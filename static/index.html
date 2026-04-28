@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0a0e17">
+  <meta name="description" content="Real-time stock reversal scanner — scans the entire US market for RSI, candlestick patterns, and swing setups.">
+  <title>Reversal Scanner</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <!-- Animated background -->
+  <div class="bg-grid"></div>
+  <div class="bg-glow"></div>
+
+  <div class="app">
+
+    <!-- Header -->
+    <header class="header">
+      <span class="header__icon">📈</span>
+      <h1 class="header__title">Reversal Scanner</h1>
+      <p class="header__subtitle">Candlestick · RSI · Swing Levels</p>
+    </header>
+
+    <!-- Scan Mode Tabs -->
+    <div class="mode-tabs" id="modeTabs">
+      <button class="mode-tab mode-tab--active" data-mode="watchlist" onclick="setMode('watchlist', this)">
+        ⚡ Watchlist
+      </button>
+      <button class="mode-tab" data-mode="full" onclick="setMode('full', this)">
+        🌐 Full Market
+      </button>
+    </div>
+
+    <!-- Mode description + Edit link -->
+    <div class="mode-info">
+      <p class="mode-desc" id="modeDesc">Scans 22 tickers — takes ~30 seconds</p>
+      <button class="edit-link" id="editWatchlistBtn" onclick="openWatchlistEditor()">✏️ Edit</button>
+    </div>
+
+    <!-- Scan Button -->
+    <button class="scan-btn" id="scanBtn" onclick="runScan()">
+      <div class="scan-btn__spinner"></div>
+      <span class="scan-btn__text">🔍  Scan Watchlist</span>
+    </button>
+
+    <!-- Progress bar (full scan only) -->
+    <div class="progress-wrap hidden" id="progressWrap">
+      <div class="progress-header">
+        <span class="progress-phase" id="progressPhase">Initializing...</span>
+        <span class="progress-pct" id="progressPct">0%</span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-bar__fill" id="progressFill" style="width: 0%"></div>
+      </div>
+      <div class="progress-footer">
+        <span class="progress-detail" id="progressDetail"></span>
+        <span class="progress-eta" id="progressEta"></span>
+      </div>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats hidden" id="statsBar">
+      <div class="stat">
+        <div class="stat__value stat__value--accent" id="statTotal">0</div>
+        <div class="stat__label">Signals</div>
+      </div>
+      <div class="stat">
+        <div class="stat__value stat__value--green" id="statBull">0</div>
+        <div class="stat__label">Bullish</div>
+      </div>
+      <div class="stat">
+        <div class="stat__value stat__value--red" id="statBear">0</div>
+        <div class="stat__label">Bearish</div>
+      </div>
+    </div>
+
+    <!-- Timestamp -->
+    <div class="timestamp hidden" id="timestamp">
+      Last scan: <span id="tsValue"></span>
+    </div>
+
+    <!-- Scan info badge -->
+    <div class="scan-badge hidden" id="scanBadge"></div>
+
+    <!-- Filter tabs -->
+    <div class="filters hidden" id="filters">
+      <button class="filter-btn filter-btn--active" data-filter="all" onclick="setFilter('all', this)">All</button>
+      <button class="filter-btn" data-filter="bullish" onclick="setFilter('bullish', this)">🟢 Bullish</button>
+      <button class="filter-btn" data-filter="bearish" onclick="setFilter('bearish', this)">🔴 Bearish</button>
+      <button class="filter-btn" data-filter="both" onclick="setFilter('both', this)">⚡ Both</button>
+    </div>
+
+    <!-- Results -->
+    <div id="results">
+      <div class="empty-state" id="emptyState">
+        <div class="empty-state__icon">🔎</div>
+        <div class="empty-state__title">Ready to scan</div>
+        <div class="empty-state__text">Choose a mode above and tap scan<br>to find reversal setups</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════
+       Watchlist Editor Modal
+       ═══════════════════════════════════════════════════════ -->
+  <div class="modal-overlay hidden" id="watchlistModal" onclick="closeWatchlistEditor(event)">
+    <div class="modal" onclick="event.stopPropagation()">
+
+      <div class="modal__header">
+        <h2 class="modal__title">📋 Edit Watchlist</h2>
+        <button class="modal__close" onclick="closeWatchlistEditor()">&times;</button>
+      </div>
+
+      <!-- Add ticker input -->
+      <div class="modal__add">
+        <input
+          class="modal__input"
+          id="addTickerInput"
+          type="text"
+          placeholder="Enter ticker (e.g. AAPL)"
+          maxlength="5"
+          autocomplete="off"
+          autocapitalize="characters"
+          spellcheck="false"
+          onkeydown="if(event.key==='Enter') addTicker()"
+        >
+        <button class="modal__add-btn" onclick="addTicker()">+ Add</button>
+      </div>
+
+      <!-- Error/success message -->
+      <div class="modal__msg hidden" id="watchlistMsg"></div>
+
+      <!-- Ticker count -->
+      <div class="modal__count" id="watchlistCount">0 tickers</div>
+
+      <!-- Ticker list -->
+      <div class="modal__list" id="watchlistList">
+        <!-- filled by JS -->
+      </div>
+
+      <!-- Done button -->
+      <button class="modal__done-btn" onclick="closeWatchlistEditor()">Done</button>
+
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
