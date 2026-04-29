@@ -62,50 +62,43 @@ def _update_progress(phase, label, current, total, ticker="", found=None):
 # =====================================================================
 
 def get_us_tickers():
-    """Fetch all actively traded US stock tickers from multiple sources."""
+    """Fetch large-cap US stock tickers (S&P 500 + NASDAQ 100)."""
     tickers = set()
+    headers = {"User-Agent": "Mozilla/5.0"}
 
-    # ── Source 1: NASDAQ Traded List (official, ~5000+ tickers) ──
+    # ── Source 1: S&P 500 ──
     try:
-        url = "https://www.nasdaqtrader.com/dynamic/symdir/nasdaqtraded.txt"
-        resp = requests.get(url, timeout=15)
-        lines = resp.text.strip().split("\n")
-        # Header: Nasdaq Traded|Symbol|Security Name|...
-        for line in lines[1:]:  # skip header
-            parts = line.split("|")
-            if len(parts) >= 2:
-                sym = parts[1].strip()
-                traded = parts[0].strip()
-                # Filter: only actively traded, normal symbols (no test/special)
-                if (traded == "Y" and sym and 1 <= len(sym) <= 5
-                        and sym.isalpha() and sym.isupper()):
-                    tickers.add(sym)
-        print(f"  Source 1 (NASDAQ Traded): {len(tickers)} tickers")
-    except Exception as e:
-        print(f"  Source 1 (NASDAQ Traded): failed ({e})")
-
-    # ── Source 2: S&P 500 from Wikipedia (backup / supplement) ──
-    try:
-        tables = pd.read_html(
-            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
-            attrs={"id": "constituents"}
-        )
+        html = requests.get("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", headers=headers).text
+        tables = pd.read_html(StringIO(html), attrs={"id": "constituents"})
         sp = tables[0]
-        added = 0
         for sym in sp["Symbol"]:
-            clean = sym.strip().replace(".", "-")
+            clean = str(sym).strip().replace(".", "-")
+            if clean:
+                tickers.add(clean)
+        print(f"  Source 1 (S&P 500): fetched {len(sp)} tickers")
+    except Exception as e:
+        print(f"  Source 1 (S&P 500): failed ({e})")
+
+    # ── Source 2: NASDAQ 100 ──
+    try:
+        html = requests.get("https://en.wikipedia.org/wiki/Nasdaq-100", headers=headers).text
+        tables = pd.read_html(StringIO(html), attrs={"id": "constituents"})
+        ndx = tables[0]
+        added = 0
+        for sym in ndx["Ticker"]:
+            clean = str(sym).strip().replace(".", "-")
             if clean and clean not in tickers:
                 tickers.add(clean)
                 added += 1
-        print(f"  Source 2 (S&P 500): +{added} tickers")
+        print(f"  Source 2 (NASDAQ 100): +{added} unique tickers")
     except Exception as e:
-        print(f"  Source 2 (S&P 500): failed ({e})")
+        print(f"  Source 2 (NASDAQ 100): failed ({e})")
 
     # Remove known non-equity / test symbols
-    exclude = {"TRUE", "NONE", "NULL", "CTEST", "NTEST", "ZTEST", "ZVZZT", "ZJZZT"}
+    exclude = {"TRUE", "NONE", "NULL", "CTEST", "NTEST", "ZTEST"}
     tickers -= exclude
 
-    print(f"  Total unique tickers: {len(tickers)}")
+    print(f"  Total big cap tickers: {len(tickers)}")
     return sorted(tickers)
 
 
