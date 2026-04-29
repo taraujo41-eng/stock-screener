@@ -52,24 +52,53 @@ _scan_running = False
 def index():
     return send_from_directory("static", "index.html")
 
-# ── API: Quick watchlist scan ────────────────────────────────────────
+# ── API: Watchlist scan (async) ──────────────────────────────────────
 
-@app.route("/api/scan", methods=["GET"])
+@app.route("/api/scan", methods=["POST"])
 def scan():
-    """Run the quick watchlist scanner and return JSON results."""
-    try:
-        df = reversal_scanner(user_watchlist)
-        results = df.to_dict(orient="records") if not df.empty else []
-        return jsonify({
-            "ok": True,
-            "mode": "watchlist",
-            "timestamp": datetime.now().strftime("%b %d, %Y  %I:%M %p"),
-            "count": len(results),
-            "tickers_scanned": len(user_watchlist),
-            "results": results,
-        })
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+    """Start a watchlist scan in the background."""
+    global _scan_running
+
+    if _scan_running:
+        return jsonify({"ok": False, "error": "A scan is already running"}), 409
+
+    def _run():
+        global _scan_running
+        _scan_running = True
+        try:
+            df = reversal_scanner(user_watchlist)
+            app.config["LAST_SCAN_RESULTS"] = {
+                "ok": True,
+                "mode": "watchlist",
+                "timestamp": datetime.now().strftime("%b %d, %Y  %I:%M %p"),
+                "count": len(df) if not df.empty else 0,
+                "tickers_scanned": len(user_watchlist),
+                "results": df.to_dict(orient="records") if not df.empty else [],
+            }
+        except Exception as e:
+            app.config["LAST_SCAN_RESULTS"] = {
+                "ok": False,
+                "error": str(e),
+            }
+            scan_progress["status"] = "error"
+            scan_progress["phase_label"] = str(e)
+        finally:
+            _scan_running = False
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    return jsonify({"ok": True, "message": "Watchlist scan started"})
+
+# ── API: Get watchlist scan results ─────────────────────────────────
+
+@app.route("/api/scan/results", methods=["GET"])
+def scan_results():
+    """Return the results of the last watchlist scan."""
+    results = app.config.get("LAST_SCAN_RESULTS")
+    if results is None:
+        return jsonify({"ok": False, "error": "No scan results available"}), 404
+    return jsonify(results)
 
 # ── API: Full market scan (async) ───────────────────────────────────
 

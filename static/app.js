@@ -338,9 +338,9 @@ function setFilter(filter, btnEl) {
   renderResults();
 }
 
-// ── Progress polling (full scan) ───────────────────────────
+// ── Progress polling (both scan modes) ─────────────────────
 
-function startProgressPolling() {
+function startProgressPolling(resultsEndpoint) {
   const wrap = document.getElementById("progressWrap");
   wrap.classList.remove("hidden");
 
@@ -367,7 +367,7 @@ function startProgressPolling() {
         stopProgressPolling();
 
         if (p.status === "done") {
-          const resData = await fetch("/api/scan/full/results");
+          const resData = await fetch(resultsEndpoint);
           const data = await resData.json();
           if (data.ok) {
             displayResults(data);
@@ -411,49 +411,31 @@ async function runScan() {
   btn.disabled = true;
 
   document.getElementById("emptyState")?.classList.add("hidden");
+  document.getElementById("results").innerHTML = "";
+  document.getElementById("modeTabs").classList.add("hidden");
 
-  if (scanMode === "watchlist") {
-    showSkeleton();
+  // Both modes now use the same async pattern
+  const endpoint = scanMode === "watchlist" ? "/api/scan" : "/api/scan/full";
+  const resultsEndpoint = scanMode === "watchlist"
+    ? "/api/scan/results"
+    : "/api/scan/full/results";
 
-    try {
-      const res = await fetch("/api/scan");
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || "Scan failed");
-      displayResults(data);
-    } catch (err) {
-      document.getElementById("results").innerHTML = `
-        <div class="empty-state">
-          <div class="empty-state__icon">⚠️</div>
-          <div class="empty-state__title">Scan error</div>
-          <div class="empty-state__text">${err.message}</div>
-        </div>
-      `;
-    } finally {
-      btn.classList.remove("scan-btn--loading");
-      btn.disabled = false;
-    }
-
-  } else {
-    document.getElementById("results").innerHTML = "";
-    document.getElementById("modeTabs").classList.add("hidden");
-
-    try {
-      const res = await fetch("/api/scan/full", { method: "POST" });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || "Failed to start scan");
-      startProgressPolling();
-    } catch (err) {
-      document.getElementById("results").innerHTML = `
-        <div class="empty-state">
-          <div class="empty-state__icon">⚠️</div>
-          <div class="empty-state__title">Scan error</div>
-          <div class="empty-state__text">${err.message}</div>
-        </div>
-      `;
-      btn.classList.remove("scan-btn--loading");
-      btn.disabled = false;
-      document.getElementById("modeTabs").classList.remove("hidden");
-    }
+  try {
+    const res = await fetch(endpoint, { method: "POST" });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "Failed to start scan");
+    startProgressPolling(resultsEndpoint);
+  } catch (err) {
+    document.getElementById("results").innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state__icon">⚠️</div>
+        <div class="empty-state__title">Scan error</div>
+        <div class="empty-state__text">${err.message}</div>
+      </div>
+    `;
+    btn.classList.remove("scan-btn--loading");
+    btn.disabled = false;
+    document.getElementById("modeTabs").classList.remove("hidden");
   }
 }
 

@@ -283,39 +283,94 @@ def _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh,
 def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
                      rsi_bull_thresh=30, rsi_bear_thresh=70,
                      swing_lookback=20, swing_tolerance=0.03):
-    """Scan a small watchlist one ticker at a time."""
+    """Scan a watchlist using batch download for speed + progress tracking."""
+    _reset_progress()
+    scan_progress["status"] = "running"
+    start_time = time.time()
+
     results = []
     end = datetime.today()
     start = end - timedelta(days=180)
-
     total = len(tickers)
-    for i, sym in enumerate(tickers, 1):
-        print(f"  [{i}/{total}] {sym}...", end=" ", flush=True)
+
+    # ── Phase 1: Batch download all tickers at once (~2-3s) ──
+    _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
+    print(f"\n[Phase 1] Batch downloading {total} tickers...")
+
+    try:
+        batch_df = yf.download(
+            tickers, start=start, end=end,
+            progress=False, auto_adjust=True,
+            group_by="ticker", threads=True
+        )
+    except Exception as e:
+        print(f"  Batch download error: {e}")
+        scan_progress["status"] = "error"
+        scan_progress["phase_label"] = str(e)
+        return pd.DataFrame()
+
+    if batch_df.empty:
+        print("  No data returned")
+        scan_progress.update({
+            "status": "done", "phase": "complete",
+            "phase_label": "Done — 0 signals found",
+            "current": total, "total": total,
+            "found": 0, "pct": 100, "eta_seconds": 0,
+        })
+        return pd.DataFrame()
+
+    # ── Phase 2: Analyze each ticker from the batch ──────────
+    print(f"\n[Phase 2] Analyzing {total} tickers...")
+
+    for i, sym in enumerate(tickers):
+        _update_progress("analyzing", f"Analyzing {sym}...", i, total,
+                         ticker=sym, found=len(results))
+
         try:
-            df = yf.download(sym, start=start, end=end, progress=False, auto_adjust=True)
-            if df.empty or len(df) < 50:
-                print("skip")
+            # Extract single ticker from batch result
+            if len(tickers) == 1:
+                stock_df = batch_df.copy()
+                if isinstance(stock_df.columns, pd.MultiIndex):
+                    stock_df.columns = stock_df.columns.get_level_values(0)
+            else:
+                if sym not in batch_df.columns.get_level_values(0):
+                    print(f"  [{i+1}/{total}] {sym}... not in batch")
+                    continue
+                stock_df = batch_df[sym].copy()
+
+            stock_df = stock_df.dropna(subset=["Close"])
+            if len(stock_df) < 50:
+                print(f"  [{i+1}/{total}] {sym}... skip (insufficient data)")
                 continue
 
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
+            last_vol = float(stock_df['Volume'].iloc[-1])
+            last_price = float(stock_df['Close'].iloc[-1])
 
-            last_vol = float(df['Volume'].iloc[-1])
-            last_price = float(df['Close'].iloc[-1])
             if last_vol < min_volume or last_price < min_price:
-                print("skip (filter)")
+                print(f"  [{i+1}/{total}] {sym}... skip (filter)")
                 continue
 
-            result = _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh,
+            result = _analyze_stock(sym, stock_df, rsi_bull_thresh, rsi_bear_thresh,
                                     swing_lookback, swing_tolerance)
             if result:
                 results.append(result)
-                print("✓ signal")
+                print(f"  [{i+1}/{total}] {sym}... ✓ signal")
             else:
-                print("no signal")
+                print(f"  [{i+1}/{total}] {sym}... no signal")
         except Exception as e:
-            print(f"error ({e})")
+            print(f"  [{i+1}/{total}] {sym}... error ({e})")
             continue
+
+    # ── Done ─────────────────────────────────────────────────
+    total_time = time.time() - start_time
+    print(f"\n[Done] Found {len(results)} signals in {total_time:.0f}s")
+
+    scan_progress.update({
+        "status": "done", "phase": "complete",
+        "phase_label": f"Done — {len(results)} signals found",
+        "current": total, "total": total,
+        "found": len(results), "pct": 100, "eta_seconds": 0,
+    })
 
     if not results:
         return pd.DataFrame()
