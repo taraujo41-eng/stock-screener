@@ -3,11 +3,13 @@ Stock Reversal Scanner — Full Market Edition
 Scans the entire US stock market for bullish/bearish reversal setups.
 
 Modes:
-  • Watchlist scan  — fast, scans a custom list (~30s)
-  • Full market scan — fetches all US tickers, pre-filters, then analyzes (~3-8 min)
+  • Watchlist scan  — fast, scans a custom list
+  • Full market scan — fetches all US tickers, pre-filters, then analyzes
+
+Data source: Yahoo Finance chart API via data_fetcher.py
+(works on cloud servers — no yfinance library dependency)
 """
 
-import yfinance as yf
 import pandas as pd
 import numpy as np
 import requests
@@ -15,6 +17,7 @@ from datetime import datetime, timedelta
 from io import StringIO
 import time
 import warnings
+from data_fetcher import fetch_batch, fetch_batch_concurrent, test_connection
 
 warnings.filterwarnings("ignore")
 
@@ -285,108 +288,72 @@ def _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh,
 def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
                      rsi_bull_thresh=30, rsi_bear_thresh=70,
                      swing_lookback=20, swing_tolerance=0.03):
-    """Scan a watchlist using batch download for speed + progress tracking."""
+    """Scan a watchlist using direct Yahoo Finance API (cloud-safe)."""
     _reset_progress()
     scan_progress["status"] = "running"
     start_time = time.time()
     log = scan_progress["debug_log"]
 
     results = []
-    end = datetime.today()
-    start = end - timedelta(days=180)
     total = len(tickers)
+    log.append(f"Starting watchlist scan: {total} tickers")
 
-    log.append(f"Starting scan: {total} tickers, date range {start.date()} to {end.date()}")
-
-    # ── Phase 1: Batch download all tickers at once (~2-3s) ──
+    # ── Phase 1: Download all tickers ────────────────────────
     _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
-    print(f"\n[Phase 1] Batch downloading {total} tickers...")
+    print(f"\n[Phase 1] Downloading {total} tickers via direct API...")
 
-    try:
-        batch_df = yf.download(
-            tickers, start=start, end=end,
-            progress=False, auto_adjust=True,
-            group_by="ticker", threads=True
-        )
-        log.append(f"Download OK: shape={batch_df.shape}, empty={batch_df.empty}")
-        log.append(f"Column type: {'MultiIndex' if isinstance(batch_df.columns, pd.MultiIndex) else 'Index'}")
-        if isinstance(batch_df.columns, pd.MultiIndex):
-            log.append(f"MI levels: {batch_df.columns.names}")
-            lvl0 = batch_df.columns.get_level_values(0).unique().tolist()
-            log.append(f"Level 0 ({len(lvl0)}): {lvl0[:10]}{'...' if len(lvl0)>10 else ''}")
-    except Exception as e:
-        log.append(f"Download FAILED: {e}")
-        print(f"  Batch download error: {e}")
-        scan_progress["status"] = "error"
-        scan_progress["phase_label"] = f"Download failed: {e}"
-        return pd.DataFrame()
+    def _on_dl_progress(i, tot, sym):
+        _update_progress("downloading", f"Downloading {sym}...", i, tot,
+                         ticker=sym, found=0)
 
-    if batch_df.empty:
-        log.append("Batch DataFrame is EMPTY — Yahoo Finance may be blocking this server")
-        print("  No data returned")
+    stock_data = fetch_batch(tickers, days=180, delay=0.05,
+                             on_progress=_on_dl_progress)
+
+    log.append(f"Downloaded: {len(stock_data)}/{total} tickers have data")
+    print(f"  Downloaded {len(stock_data)}/{total} tickers")
+
+    if not stock_data:
+        log.append("No data returned — API may be blocking this server")
         scan_progress.update({
             "status": "done", "phase": "complete",
-            "phase_label": "No data — Yahoo Finance may be blocking this server",
+            "phase_label": "No data — API may be blocking this server",
             "current": total, "total": total,
             "found": 0, "pct": 100, "eta_seconds": 0,
         })
         return pd.DataFrame()
 
-    # ── Phase 2: Analyze each ticker from the batch ──────────
-    print(f"\n[Phase 2] Analyzing {total} tickers...")
-    skipped_not_found = 0
-    skipped_no_data = 0
+    # ── Phase 2: Analyze each ticker ─────────────────────────
+    print(f"\n[Phase 2] Analyzing {len(stock_data)} tickers...")
     skipped_filter = 0
-    errors = 0
 
-    for i, sym in enumerate(tickers):
-        _update_progress("analyzing", f"Analyzing {sym}...", i, total,
+    for i, (sym, df) in enumerate(stock_data.items()):
+        _update_progress("analyzing", f"Analyzing {sym}...", i, len(stock_data),
                          ticker=sym, found=len(results))
 
         try:
-            # Extract single ticker from batch result
-            if len(tickers) == 1:
-                stock_df = batch_df.copy()
-                if isinstance(stock_df.columns, pd.MultiIndex):
-                    stock_df.columns = stock_df.columns.get_level_values(0)
-            else:
-                if sym not in batch_df.columns.get_level_values(0):
-                    print(f"  [{i+1}/{total}] {sym}... not in batch")
-                    skipped_not_found += 1
-                    continue
-                stock_df = batch_df[sym].copy()
-
-            stock_df = stock_df.dropna(subset=["Close"])
-            if len(stock_df) < 50:
-                print(f"  [{i+1}/{total}] {sym}... skip (insufficient data: {len(stock_df)} rows)")
-                skipped_no_data += 1
-                continue
-
-            last_vol = float(stock_df['Volume'].iloc[-1])
-            last_price = float(stock_df['Close'].iloc[-1])
+            last_vol = float(df['Volume'].iloc[-1])
+            last_price = float(df['Close'].iloc[-1])
 
             if last_vol < min_volume or last_price < min_price:
-                print(f"  [{i+1}/{total}] {sym}... skip (vol={last_vol:.0f}, price={last_price:.2f})")
+                print(f"  [{i+1}/{len(stock_data)}] {sym}... skip (vol={last_vol:.0f}, price={last_price:.2f})")
                 skipped_filter += 1
                 continue
 
-            result = _analyze_stock(sym, stock_df, rsi_bull_thresh, rsi_bear_thresh,
+            result = _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh,
                                     swing_lookback, swing_tolerance)
             if result:
                 results.append(result)
-                print(f"  [{i+1}/{total}] {sym}... ✓ signal")
+                print(f"  [{i+1}/{len(stock_data)}] {sym}... ✓ signal")
             else:
-                print(f"  [{i+1}/{total}] {sym}... no signal")
+                print(f"  [{i+1}/{len(stock_data)}] {sym}... no signal")
         except Exception as e:
-            print(f"  [{i+1}/{total}] {sym}... error ({e})")
-            errors += 1
+            print(f"  [{i+1}/{len(stock_data)}] {sym}... error ({e})")
             continue
 
     # ── Done ─────────────────────────────────────────────────
     total_time = time.time() - start_time
     summary = (f"Done in {total_time:.1f}s: {len(results)} signals, "
-               f"{skipped_not_found} not found, {skipped_no_data} insufficient data, "
-               f"{skipped_filter} filtered, {errors} errors")
+               f"{skipped_filter} filtered out")
     log.append(summary)
     print(f"\n[Done] {summary}")
 
@@ -408,18 +375,18 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
 
 def full_market_scan(min_volume=500_000, min_price=5.0,
                      rsi_bull_thresh=30, rsi_bear_thresh=70,
-                     swing_lookback=20, swing_tolerance=0.03,
-                     chunk_size=80):
+                     swing_lookback=20, swing_tolerance=0.03):
     """
     Scan the entire US stock market:
       1. Fetch all US ticker symbols
-      2. Batch download price data in chunks
+      2. Download price data concurrently via direct API
       3. Pre-filter by volume & price
       4. Run full reversal analysis on candidates
     """
     _reset_progress()
     scan_progress["status"] = "running"
     start_time = time.time()
+    log = scan_progress["debug_log"]
 
     # ── Phase 1: Get ticker list ────────────────────────────
     _update_progress("fetching_tickers", "Fetching ticker list...", 0, 1)
@@ -428,76 +395,46 @@ def full_market_scan(min_volume=500_000, min_price=5.0,
 
     if not all_tickers:
         scan_progress["status"] = "error"
+        scan_progress["phase_label"] = "Failed to fetch ticker list"
         return pd.DataFrame()
 
     total_tickers = len(all_tickers)
-    print(f"\n[Phase 2] Batch downloading {total_tickers} tickers...")
+    log.append(f"Found {total_tickers} US tickers")
+    print(f"\n[Phase 2] Downloading {total_tickers} tickers via direct API...")
 
-    # ── Phase 2: Batch download & pre-filter ────────────────
-    candidates = []   # list of (sym, DataFrame) tuples
-    end = datetime.today()
-    start = end - timedelta(days=180)
-    downloaded = 0
-    phase2_start = time.time()
-
-    for i in range(0, total_tickers, chunk_size):
-        chunk = all_tickers[i : i + chunk_size]
-        chunk_label = f"{chunk[0]}–{chunk[-1]}"
-
-        elapsed = time.time() - phase2_start
-        if downloaded > 0:
-            rate = elapsed / downloaded
-            remaining = (total_tickers - downloaded) * rate
-        else:
-            remaining = 0
-
+    # ── Phase 2: Download all tickers concurrently ──────────
+    def _on_dl_progress(done, tot, sym):
         _update_progress("downloading",
-                         f"Downloading {chunk_label}...",
-                         downloaded, total_tickers,
-                         ticker=chunk_label, found=len(candidates))
-        scan_progress["eta_seconds"] = int(remaining)
+                         f"Downloading... ({done}/{tot})",
+                         done, tot,
+                         ticker=sym, found=0)
+        elapsed = time.time() - start_time
+        if done > 0:
+            rate = elapsed / done
+            remaining = (tot - done) * rate
+            scan_progress["eta_seconds"] = int(remaining)
 
+    stock_data = fetch_batch_concurrent(
+        all_tickers, days=180, max_workers=8,
+        on_progress=_on_dl_progress, delay=0.05
+    )
+
+    log.append(f"Downloaded: {len(stock_data)}/{total_tickers} tickers")
+    print(f"\n  Downloaded: {len(stock_data)} tickers with data")
+
+    # ── Phase 2b: Pre-filter by volume & price ──────────────
+    candidates = []
+    for sym, df in stock_data.items():
         try:
-            batch_df = yf.download(
-                chunk, start=start, end=end,
-                progress=False, auto_adjust=True,
-                group_by="ticker", threads=True
-            )
+            vol = float(df['Volume'].iloc[-1])
+            price = float(df['Close'].iloc[-1])
+            if vol >= min_volume and price >= min_price:
+                candidates.append((sym, df))
+        except:
+            continue
 
-            if batch_df.empty:
-                downloaded += len(chunk)
-                continue
-
-            for sym in chunk:
-                try:
-                    # Extract single ticker from batch
-                    if len(chunk) == 1:
-                        stock_df = batch_df.copy()
-                        if isinstance(stock_df.columns, pd.MultiIndex):
-                            stock_df.columns = stock_df.columns.get_level_values(0)
-                    else:
-                        if sym not in batch_df.columns.get_level_values(0):
-                            continue
-                        stock_df = batch_df[sym].copy()
-
-                    stock_df = stock_df.dropna(subset=["Close"])
-                    if len(stock_df) < 50:
-                        continue
-
-                    vol = float(stock_df['Volume'].iloc[-1])
-                    price = float(stock_df['Close'].iloc[-1])
-
-                    if vol >= min_volume and price >= min_price:
-                        candidates.append((sym, stock_df))
-                except:
-                    continue
-
-        except Exception as e:
-            print(f"  Chunk error: {e}")
-
-        downloaded += len(chunk)
-
-    print(f"\n  Pre-filter: {len(candidates)} candidates from {total_tickers} tickers")
+    log.append(f"Pre-filter: {len(candidates)} candidates pass vol/price filters")
+    print(f"  Pre-filter: {len(candidates)} candidates from {len(stock_data)} tickers")
 
     # ── Phase 3: Analyze candidates ─────────────────────────
     print(f"\n[Phase 3] Analyzing {len(candidates)} candidates...")
@@ -526,7 +463,9 @@ def full_market_scan(min_volume=500_000, min_price=5.0,
 
     # ── Done ────────────────────────────────────────────────
     total_time = time.time() - start_time
-    print(f"\n[Done] Found {len(results)} signals in {total_time:.0f}s")
+    summary = f"Done in {total_time:.0f}s: {len(results)} signals from {total_candidates} candidates"
+    log.append(summary)
+    print(f"\n[Done] {summary}")
 
     scan_progress.update({
         "status": "done", "phase": "complete",

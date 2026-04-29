@@ -207,53 +207,12 @@ def watchlist_remove():
 # ── API: Diagnostics ────────────────────────────────────────────────
 
 @app.route("/api/test", methods=["GET"])
-def test_yfinance():
-    """Diagnostic endpoint: test if yfinance works on this server."""
-    import yfinance as yf
-    import pandas as pd
-
+def test_api():
+    """Diagnostic endpoint: test if the data fetcher works on this server."""
+    from data_fetcher import test_connection
     ticker = request.args.get("ticker", "AAPL")
-    diag = {
-        "ticker": ticker,
-        "server_time": datetime.now().isoformat(),
-        "yfinance_version": yf.__version__,
-        "pandas_version": pd.__version__,
-    }
-
-    try:
-        end = datetime.today()
-        start = end - timedelta(days=30)
-        df = yf.download(ticker, start=start, end=end, progress=False, auto_adjust=True)
-
-        diag["download_ok"] = True
-        diag["rows"] = len(df)
-        diag["empty"] = df.empty
-        diag["columns"] = str(df.columns.tolist())
-        diag["is_multiindex"] = isinstance(df.columns, pd.MultiIndex)
-
-        if not df.empty:
-            if isinstance(df.columns, pd.MultiIndex):
-                diag["multiindex_levels"] = str(df.columns.names)
-                diag["level_0_values"] = str(df.columns.get_level_values(0).unique().tolist())
-                diag["level_1_values"] = str(df.columns.get_level_values(1).unique().tolist())
-                # Try to flatten
-                flat_df = df.copy()
-                flat_df.columns = flat_df.columns.get_level_values(0)
-                diag["flattened_columns"] = str(flat_df.columns.tolist())
-                diag["last_close"] = str(flat_df['Close'].iloc[-1])
-                diag["last_volume"] = str(flat_df['Volume'].iloc[-1])
-            else:
-                diag["last_close"] = str(df['Close'].iloc[-1])
-                diag["last_volume"] = str(df['Volume'].iloc[-1])
-            diag["last_date"] = str(df.index[-1])
-        else:
-            diag["note"] = "yfinance returned EMPTY data — Yahoo Finance may be blocking this server's IP"
-
-    except Exception as e:
-        diag["download_ok"] = False
-        diag["error"] = str(e)
-        diag["traceback"] = traceback.format_exc()
-
+    diag = test_connection(ticker)
+    diag["server_time"] = datetime.now().isoformat()
     return jsonify(diag)
 
 # ── Start ────────────────────────────────────────────────────────────
