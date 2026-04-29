@@ -420,22 +420,40 @@ async function runScan() {
     ? "/api/scan/results"
     : "/api/scan/full/results";
 
-  try {
-    const res = await fetch(endpoint, { method: "POST" });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error || "Failed to start scan");
-    startProgressPolling(resultsEndpoint);
-  } catch (err) {
-    document.getElementById("results").innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state__icon">⚠️</div>
-        <div class="empty-state__title">Scan error</div>
-        <div class="empty-state__text">${err.message}</div>
-      </div>
-    `;
-    btn.classList.remove("scan-btn--loading");
-    btn.disabled = false;
-    document.getElementById("modeTabs").classList.remove("hidden");
+  // Retry logic for Render cold starts
+  const maxRetries = 3;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt > 1) {
+        document.getElementById("results").innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state__icon">⏳</div>
+            <div class="empty-state__title">Waking up server...</div>
+            <div class="empty-state__text">Free servers sleep when idle. Retrying (${attempt}/${maxRetries})...</div>
+          </div>
+        `;
+        await new Promise(r => setTimeout(r, 3000));
+      }
+
+      const res = await fetch(endpoint, { method: "POST" });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "Failed to start scan");
+      startProgressPolling(resultsEndpoint);
+      return; // success — exit the retry loop
+    } catch (err) {
+      if (attempt === maxRetries) {
+        document.getElementById("results").innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state__icon">⚠️</div>
+            <div class="empty-state__title">Scan error</div>
+            <div class="empty-state__text">${err.message}<br><small>The server may be starting up — try again in 30 seconds.</small></div>
+          </div>
+        `;
+        btn.classList.remove("scan-btn--loading");
+        btn.disabled = false;
+        document.getElementById("modeTabs").classList.remove("hidden");
+      }
+    }
   }
 }
 
