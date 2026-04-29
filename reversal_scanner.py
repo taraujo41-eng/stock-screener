@@ -32,6 +32,7 @@ scan_progress = {
     "ticker": "",
     "pct": 0,
     "eta_seconds": 0,
+    "debug_log": [],
 }
 
 def _reset_progress():
@@ -39,6 +40,7 @@ def _reset_progress():
         "status": "idle", "phase": "", "phase_label": "",
         "current": 0, "total": 0, "found": 0,
         "ticker": "", "pct": 0, "eta_seconds": 0,
+        "debug_log": [],
     })
 
 def _update_progress(phase, label, current, total, ticker="", found=None):
@@ -287,11 +289,14 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
     _reset_progress()
     scan_progress["status"] = "running"
     start_time = time.time()
+    log = scan_progress["debug_log"]
 
     results = []
     end = datetime.today()
     start = end - timedelta(days=180)
     total = len(tickers)
+
+    log.append(f"Starting scan: {total} tickers, date range {start.date()} to {end.date()}")
 
     # ── Phase 1: Batch download all tickers at once (~2-3s) ──
     _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
@@ -303,17 +308,25 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
             progress=False, auto_adjust=True,
             group_by="ticker", threads=True
         )
+        log.append(f"Download OK: shape={batch_df.shape}, empty={batch_df.empty}")
+        log.append(f"Column type: {'MultiIndex' if isinstance(batch_df.columns, pd.MultiIndex) else 'Index'}")
+        if isinstance(batch_df.columns, pd.MultiIndex):
+            log.append(f"MI levels: {batch_df.columns.names}")
+            lvl0 = batch_df.columns.get_level_values(0).unique().tolist()
+            log.append(f"Level 0 ({len(lvl0)}): {lvl0[:10]}{'...' if len(lvl0)>10 else ''}")
     except Exception as e:
+        log.append(f"Download FAILED: {e}")
         print(f"  Batch download error: {e}")
         scan_progress["status"] = "error"
-        scan_progress["phase_label"] = str(e)
+        scan_progress["phase_label"] = f"Download failed: {e}"
         return pd.DataFrame()
 
     if batch_df.empty:
+        log.append("Batch DataFrame is EMPTY — Yahoo Finance may be blocking this server")
         print("  No data returned")
         scan_progress.update({
             "status": "done", "phase": "complete",
-            "phase_label": "Done — 0 signals found",
+            "phase_label": "No data — Yahoo Finance may be blocking this server",
             "current": total, "total": total,
             "found": 0, "pct": 100, "eta_seconds": 0,
         })
@@ -321,6 +334,10 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
 
     # ── Phase 2: Analyze each ticker from the batch ──────────
     print(f"\n[Phase 2] Analyzing {total} tickers...")
+    skipped_not_found = 0
+    skipped_no_data = 0
+    skipped_filter = 0
+    errors = 0
 
     for i, sym in enumerate(tickers):
         _update_progress("analyzing", f"Analyzing {sym}...", i, total,
@@ -335,19 +352,22 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
             else:
                 if sym not in batch_df.columns.get_level_values(0):
                     print(f"  [{i+1}/{total}] {sym}... not in batch")
+                    skipped_not_found += 1
                     continue
                 stock_df = batch_df[sym].copy()
 
             stock_df = stock_df.dropna(subset=["Close"])
             if len(stock_df) < 50:
-                print(f"  [{i+1}/{total}] {sym}... skip (insufficient data)")
+                print(f"  [{i+1}/{total}] {sym}... skip (insufficient data: {len(stock_df)} rows)")
+                skipped_no_data += 1
                 continue
 
             last_vol = float(stock_df['Volume'].iloc[-1])
             last_price = float(stock_df['Close'].iloc[-1])
 
             if last_vol < min_volume or last_price < min_price:
-                print(f"  [{i+1}/{total}] {sym}... skip (filter)")
+                print(f"  [{i+1}/{total}] {sym}... skip (vol={last_vol:.0f}, price={last_price:.2f})")
+                skipped_filter += 1
                 continue
 
             result = _analyze_stock(sym, stock_df, rsi_bull_thresh, rsi_bear_thresh,
@@ -359,11 +379,16 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
                 print(f"  [{i+1}/{total}] {sym}... no signal")
         except Exception as e:
             print(f"  [{i+1}/{total}] {sym}... error ({e})")
+            errors += 1
             continue
 
     # ── Done ─────────────────────────────────────────────────
     total_time = time.time() - start_time
-    print(f"\n[Done] Found {len(results)} signals in {total_time:.0f}s")
+    summary = (f"Done in {total_time:.1f}s: {len(results)} signals, "
+               f"{skipped_not_found} not found, {skipped_no_data} insufficient data, "
+               f"{skipped_filter} filtered, {errors} errors")
+    log.append(summary)
+    print(f"\n[Done] {summary}")
 
     scan_progress.update({
         "status": "done", "phase": "complete",
