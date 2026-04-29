@@ -20,9 +20,10 @@ import traceback
 app = Flask(__name__, static_folder="static", static_url_path="")
 CORS(app)
 
-# ── Watchlist persistence ────────────────────────────────────────────
+# ── Watchlist & Scan Persistence ───────────────────────────────────────
 
 WATCHLIST_FILE = os.path.join(os.path.dirname(__file__), "watchlist.json")
+SCAN_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_scan.json")
 
 def load_watchlist():
     """Load watchlist from file, or use default."""
@@ -39,6 +40,24 @@ def save_watchlist(tickers):
     """Save watchlist to file."""
     with open(WATCHLIST_FILE, "w") as f:
         json.dump(tickers, f, indent=2)
+
+def load_last_scan():
+    """Load the last scan results from file."""
+    if os.path.exists(SCAN_RESULTS_FILE):
+        try:
+            with open(SCAN_RESULTS_FILE, "r") as f:
+                return json.load(f)
+        except:
+            pass
+    return None
+
+def save_last_scan(data):
+    """Save the scan results to file for persistence."""
+    try:
+        with open(SCAN_RESULTS_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print(f"Failed to save scan results: {e}")
 
 # In-memory watchlist (loaded on startup)
 user_watchlist = load_watchlist()
@@ -116,13 +135,15 @@ def scan_full():
         _scan_running = True
         try:
             df = full_market_scan()
-            app.config["LAST_FULL_RESULTS"] = {
+            results_data = {
                 "ok": True,
                 "mode": "full_market",
                 "timestamp": datetime.now().strftime("%b %d, %Y  %I:%M %p"),
                 "count": len(df) if not df.empty else 0,
                 "results": df.to_dict(orient="records") if not df.empty else [],
             }
+            app.config["LAST_FULL_RESULTS"] = results_data
+            save_last_scan(results_data)
         except Exception as e:
             app.config["LAST_FULL_RESULTS"] = {
                 "ok": False,
@@ -151,8 +172,16 @@ def scan_full_progress():
 def scan_full_results():
     """Return the results of the last full market scan."""
     results = app.config.get("LAST_FULL_RESULTS")
+    
+    # If not in memory, try loading from file
+    if results is None:
+        results = load_last_scan()
+        if results:
+            app.config["LAST_FULL_RESULTS"] = results
+
     if results is None:
         return jsonify({"ok": False, "error": "No scan results available"}), 404
+        
     return jsonify(results)
 
 # ── API: Watchlist CRUD ─────────────────────────────────────────────
