@@ -60,7 +60,7 @@ function updateModeDesc() {
 
 // ── Mode switching ─────────────────────────────────────────
 
-function setMode(mode, btn) {
+async function setMode(mode, btn) {
   scanMode = mode;
   document.querySelectorAll(".mode-tab").forEach(b =>
     b.classList.remove("mode-tab--active"));
@@ -69,8 +69,48 @@ function setMode(mode, btn) {
   const scanBtn = document.getElementById("scanBtn");
   if (mode === "watchlist") {
     scanBtn.querySelector(".scan-btn__text").textContent = "🔍  Scan Watchlist";
+    // Clear results so they don't see full market results on the watchlist tab
+    document.getElementById("results").innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state__icon">🔍</div>
+        <div class="empty-state__title">Ready to scan</div>
+        <div class="empty-state__text">Click the button above to scan your watchlist</div>
+      </div>
+    `;
+    document.getElementById("statsBar").classList.add("hidden");
+    document.getElementById("timestamp").classList.add("hidden");
+    document.getElementById("filters").classList.add("hidden");
+    document.getElementById("scanBadge").classList.add("hidden");
   } else {
     scanBtn.querySelector(".scan-btn__text").textContent = "🌐  Scan Full Market";
+    // Auto-load the persistent full market scan results
+    try {
+      showSkeleton();
+      const res = await fetch("/api/scan/full/results");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && data.results) {
+          displayResults(data);
+          updateModeDesc();
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("No saved full scan available yet");
+    }
+    
+    // If no saved scan exists yet
+    document.getElementById("results").innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state__icon">🌐</div>
+        <div class="empty-state__title">Ready to scan</div>
+        <div class="empty-state__text">Click the button above to scan the full market</div>
+      </div>
+    `;
+    document.getElementById("statsBar").classList.add("hidden");
+    document.getElementById("timestamp").classList.add("hidden");
+    document.getElementById("filters").classList.add("hidden");
+    document.getElementById("scanBadge").classList.add("hidden");
   }
   updateModeDesc();
 }
