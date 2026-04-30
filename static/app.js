@@ -407,7 +407,7 @@ function startProgressPolling(resultsEndpoint) {
         stopProgressPolling();
 
         if (p.status === "done") {
-          const resData = await fetch(resultsEndpoint);
+          const resData = await fetch(`${resultsEndpoint}?t=${Date.now()}`);
           const data = await resData.json();
           if (data.ok) {
             displayResults(data);
@@ -454,6 +454,8 @@ async function runScan() {
   document.getElementById("results").innerHTML = "";
   document.getElementById("modeTabs").classList.add("hidden");
 
+  const extHours = document.getElementById("extHoursToggle")?.checked || false;
+
   // Both modes now use the same async pattern
   const endpoint = scanMode === "watchlist" ? "/api/scan" : "/api/scan/full";
   const resultsEndpoint = scanMode === "watchlist"
@@ -475,7 +477,11 @@ async function runScan() {
         await new Promise(r => setTimeout(r, 3000));
       }
 
-      const res = await fetch(endpoint, { method: "POST" });
+      const res = await fetch(endpoint, { 
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ extended_hours: extHours })
+      });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "Failed to start scan");
       startProgressPolling(resultsEndpoint);

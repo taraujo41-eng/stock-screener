@@ -82,11 +82,14 @@ def scan():
     if _scan_running:
         return jsonify({"ok": False, "error": "A scan is already running"}), 409
 
+    req_data = request.get_json(silent=True) or {}
+    extended_hours = req_data.get("extended_hours", False)
+
     def _run():
         global _scan_running
         _scan_running = True
         try:
-            df = reversal_scanner(user_watchlist)
+            df = reversal_scanner(user_watchlist, extended_hours=extended_hours)
             app.config["LAST_SCAN_RESULTS"] = {
                 "ok": True,
                 "mode": "watchlist",
@@ -130,11 +133,14 @@ def scan_full():
     if _scan_running:
         return jsonify({"ok": False, "error": "A scan is already running"}), 409
 
+    req_data = request.get_json(silent=True) or {}
+    extended_hours = req_data.get("extended_hours", False)
+
     def _run():
         global _scan_running
         _scan_running = True
         try:
-            df = full_market_scan()
+            df = full_market_scan(extended_hours=extended_hours)
             results_data = {
                 "ok": True,
                 "mode": "full_market",

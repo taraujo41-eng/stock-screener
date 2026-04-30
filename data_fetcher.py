@@ -76,9 +76,9 @@ def _ensure_session():
 
 # ── Single ticker download ──────────────────────────────────────────
 
-def fetch_one(ticker, days=180):
+def fetch_one(ticker, days=180, interval="1d", includePrePost="false"):
     """
-    Fetch daily OHLCV for one ticker.
+    Fetch OHLCV data for one ticker.
     Returns a pandas DataFrame or None on failure.
     """
     session, crumb = _ensure_session()
@@ -90,8 +90,8 @@ def fetch_one(ticker, days=180):
     params = {
         "period1": start_ts,
         "period2": end_ts,
-        "interval": "1d",
-        "includePrePost": "false",
+        "interval": interval,
+        "includePrePost": includePrePost,
     }
     if crumb:
         params["crumb"] = crumb
@@ -151,7 +151,7 @@ def fetch_one(ticker, days=180):
 
 # ── Batch download (sequential — for watchlists) ────────────────────
 
-def fetch_batch(tickers, days=180, delay=0.05, on_progress=None):
+def fetch_batch(tickers, days=180, delay=0.05, on_progress=None, interval="1d", includePrePost="false"):
     """
     Download data for a list of tickers sequentially.
     Returns dict of {ticker: DataFrame}.
@@ -163,7 +163,7 @@ def fetch_batch(tickers, days=180, delay=0.05, on_progress=None):
         if on_progress:
             on_progress(i, total, ticker)
 
-        df = fetch_one(ticker, days)
+        df = fetch_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
         if df is not None and len(df) >= 50:
             data[ticker] = df
 
@@ -176,7 +176,7 @@ def fetch_batch(tickers, days=180, delay=0.05, on_progress=None):
 # ── Batch download (concurrent — for full market scan) ───────────────
 
 def fetch_batch_concurrent(tickers, days=180, max_workers=8,
-                           on_progress=None, delay=0.05):
+                           on_progress=None, delay=0.05, interval="1d", includePrePost="false"):
     """
     Download data for many tickers using a thread pool.
     Returns dict of {ticker: DataFrame}.
@@ -188,7 +188,7 @@ def fetch_batch_concurrent(tickers, days=180, max_workers=8,
     def _fetch(i, ticker):
         # Small stagger to spread requests
         time.sleep(delay * (i % max_workers))
-        return ticker, fetch_one(ticker, days)
+        return ticker, fetch_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(_fetch, i, t): t for i, t in enumerate(tickers)}

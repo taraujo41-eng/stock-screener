@@ -280,7 +280,7 @@ def _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh,
 
 def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
                      rsi_bull_thresh=30, rsi_bear_thresh=70,
-                     swing_lookback=20, swing_tolerance=0.03):
+                     swing_lookback=20, swing_tolerance=0.03, extended_hours=False):
     """Scan a watchlist using direct Yahoo Finance API (cloud-safe)."""
     _reset_progress()
     scan_progress["status"] = "running"
@@ -299,8 +299,12 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
         _update_progress("downloading", f"Downloading {sym}...", i, tot,
                          ticker=sym, found=0)
 
-    stock_data = fetch_batch(tickers, days=180, delay=0.05,
-                             on_progress=_on_dl_progress)
+    interval = "1h" if extended_hours else "1d"
+    includePrePost = "true" if extended_hours else "false"
+    fetch_days = 30 if extended_hours else 180
+
+    stock_data = fetch_batch(tickers, days=fetch_days, delay=0.05,
+                             on_progress=_on_dl_progress, interval=interval, includePrePost=includePrePost)
 
     log.append(f"Downloaded: {len(stock_data)}/{total} tickers have data")
     print(f"  Downloaded {len(stock_data)}/{total} tickers")
@@ -324,11 +328,16 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
                          ticker=sym, found=len(results))
 
         try:
-            last_vol = float(df['Volume'].iloc[-1])
+            if extended_hours:
+                # 1h interval with extended hours produces ~16 candles per day. Check cumulative 24h volume.
+                recent_vol = float(df['Volume'].tail(16).sum())
+            else:
+                recent_vol = float(df['Volume'].iloc[-1])
+
             last_price = float(df['Close'].iloc[-1])
 
-            if last_vol < min_volume or last_price < min_price:
-                print(f"  [{i+1}/{len(stock_data)}] {sym}... skip (vol={last_vol:.0f}, price={last_price:.2f})")
+            if recent_vol < min_volume or last_price < min_price:
+                print(f"  [{i+1}/{len(stock_data)}] {sym}... skip (vol={recent_vol:.0f}, price={last_price:.2f})")
                 skipped_filter += 1
                 continue
 
@@ -368,7 +377,7 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
 
 def full_market_scan(min_volume=500_000, min_price=5.0,
                      rsi_bull_thresh=30, rsi_bear_thresh=70,
-                     swing_lookback=20, swing_tolerance=0.03):
+                     swing_lookback=20, swing_tolerance=0.03, extended_hours=False):
     """
     Scan the entire US stock market:
       1. Fetch all US ticker symbols
@@ -407,9 +416,13 @@ def full_market_scan(min_volume=500_000, min_price=5.0,
             remaining = (tot - done) * rate
             scan_progress["eta_seconds"] = int(remaining)
 
+    interval = "1h" if extended_hours else "1d"
+    includePrePost = "true" if extended_hours else "false"
+    fetch_days = 30 if extended_hours else 180
+
     stock_data = fetch_batch_concurrent(
-        all_tickers, days=180, max_workers=8,
-        on_progress=_on_dl_progress, delay=0.05
+        all_tickers, days=fetch_days, max_workers=8,
+        on_progress=_on_dl_progress, delay=0.05, interval=interval, includePrePost=includePrePost
     )
 
     log.append(f"Downloaded: {len(stock_data)}/{total_tickers} tickers")
@@ -419,9 +432,13 @@ def full_market_scan(min_volume=500_000, min_price=5.0,
     candidates = []
     for sym, df in stock_data.items():
         try:
-            vol = float(df['Volume'].iloc[-1])
+            if extended_hours:
+                recent_vol = float(df['Volume'].tail(16).sum())
+            else:
+                recent_vol = float(df['Volume'].iloc[-1])
+
             price = float(df['Close'].iloc[-1])
-            if vol >= min_volume and price >= min_price:
+            if recent_vol >= min_volume and price >= min_price:
                 candidates.append((sym, df))
         except:
             continue

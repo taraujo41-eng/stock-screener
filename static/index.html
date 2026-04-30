@@ -9,7 +9,8 @@
   <meta name="description" content="Real-time stock reversal scanner — scans the entire US market for RSI, candlestick patterns, and swing setups.">
   <title>Reversal Scanner</title>
   <link rel="manifest" href="/manifest.json">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
+  <link rel="apple-touch-icon" href="/icon.png">
+  <link rel="icon" href="/icon.png">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -41,6 +42,15 @@
     <div class="mode-info">
       <p class="mode-desc" id="modeDesc">Scans 22 tickers — takes ~30 seconds</p>
       <button class="edit-link" id="editWatchlistBtn" onclick="openWatchlistEditor()">✏️ Edit</button>
+    </div>
+
+    <!-- Extended Hours Toggle -->
+    <div class="ext-hours-wrap" id="extHoursWrap">
+      <label class="ext-hours-label">
+        <input type="checkbox" id="extHoursToggle" class="ext-hours-checkbox">
+        <span class="ext-hours-slider"></span>
+        <span class="ext-hours-text">🌙 Include Extended Hours</span>
+      </label>
     </div>
 
     <!-- Scan Button -->
@@ -151,6 +161,6 @@
     </div>
   </div>
 
-  <script src="/app.js"></script>
+  <script src="/app.js?v=2"></script>
 </body>
 </html>

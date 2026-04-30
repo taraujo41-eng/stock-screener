@@ -1,0 +1,3520 @@
+{
+  "ok": true,
+  "mode": "full_market",
+  "timestamp": "Apr 29, 2026  11:01 PM",
+  "count": 439,
+  "results": [
+    {
+      "Ticker": "A",
+      "Last Price": 111.0,
+      "Volume": 0,
+      "RSI": 31.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "MTB",
+      "Last Price": 215.0,
+      "Volume": 0,
+      "RSI": 44.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "NDAQ",
+      "Last Price": 91.7,
+      "Volume": 0,
+      "RSI": 55.7,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "NI",
+      "Last Price": 47.96,
+      "Volume": 0,
+      "RSI": 40.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "NSC",
+      "Last Price": 309.73,
+      "Volume": 0,
+      "RSI": 34.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "NCLH",
+      "Last Price": 17.77,
+      "Volume": 0,
+      "RSI": 48.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "NRG",
+      "Last Price": 149.05,
+      "Volume": 0,
+      "RSI": 36.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "NFLX",
+      "Last Price": 91.45,
+      "Volume": 0,
+      "RSI": 43.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "MU",
+      "Last Price": 523.2,
+      "Volume": 0,
+      "RSI": 57.7,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "NEM",
+      "Last Price": 107.46,
+      "Volume": 0,
+      "RSI": 27.3,
+      "Bullish Signals": "RSI=27.3, Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "MSCI",
+      "Last Price": 598.0,
+      "Volume": 0,
+      "RSI": 52.7,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "NEE",
+      "Last Price": 93.8,
+      "Volume": 0,
+      "RSI": 33.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "MS",
+      "Last Price": 186.3,
+      "Volume": 0,
+      "RSI": 36.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "MRVL",
+      "Last Price": 159.86,
+      "Volume": 0,
+      "RSI": 63.8,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "MKC",
+      "Last Price": 50.33,
+      "Volume": 0,
+      "RSI": 43.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "MSTR",
+      "Last Price": 159.35,
+      "Volume": 0,
+      "RSI": 37.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "MRSH",
+      "Last Price": 170.14,
+      "Volume": 0,
+      "RSI": 49.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "MOS",
+      "Last Price": 23.05,
+      "Volume": 0,
+      "RSI": 44.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "MSI",
+      "Last Price": 420.95,
+      "Volume": 0,
+      "RSI": 36.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "MO",
+      "Last Price": 67.76,
+      "Volume": 0,
+      "RSI": 50.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "MRNA",
+      "Last Price": 45.4,
+      "Volume": 0,
+      "RSI": 33.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "MNST",
+      "Last Price": 76.84,
+      "Volume": 0,
+      "RSI": 49.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "MRK",
+      "Last Price": 110.74,
+      "Volume": 0,
+      "RSI": 54.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "MET",
+      "Last Price": 77.29,
+      "Volume": 0,
+      "RSI": 39.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "MMM",
+      "Last Price": 143.12,
+      "Volume": 0,
+      "RSI": 31.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "MPC",
+      "Last Price": 241.0,
+      "Volume": 0,
+      "RSI": 65.3,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "NTAP",
+      "Last Price": 107.7,
+      "Volume": 0,
+      "RSI": 46.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "NKE",
+      "Last Price": 44.35,
+      "Volume": 0,
+      "RSI": 38.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "NWSA",
+      "Last Price": 25.78,
+      "Volume": 0,
+      "RSI": 33.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "NOC",
+      "Last Price": 570.0,
+      "Volume": 0,
+      "RSI": 40.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "PM",
+      "Last Price": 161.13,
+      "Volume": 0,
+      "RSI": 39.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "POOL",
+      "Last Price": 209.99,
+      "Volume": 0,
+      "RSI": 34.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "PGR",
+      "Last Price": 200.0,
+      "Volume": 0,
+      "RSI": 35.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "PG",
+      "Last Price": 145.38,
+      "Volume": 0,
+      "RSI": 31.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "PLD",
+      "Last Price": 137.5,
+      "Volume": 0,
+      "RSI": 37.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "PDD",
+      "Last Price": 97.8,
+      "Volume": 0,
+      "RSI": 54.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "PCG",
+      "Last Price": 16.34,
+      "Volume": 0,
+      "RSI": 48.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "PFG",
+      "Last Price": 99.63,
+      "Volume": 0,
+      "RSI": 47.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "PFE",
+      "Last Price": 26.23,
+      "Volume": 0,
+      "RSI": 38.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "PCAR",
+      "Last Price": 118.08,
+      "Volume": 0,
+      "RSI": 40.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "PAYX",
+      "Last Price": 94.05,
+      "Volume": 0,
+      "RSI": 63.9,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "PEP",
+      "Last Price": 154.23,
+      "Volume": 0,
+      "RSI": 41.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "PEG",
+      "Last Price": 79.22,
+      "Volume": 0,
+      "RSI": 44.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ON",
+      "Last Price": 99.5,
+      "Volume": 0,
+      "RSI": 58.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "PANW",
+      "Last Price": 181.06,
+      "Volume": 0,
+      "RSI": 51.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "OXY",
+      "Last Price": 60.44,
+      "Volume": 0,
+      "RSI": 66.5,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "OKE",
+      "Last Price": 88.56,
+      "Volume": 0,
+      "RSI": 42.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "OTIS",
+      "Last Price": 75.71,
+      "Volume": 0,
+      "RSI": 37.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "ODFL",
+      "Last Price": 209.3,
+      "Volume": 0,
+      "RSI": 39.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "O",
+      "Last Price": 63.24,
+      "Volume": 0,
+      "RSI": 45.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "NUE",
+      "Last Price": 220.28,
+      "Volume": 0,
+      "RSI": 41.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "NXPI",
+      "Last Price": 289.9,
+      "Volume": 0,
+      "RSI": 74.3,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "RSI=74.3, Near Resistance"
+    },
+    {
+      "Ticker": "NOW",
+      "Last Price": 88.31,
+      "Volume": 0,
+      "RSI": 42.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "MDT",
+      "Last Price": 79.22,
+      "Volume": 0,
+      "RSI": 29.7,
+      "Bullish Signals": "RSI=29.7, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "MDLZ",
+      "Last Price": 60.19,
+      "Volume": 0,
+      "RSI": 51.2,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "PNC",
+      "Last Price": 217.06,
+      "Volume": 0,
+      "RSI": 44.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "JKHY",
+      "Last Price": 153.75,
+      "Volume": 0,
+      "RSI": 54.5,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "L",
+      "Last Price": 110.12,
+      "Volume": 0,
+      "RSI": 34.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "KVUE",
+      "Last Price": 17.23,
+      "Volume": 0,
+      "RSI": 42.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "KEY",
+      "Last Price": 21.27,
+      "Volume": 0,
+      "RSI": 27.9,
+      "Bullish Signals": "RSI=27.9, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "KDP",
+      "Last Price": 28.9,
+      "Volume": 0,
+      "RSI": 54.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "KR",
+      "Last Price": 66.58,
+      "Volume": 0,
+      "RSI": 47.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "KKR",
+      "Last Price": 97.25,
+      "Volume": 0,
+      "RSI": 29.0,
+      "Bullish Signals": "RSI=29.0, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "KIM",
+      "Last Price": 23.59,
+      "Volume": 0,
+      "RSI": 44.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "JPM",
+      "Last Price": 308.3,
+      "Volume": 0,
+      "RSI": 38.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "JNJ",
+      "Last Price": 225.5,
+      "Volume": 0,
+      "RSI": 39.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "KHC",
+      "Last Price": 22.34,
+      "Volume": 0,
+      "RSI": 50.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "IVZ",
+      "Last Price": 25.64,
+      "Volume": 0,
+      "RSI": 51.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "ITW",
+      "Last Price": 256.0,
+      "Volume": 0,
+      "RSI": 26.9,
+      "Bullish Signals": "RSI=26.9, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "MGM",
+      "Last Price": 39.5,
+      "Volume": 0,
+      "RSI": 46.2,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "JCI",
+      "Last Price": 142.43,
+      "Volume": 0,
+      "RSI": 53.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "JBL",
+      "Last Price": 340.0,
+      "Volume": 0,
+      "RSI": 67.5,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "IP",
+      "Last Price": 33.3,
+      "Volume": 0,
+      "RSI": 46.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "IT",
+      "Last Price": 149.01,
+      "Volume": 0,
+      "RSI": 40.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "INVH",
+      "Last Price": 27.66,
+      "Volume": 0,
+      "RSI": 46.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "ISRG",
+      "Last Price": 453.8,
+      "Volume": 0,
+      "RSI": 35.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "JBHT",
+      "Last Price": 243.1,
+      "Volume": 0,
+      "RSI": 34.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "INTU",
+      "Last Price": 392.8,
+      "Volume": 0,
+      "RSI": 46.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "IRM",
+      "Last Price": 112.65,
+      "Volume": 0,
+      "RSI": 44.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "INTC",
+      "Last Price": 98.76,
+      "Volume": 0,
+      "RSI": 82.8,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "RSI=82.8, Near Resistance"
+    },
+    {
+      "Ticker": "IR",
+      "Last Price": 77.0,
+      "Volume": 0,
+      "RSI": 35.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "KMB",
+      "Last Price": 95.87,
+      "Volume": 0,
+      "RSI": 35.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "LDOS",
+      "Last Price": 145.5,
+      "Volume": 0,
+      "RSI": 46.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "LIN",
+      "Last Price": 504.71,
+      "Volume": 0,
+      "RSI": 43.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "KMI",
+      "Last Price": 31.61,
+      "Volume": 0,
+      "RSI": 44.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "MAS",
+      "Last Price": 70.78,
+      "Volume": 0,
+      "RSI": 23.2,
+      "Bullish Signals": "RSI=23.2, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "META",
+      "Last Price": 622.25,
+      "Volume": 0,
+      "RSI": 18.9,
+      "Bullish Signals": "RSI=18.9",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "MAR",
+      "Last Price": 352.53,
+      "Volume": 0,
+      "RSI": 47.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "MCO",
+      "Last Price": 454.41,
+      "Volume": 0,
+      "RSI": 41.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "MAA",
+      "Last Price": 129.75,
+      "Volume": 0,
+      "RSI": 53.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "MCK",
+      "Last Price": 821.06,
+      "Volume": 0,
+      "RSI": 39.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "MA",
+      "Last Price": 529.6,
+      "Volume": 0,
+      "RSI": 64.1,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "LULU",
+      "Last Price": 137.84,
+      "Volume": 0,
+      "RSI": 29.9,
+      "Bullish Signals": "RSI=29.9, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "MCHP",
+      "Last Price": 90.98,
+      "Volume": 0,
+      "RSI": 67.0,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "LRCX",
+      "Last Price": 251.0,
+      "Volume": 0,
+      "RSI": 52.2,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "LYV",
+      "Last Price": 152.92,
+      "Volume": 0,
+      "RSI": 41.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "MCD",
+      "Last Price": 289.76,
+      "Volume": 0,
+      "RSI": 38.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "LOW",
+      "Last Price": 231.5,
+      "Volume": 0,
+      "RSI": 29.3,
+      "Bullish Signals": "RSI=29.3, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "LYB",
+      "Last Price": 73.37,
+      "Volume": 0,
+      "RSI": 61.3,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "LNT",
+      "Last Price": 71.3,
+      "Volume": 0,
+      "RSI": 37.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "LHX",
+      "Last Price": 315.5,
+      "Volume": 0,
+      "RSI": 41.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "LMT",
+      "Last Price": 508.0,
+      "Volume": 0,
+      "RSI": 43.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "LUV",
+      "Last Price": 37.22,
+      "Volume": 0,
+      "RSI": 36.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "LH",
+      "Last Price": 256.0,
+      "Volume": 0,
+      "RSI": 43.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "LLY",
+      "Last Price": 855.49,
+      "Volume": 0,
+      "RSI": 33.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "KO",
+      "Last Price": 78.61,
+      "Volume": 0,
+      "RSI": 53.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "LEN",
+      "Last Price": 88.38,
+      "Volume": 0,
+      "RSI": 25.6,
+      "Bullish Signals": "RSI=25.6, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "LITE",
+      "Last Price": 888.6,
+      "Volume": 0,
+      "RSI": 71.3,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "RSI=71.3, Near Resistance"
+    },
+    {
+      "Ticker": "PPG",
+      "Last Price": 103.8,
+      "Volume": 0,
+      "RSI": 33.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "PPL",
+      "Last Price": 38.57,
+      "Volume": 0,
+      "RSI": 40.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ICE",
+      "Last Price": 154.39,
+      "Volume": 0,
+      "RSI": 43.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "TYL",
+      "Last Price": 359.99,
+      "Volume": 0,
+      "RSI": 66.5,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "V",
+      "Last Price": 332.52,
+      "Volume": 0,
+      "RSI": 62.9,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "USB",
+      "Last Price": 55.74,
+      "Volume": 0,
+      "RSI": 43.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ULTA",
+      "Last Price": 520.1,
+      "Volume": 0,
+      "RSI": 30.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "UHS",
+      "Last Price": 169.98,
+      "Volume": 0,
+      "RSI": 53.1,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "UDR",
+      "Last Price": 35.04,
+      "Volume": 0,
+      "RSI": 38.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "UPS",
+      "Last Price": 105.81,
+      "Volume": 0,
+      "RSI": 53.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "UNP",
+      "Last Price": 263.11,
+      "Volume": 0,
+      "RSI": 37.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "TTWO",
+      "Last Price": 215.3,
+      "Volume": 0,
+      "RSI": 57.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "UNH",
+      "Last Price": 368.5,
+      "Volume": 0,
+      "RSI": 59.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "TTD",
+      "Last Price": 24.29,
+      "Volume": 0,
+      "RSI": 67.3,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "UAL",
+      "Last Price": 88.69,
+      "Volume": 0,
+      "RSI": 39.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "TT",
+      "Last Price": 476.5,
+      "Volume": 0,
+      "RSI": 40.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "TMUS",
+      "Last Price": 198.91,
+      "Volume": 0,
+      "RSI": 67.1,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "TXT",
+      "Last Price": 91.0,
+      "Volume": 0,
+      "RSI": 65.4,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "TSN",
+      "Last Price": 63.09,
+      "Volume": 0,
+      "RSI": 39.4,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "TRMB",
+      "Last Price": 66.43,
+      "Volume": 0,
+      "RSI": 49.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "TXN",
+      "Last Price": 266.8,
+      "Volume": 0,
+      "RSI": 44.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "TSCO",
+      "Last Price": 34.7,
+      "Volume": 0,
+      "RSI": 32.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "TRGP",
+      "Last Price": 248.0,
+      "Volume": 0,
+      "RSI": 48.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "TPR",
+      "Last Price": 144.21,
+      "Volume": 0,
+      "RSI": 52.4,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "TJX",
+      "Last Price": 155.11,
+      "Volume": 0,
+      "RSI": 38.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "TRV",
+      "Last Price": 298.0,
+      "Volume": 0,
+      "RSI": 25.2,
+      "Bullish Signals": "RSI=25.2, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "TGT",
+      "Last Price": 127.35,
+      "Volume": 0,
+      "RSI": 46.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "TROW",
+      "Last Price": 100.0,
+      "Volume": 0,
+      "RSI": 43.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "VICI",
+      "Last Price": 28.75,
+      "Volume": 0,
+      "RSI": 56.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "VTRS",
+      "Last Price": 14.9,
+      "Volume": 0,
+      "RSI": 52.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "VLO",
+      "Last Price": 251.17,
+      "Volume": 0,
+      "RSI": 74.0,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "RSI=74.0, Near Resistance"
+    },
+    {
+      "Ticker": "VZ",
+      "Last Price": 46.52,
+      "Volume": 0,
+      "RSI": 39.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "ZTS",
+      "Last Price": 115.0,
+      "Volume": 0,
+      "RSI": 47.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "XYL",
+      "Last Price": 115.28,
+      "Volume": 0,
+      "RSI": 37.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "ZS",
+      "Last Price": 134.5,
+      "Volume": 0,
+      "RSI": 48.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "XOM",
+      "Last Price": 154.13,
+      "Volume": 0,
+      "RSI": 65.7,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "WST",
+      "Last Price": 295.3,
+      "Volume": 0,
+      "RSI": 51.3,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ZBRA",
+      "Last Price": 218.78,
+      "Volume": 0,
+      "RSI": 49.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ZBH",
+      "Last Price": 80.17,
+      "Volume": 0,
+      "RSI": 31.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "XEL",
+      "Last Price": 78.76,
+      "Volume": 0,
+      "RSI": 48.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "WRB",
+      "Last Price": 66.62,
+      "Volume": 0,
+      "RSI": 48.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "WYNN",
+      "Last Price": 103.15,
+      "Volume": 0,
+      "RSI": 39.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "WMT",
+      "Last Price": 126.95,
+      "Volume": 0,
+      "RSI": 43.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "WEC",
+      "Last Price": 114.22,
+      "Volume": 0,
+      "RSI": 43.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "WY",
+      "Last Price": 24.07,
+      "Volume": 0,
+      "RSI": 27.3,
+      "Bullish Signals": "RSI=27.3, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "WMB",
+      "Last Price": 72.24,
+      "Volume": 0,
+      "RSI": 38.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "WTW",
+      "Last Price": 290.11,
+      "Volume": 0,
+      "RSI": 50.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "WDAY",
+      "Last Price": 122.35,
+      "Volume": 0,
+      "RSI": 58.5,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "WM",
+      "Last Price": 228.1,
+      "Volume": 0,
+      "RSI": 51.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "WBD",
+      "Last Price": 26.94,
+      "Volume": 0,
+      "RSI": 49.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "VTR",
+      "Last Price": 87.35,
+      "Volume": 0,
+      "RSI": 55.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "WFC",
+      "Last Price": 81.17,
+      "Volume": 0,
+      "RSI": 49.1,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "VST",
+      "Last Price": 154.45,
+      "Volume": 0,
+      "RSI": 29.2,
+      "Bullish Signals": "RSI=29.2, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "WAT",
+      "Last Price": 289.48,
+      "Volume": 0,
+      "RSI": 33.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "VRTX",
+      "Last Price": 423.0,
+      "Volume": 0,
+      "RSI": 45.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "TFC",
+      "Last Price": 50.21,
+      "Volume": 0,
+      "RSI": 33.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "TAP",
+      "Last Price": 42.41,
+      "Volume": 0,
+      "RSI": 50.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "PNR",
+      "Last Price": 80.0,
+      "Volume": 0,
+      "RSI": 24.2,
+      "Bullish Signals": "RSI=24.2, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "RCL",
+      "Last Price": 258.14,
+      "Volume": 0,
+      "RSI": 57.4,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ROST",
+      "Last Price": 226.8,
+      "Volume": 0,
+      "RSI": 55.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "SBAC",
+      "Last Price": 210.38,
+      "Volume": 0,
+      "RSI": 27.9,
+      "Bullish Signals": "RSI=27.9, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "SJM",
+      "Last Price": 95.93,
+      "Volume": 0,
+      "RSI": 42.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "ROP",
+      "Last Price": 355.06,
+      "Volume": 0,
+      "RSI": 51.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "SATS",
+      "Last Price": 120.49,
+      "Volume": 0,
+      "RSI": 43.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "RF",
+      "Last Price": 27.91,
+      "Volume": 0,
+      "RSI": 32.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ROL",
+      "Last Price": 55.28,
+      "Volume": 0,
+      "RSI": 42.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "REGN",
+      "Last Price": 678.5,
+      "Volume": 0,
+      "RSI": 31.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "RTX",
+      "Last Price": 172.0,
+      "Volume": 0,
+      "RSI": 36.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "REG",
+      "Last Price": 79.38,
+      "Volume": 0,
+      "RSI": 43.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "RMD",
+      "Last Price": 213.4,
+      "Volume": 0,
+      "RSI": 44.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "PTC",
+      "Last Price": 137.5,
+      "Volume": 0,
+      "RSI": 51.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "TMO",
+      "Last Price": 462.52,
+      "Volume": 0,
+      "RSI": 42.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "QCOM",
+      "Last Price": 176.9,
+      "Volume": 0,
+      "RSI": 76.0,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "RSI=76.0"
+    },
+    {
+      "Ticker": "PSX",
+      "Last Price": 172.25,
+      "Volume": 0,
+      "RSI": 59.3,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "RJF",
+      "Last Price": 155.58,
+      "Volume": 0,
+      "RSI": 52.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "Q",
+      "Last Price": 141.54,
+      "Volume": 0,
+      "RSI": 57.3,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "PSKY",
+      "Last Price": 10.39,
+      "Volume": 0,
+      "RSI": 45.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "PODD",
+      "Last Price": 158.8,
+      "Volume": 0,
+      "RSI": 21.4,
+      "Bullish Signals": "RSI=21.4, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "PSA",
+      "Last Price": 291.55,
+      "Volume": 0,
+      "RSI": 38.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "PYPL",
+      "Last Price": 50.5,
+      "Volume": 0,
+      "RSI": 56.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "PNW",
+      "Last Price": 102.02,
+      "Volume": 0,
+      "RSI": 41.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "PWR",
+      "Last Price": 645.0,
+      "Volume": 0,
+      "RSI": 64.3,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "PRU",
+      "Last Price": 96.23,
+      "Volume": 0,
+      "RSI": 46.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "SLB",
+      "Last Price": 55.52,
+      "Volume": 0,
+      "RSI": 46.0,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "RSG",
+      "Last Price": 206.5,
+      "Volume": 0,
+      "RSI": 44.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "SBUX",
+      "Last Price": 104.99,
+      "Volume": 0,
+      "RSI": 63.1,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "SCHW",
+      "Last Price": 90.5,
+      "Volume": 0,
+      "RSI": 46.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "T",
+      "Last Price": 25.7,
+      "Volume": 0,
+      "RSI": 36.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "TKO",
+      "Last Price": 187.38,
+      "Volume": 0,
+      "RSI": 63.2,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "TEL",
+      "Last Price": 204.7,
+      "Volume": 0,
+      "RSI": 49.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "SYY",
+      "Last Price": 73.74,
+      "Volume": 0,
+      "RSI": 51.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "TECH",
+      "Last Price": 51.68,
+      "Volume": 0,
+      "RSI": 37.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "SYK",
+      "Last Price": 315.96,
+      "Volume": 0,
+      "RSI": 44.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "STZ",
+      "Last Price": 150.01,
+      "Volume": 0,
+      "RSI": 29.9,
+      "Bullish Signals": "RSI=29.9, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "SYF",
+      "Last Price": 74.51,
+      "Volume": 0,
+      "RSI": 27.8,
+      "Bullish Signals": "RSI=27.8, Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "STT",
+      "Last Price": 150.34,
+      "Volume": 0,
+      "RSI": 41.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "SWKS",
+      "Last Price": 63.15,
+      "Volume": 0,
+      "RSI": 59.4,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "STLD",
+      "Last Price": 220.14,
+      "Volume": 0,
+      "RSI": 38.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "SOLV",
+      "Last Price": 66.73,
+      "Volume": 0,
+      "RSI": 45.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "SWK",
+      "Last Price": 75.88,
+      "Volume": 0,
+      "RSI": 41.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "SO",
+      "Last Price": 92.6,
+      "Volume": 0,
+      "RSI": 32.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "SW",
+      "Last Price": 40.16,
+      "Volume": 0,
+      "RSI": 54.6,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "STE",
+      "Last Price": 216.9,
+      "Volume": 0,
+      "RSI": 51.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "SNPS",
+      "Last Price": 481.0,
+      "Volume": 0,
+      "RSI": 48.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "SRE",
+      "Last Price": 93.0,
+      "Volume": 0,
+      "RSI": 51.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "SNDK",
+      "Last Price": 1095.37,
+      "Volume": 0,
+      "RSI": 64.7,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "SHW",
+      "Last Price": 314.55,
+      "Volume": 0,
+      "RSI": 34.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "SPGI",
+      "Last Price": 430.26,
+      "Volume": 0,
+      "RSI": 41.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "SHOP",
+      "Last Price": 121.8,
+      "Volume": 0,
+      "RSI": 49.8,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "SPG",
+      "Last Price": 198.66,
+      "Volume": 0,
+      "RSI": 39.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "IQV",
+      "Last Price": 156.49,
+      "Volume": 0,
+      "RSI": 39.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "INSM",
+      "Last Price": 133.82,
+      "Volume": 0,
+      "RSI": 44.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ADI",
+      "Last Price": 388.56,
+      "Volume": 0,
+      "RSI": 47.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "CB",
+      "Last Price": 323.16,
+      "Volume": 0,
+      "RSI": 37.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CI",
+      "Last Price": 292.4,
+      "Volume": 0,
+      "RSI": 61.0,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CF",
+      "Last Price": 126.67,
+      "Volume": 0,
+      "RSI": 61.7,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CCEP",
+      "Last Price": 91.94,
+      "Volume": 0,
+      "RSI": 27.4,
+      "Bullish Signals": "RSI=27.4, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "CEG",
+      "Last Price": 298.75,
+      "Volume": 0,
+      "RSI": 38.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "CARR",
+      "Last Price": 61.0,
+      "Volume": 0,
+      "RSI": 43.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "CBRE",
+      "Last Price": 139.43,
+      "Volume": 0,
+      "RSI": 36.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "CDW",
+      "Last Price": 133.96,
+      "Volume": 0,
+      "RSI": 47.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CAH",
+      "Last Price": 203.5,
+      "Volume": 0,
+      "RSI": 48.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "CDNS",
+      "Last Price": 329.61,
+      "Volume": 0,
+      "RSI": 57.0,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CBOE",
+      "Last Price": 308.61,
+      "Volume": 0,
+      "RSI": 65.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CAG",
+      "Last Price": 14.26,
+      "Volume": 0,
+      "RSI": 49.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CAT",
+      "Last Price": 808.5,
+      "Volume": 0,
+      "RSI": 34.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "BKR",
+      "Last Price": 68.81,
+      "Volume": 0,
+      "RSI": 53.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "BRK-B",
+      "Last Price": 473.9,
+      "Volume": 0,
+      "RSI": 34.3,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "C",
+      "Last Price": 126.88,
+      "Volume": 0,
+      "RSI": 39.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "BR",
+      "Last Price": 160.75,
+      "Volume": 0,
+      "RSI": 55.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "BXP",
+      "Last Price": 55.43,
+      "Volume": 0,
+      "RSI": 35.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "BMY",
+      "Last Price": 57.25,
+      "Volume": 0,
+      "RSI": 36.4,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "BX",
+      "Last Price": 119.25,
+      "Volume": 0,
+      "RSI": 39.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "BSX",
+      "Last Price": 57.14,
+      "Volume": 0,
+      "RSI": 38.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "BIIB",
+      "Last Price": 192.82,
+      "Volume": 0,
+      "RSI": 60.7,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "BG",
+      "Last Price": 128.31,
+      "Volume": 0,
+      "RSI": 56.8,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "BRO",
+      "Last Price": 61.01,
+      "Volume": 0,
+      "RSI": 33.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "BLDR",
+      "Last Price": 83.99,
+      "Volume": 0,
+      "RSI": 29.3,
+      "Bullish Signals": "RSI=29.3, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "CCI",
+      "Last Price": 84.77,
+      "Volume": 0,
+      "RSI": 41.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "CIEN",
+      "Last Price": 484.0,
+      "Volume": 0,
+      "RSI": 55.9,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CFG",
+      "Last Price": 64.05,
+      "Volume": 0,
+      "RSI": 38.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CINF",
+      "Last Price": 163.22,
+      "Volume": 0,
+      "RSI": 48.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CTSH",
+      "Last Price": 55.1,
+      "Volume": 0,
+      "RSI": 54.2,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CSCO",
+      "Last Price": 89.2,
+      "Volume": 0,
+      "RSI": 62.3,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CRWD",
+      "Last Price": 452.01,
+      "Volume": 0,
+      "RSI": 50.6,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CPRT",
+      "Last Price": 33.33,
+      "Volume": 0,
+      "RSI": 53.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CPB",
+      "Last Price": 20.49,
+      "Volume": 0,
+      "RSI": 49.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "COO",
+      "Last Price": 61.34,
+      "Volume": 0,
+      "RSI": 39.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "CRM",
+      "Last Price": 180.0,
+      "Volume": 0,
+      "RSI": 44.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "COIN",
+      "Last Price": 182.09,
+      "Volume": 0,
+      "RSI": 38.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "COST",
+      "Last Price": 993.25,
+      "Volume": 0,
+      "RSI": 46.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "COHR",
+      "Last Price": 314.5,
+      "Volume": 0,
+      "RSI": 61.9,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "COR",
+      "Last Price": 308.96,
+      "Volume": 0,
+      "RSI": 45.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "COF",
+      "Last Price": 190.37,
+      "Volume": 0,
+      "RSI": 42.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CNP",
+      "Last Price": 42.3,
+      "Volume": 0,
+      "RSI": 34.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CME",
+      "Last Price": 283.46,
+      "Volume": 0,
+      "RSI": 42.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "COP",
+      "Last Price": 128.05,
+      "Volume": 0,
+      "RSI": 68.6,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CNC",
+      "Last Price": 53.65,
+      "Volume": 0,
+      "RSI": 75.4,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "RSI=75.4, Near Resistance"
+    },
+    {
+      "Ticker": "CMCSA",
+      "Last Price": 26.75,
+      "Volume": 0,
+      "RSI": 31.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "CMS",
+      "Last Price": 74.0,
+      "Volume": 0,
+      "RSI": 35.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "CLX",
+      "Last Price": 94.72,
+      "Volume": 0,
+      "RSI": 38.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CL",
+      "Last Price": 84.03,
+      "Volume": 0,
+      "RSI": 38.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CHTR",
+      "Last Price": 158.85,
+      "Volume": 0,
+      "RSI": 16.0,
+      "Bullish Signals": "RSI=16.0, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "CCL",
+      "Last Price": 25.65,
+      "Volume": 0,
+      "RSI": 38.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "CHD",
+      "Last Price": 96.2,
+      "Volume": 0,
+      "RSI": 48.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "BF-B",
+      "Last Price": 24.86,
+      "Volume": 0,
+      "RSI": 24.4,
+      "Bullish Signals": "RSI=24.4, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "BEN",
+      "Last Price": 29.15,
+      "Volume": 0,
+      "RSI": 50.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "CTVA",
+      "Last Price": 78.65,
+      "Volume": 0,
+      "RSI": 43.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "AJG",
+      "Last Price": 207.95,
+      "Volume": 0,
+      "RSI": 36.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "ALLE",
+      "Last Price": 138.92,
+      "Volume": 0,
+      "RSI": 47.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "ALL",
+      "Last Price": 210.0,
+      "Volume": 0,
+      "RSI": 32.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "AMZN",
+      "Last Price": 270.3,
+      "Volume": 0,
+      "RSI": 61.8,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "AMD",
+      "Last Price": 348.0,
+      "Volume": 0,
+      "RSI": 70.3,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "RSI=70.3, Near Resistance"
+    },
+    {
+      "Ticker": "AMCR",
+      "Last Price": 37.52,
+      "Volume": 0,
+      "RSI": 35.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "AMAT",
+      "Last Price": 382.0,
+      "Volume": 0,
+      "RSI": 47.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "AFL",
+      "Last Price": 112.0,
+      "Volume": 0,
+      "RSI": 29.3,
+      "Bullish Signals": "RSI=29.3, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "ALB",
+      "Last Price": 190.05,
+      "Volume": 0,
+      "RSI": 45.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ALNY",
+      "Last Price": 301.19,
+      "Volume": 0,
+      "RSI": 48.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "AES",
+      "Last Price": 14.48,
+      "Volume": 0,
+      "RSI": 51.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "AKAM",
+      "Last Price": 98.99,
+      "Volume": 0,
+      "RSI": 57.4,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "AEP",
+      "Last Price": 134.27,
+      "Volume": 0,
+      "RSI": 41.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "BAC",
+      "Last Price": 52.7,
+      "Volume": 0,
+      "RSI": 51.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "AEE",
+      "Last Price": 110.59,
+      "Volume": 0,
+      "RSI": 41.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ADBE",
+      "Last Price": 242.0,
+      "Volume": 0,
+      "RSI": 49.0,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "AIG",
+      "Last Price": 73.2,
+      "Volume": 0,
+      "RSI": 42.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ACGL",
+      "Last Price": 91.7,
+      "Volume": 0,
+      "RSI": 35.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "ADSK",
+      "Last Price": 234.65,
+      "Volume": 0,
+      "RSI": 52.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ACN",
+      "Last Price": 180.0,
+      "Volume": 0,
+      "RSI": 59.2,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ADP",
+      "Last Price": 212.81,
+      "Volume": 0,
+      "RSI": 74.1,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "RSI=74.1, Near Resistance"
+    },
+    {
+      "Ticker": "ABT",
+      "Last Price": 91.21,
+      "Volume": 0,
+      "RSI": 32.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "ADM",
+      "Last Price": 74.14,
+      "Volume": 0,
+      "RSI": 58.2,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ABNB",
+      "Last Price": 140.28,
+      "Volume": 0,
+      "RSI": 54.6,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ABBV",
+      "Last Price": 204.0,
+      "Volume": 0,
+      "RSI": 61.9,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ANET",
+      "Last Price": 173.6,
+      "Volume": 0,
+      "RSI": 72.2,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "RSI=72.2"
+    },
+    {
+      "Ticker": "AME",
+      "Last Price": 227.87,
+      "Volume": 0,
+      "RSI": 48.8,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "AMGN",
+      "Last Price": 338.01,
+      "Volume": 0,
+      "RSI": 49.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "AON",
+      "Last Price": 319.69,
+      "Volume": 0,
+      "RSI": 40.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "BKNG",
+      "Last Price": 173.1,
+      "Volume": 0,
+      "RSI": 51.6,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "BK",
+      "Last Price": 130.0,
+      "Volume": 0,
+      "RSI": 33.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "BDX",
+      "Last Price": 143.3,
+      "Volume": 0,
+      "RSI": 30.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "BBY",
+      "Last Price": 58.6,
+      "Volume": 0,
+      "RSI": 40.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "AXP",
+      "Last Price": 313.33,
+      "Volume": 0,
+      "RSI": 34.4,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "BAX",
+      "Last Price": 17.03,
+      "Volume": 0,
+      "RSI": 30.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "AVB",
+      "Last Price": 186.62,
+      "Volume": 0,
+      "RSI": 68.0,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "BALL",
+      "Last Price": 60.29,
+      "Volume": 0,
+      "RSI": 41.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "AXON",
+      "Last Price": 401.94,
+      "Volume": 0,
+      "RSI": 51.8,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ASML",
+      "Last Price": 1396.0,
+      "Volume": 0,
+      "RSI": 52.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "AWK",
+      "Last Price": 130.51,
+      "Volume": 0,
+      "RSI": 42.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "ARM",
+      "Last Price": 206.5,
+      "Volume": 0,
+      "RSI": 57.4,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "AVY",
+      "Last Price": 161.55,
+      "Volume": 0,
+      "RSI": 36.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "APO",
+      "Last Price": 120.15,
+      "Volume": 0,
+      "RSI": 32.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "AVGO",
+      "Last Price": 414.0,
+      "Volume": 0,
+      "RSI": 70.3,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "RSI=70.3, Near Resistance"
+    },
+    {
+      "Ticker": "ARES",
+      "Last Price": 111.94,
+      "Volume": 0,
+      "RSI": 51.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "APD",
+      "Last Price": 300.5,
+      "Volume": 0,
+      "RSI": 41.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ARE",
+      "Last Price": 40.91,
+      "Volume": 0,
+      "RSI": 40.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "AMT",
+      "Last Price": 176.12,
+      "Volume": 0,
+      "RSI": 48.1,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "APA",
+      "Last Price": 40.14,
+      "Volume": 0,
+      "RSI": 60.4,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "APTV",
+      "Last Price": 58.0,
+      "Volume": 0,
+      "RSI": 38.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "AOS",
+      "Last Price": 63.0,
+      "Volume": 0,
+      "RSI": 37.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "APP",
+      "Last Price": 441.75,
+      "Volume": 0,
+      "RSI": 47.6,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CPT",
+      "Last Price": 104.3,
+      "Volume": 0,
+      "RSI": 46.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "CRH",
+      "Last Price": 111.14,
+      "Volume": 0,
+      "RSI": 32.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "IBM",
+      "Last Price": 226.97,
+      "Volume": 0,
+      "RSI": 34.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "GE",
+      "Last Price": 283.91,
+      "Volume": 0,
+      "RSI": 47.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "GIS",
+      "Last Price": 34.4,
+      "Volume": 0,
+      "RSI": 42.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "GOOG",
+      "Last Price": 371.8,
+      "Volume": 0,
+      "RSI": 82.7,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "RSI=82.7, Near Resistance"
+    },
+    {
+      "Ticker": "GILD",
+      "Last Price": 128.35,
+      "Volume": 0,
+      "RSI": 45.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "GDDY",
+      "Last Price": 87.45,
+      "Volume": 0,
+      "RSI": 62.9,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "GM",
+      "Last Price": 76.54,
+      "Volume": 0,
+      "RSI": 41.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "GEV",
+      "Last Price": 1069.43,
+      "Volume": 0,
+      "RSI": 44.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "FTV",
+      "Last Price": 61.88,
+      "Volume": 0,
+      "RSI": 46.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "GEN",
+      "Last Price": 19.01,
+      "Volume": 0,
+      "RSI": 44.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "FTNT",
+      "Last Price": 86.0,
+      "Volume": 0,
+      "RSI": 51.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "GEHC",
+      "Last Price": 59.89,
+      "Volume": 0,
+      "RSI": 27.5,
+      "Bullish Signals": "RSI=27.5, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "FITB",
+      "Last Price": 49.86,
+      "Volume": 0,
+      "RSI": 47.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "FSLR",
+      "Last Price": 190.94,
+      "Volume": 0,
+      "RSI": 43.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "EXE",
+      "Last Price": 100.96,
+      "Volume": 0,
+      "RSI": 64.9,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "FISV",
+      "Last Price": 61.8,
+      "Volume": 0,
+      "RSI": 51.8,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "FRT",
+      "Last Price": 109.48,
+      "Volume": 0,
+      "RSI": 38.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "FIS",
+      "Last Price": 46.0,
+      "Volume": 0,
+      "RSI": 47.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "FDX",
+      "Last Price": 386.5,
+      "Volume": 0,
+      "RSI": 46.1,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "FOXA",
+      "Last Price": 62.94,
+      "Volume": 0,
+      "RSI": 40.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "FDS",
+      "Last Price": 232.4,
+      "Volume": 0,
+      "RSI": 54.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "FOX",
+      "Last Price": 56.62,
+      "Volume": 0,
+      "RSI": 43.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "FCX",
+      "Last Price": 56.65,
+      "Volume": 0,
+      "RSI": 19.7,
+      "Bullish Signals": "RSI=19.7, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "FFIV",
+      "Last Price": 324.3,
+      "Volume": 0,
+      "RSI": 57.7,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "FAST",
+      "Last Price": 43.34,
+      "Volume": 0,
+      "RSI": 28.3,
+      "Bullish Signals": "RSI=28.3, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "FER",
+      "Last Price": 67.06,
+      "Volume": 0,
+      "RSI": 44.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "GOOGL",
+      "Last Price": 375.02,
+      "Volume": 0,
+      "RSI": 81.7,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "RSI=81.7, Near Resistance"
+    },
+    {
+      "Ticker": "GPC",
+      "Last Price": 102.88,
+      "Volume": 0,
+      "RSI": 35.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "GLW",
+      "Last Price": 153.93,
+      "Volume": 0,
+      "RSI": 48.0,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "HAL",
+      "Last Price": 41.7,
+      "Volume": 0,
+      "RSI": 66.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "INCY",
+      "Last Price": 101.94,
+      "Volume": 0,
+      "RSI": 67.9,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "IBKR",
+      "Last Price": 76.98,
+      "Volume": 0,
+      "RSI": 50.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "HST",
+      "Last Price": 20.75,
+      "Volume": 0,
+      "RSI": 43.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "IFF",
+      "Last Price": 68.5,
+      "Volume": 0,
+      "RSI": 22.7,
+      "Bullish Signals": "RSI=22.7, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "HSIC",
+      "Last Price": 73.8,
+      "Volume": 0,
+      "RSI": 31.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "HWM",
+      "Last Price": 234.0,
+      "Volume": 0,
+      "RSI": 26.6,
+      "Bullish Signals": "RSI=26.6, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "HRL",
+      "Last Price": 20.76,
+      "Volume": 0,
+      "RSI": 28.5,
+      "Bullish Signals": "RSI=28.5, Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "HUM",
+      "Last Price": 241.2,
+      "Volume": 0,
+      "RSI": 65.9,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "HPQ",
+      "Last Price": 20.18,
+      "Volume": 0,
+      "RSI": 57.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "HUBB",
+      "Last Price": 545.93,
+      "Volume": 0,
+      "RSI": 48.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "HPE",
+      "Last Price": 28.4,
+      "Volume": 0,
+      "RSI": 57.9,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "HIG",
+      "Last Price": 135.2,
+      "Volume": 0,
+      "RSI": 36.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "HSY",
+      "Last Price": 192.2,
+      "Volume": 0,
+      "RSI": 61.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "HD",
+      "Last Price": 321.01,
+      "Volume": 0,
+      "RSI": 29.9,
+      "Bullish Signals": "RSI=29.9, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "HOOD",
+      "Last Price": 71.51,
+      "Volume": 0,
+      "RSI": 30.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "GS",
+      "Last Price": 904.25,
+      "Volume": 0,
+      "RSI": 27.9,
+      "Bullish Signals": "RSI=27.9, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "HCA",
+      "Last Price": 432.0,
+      "Volume": 0,
+      "RSI": 44.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "HON",
+      "Last Price": 209.8,
+      "Volume": 0,
+      "RSI": 42.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "GRMN",
+      "Last Price": 250.52,
+      "Volume": 0,
+      "RSI": 51.3,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "HLT",
+      "Last Price": 310.91,
+      "Volume": 0,
+      "RSI": 34.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "HBAN",
+      "Last Price": 16.26,
+      "Volume": 0,
+      "RSI": 43.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "HAS",
+      "Last Price": 93.0,
+      "Volume": 0,
+      "RSI": 41.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "GPN",
+      "Last Price": 70.95,
+      "Volume": 0,
+      "RSI": 68.2,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "EXPD",
+      "Last Price": 147.1,
+      "Volume": 0,
+      "RSI": 43.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "FE",
+      "Last Price": 49.78,
+      "Volume": 0,
+      "RSI": 53.9,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CVNA",
+      "Last Price": 432.85,
+      "Volume": 0,
+      "RSI": 76.0,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "RSI=76.0, Near Resistance"
+    },
+    {
+      "Ticker": "DIS",
+      "Last Price": 100.76,
+      "Volume": 0,
+      "RSI": 43.2,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "DOV",
+      "Last Price": 220.36,
+      "Volume": 0,
+      "RSI": 36.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "DHI",
+      "Last Price": 151.5,
+      "Volume": 0,
+      "RSI": 31.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "DOC",
+      "Last Price": 16.0,
+      "Volume": 0,
+      "RSI": 44.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "DTE",
+      "Last Price": 146.02,
+      "Volume": 0,
+      "RSI": 41.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "DGX",
+      "Last Price": 191.88,
+      "Volume": 0,
+      "RSI": 47.7,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "DRI",
+      "Last Price": 195.0,
+      "Volume": 0,
+      "RSI": 35.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "DLTR",
+      "Last Price": 95.0,
+      "Volume": 0,
+      "RSI": 36.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "DG",
+      "Last Price": 113.53,
+      "Volume": 0,
+      "RSI": 35.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "DLR",
+      "Last Price": 193.5,
+      "Volume": 0,
+      "RSI": 43.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "DELL",
+      "Last Price": 206.9,
+      "Volume": 0,
+      "RSI": 50.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "DASH",
+      "Last Price": 166.76,
+      "Volume": 0,
+      "RSI": 37.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "DHR",
+      "Last Price": 177.06,
+      "Volume": 0,
+      "RSI": 39.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "F",
+      "Last Price": 12.08,
+      "Volume": 0,
+      "RSI": 36.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "DAL",
+      "Last Price": 66.14,
+      "Volume": 0,
+      "RSI": 36.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "DECK",
+      "Last Price": 101.08,
+      "Volume": 0,
+      "RSI": 32.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "D",
+      "Last Price": 62.1,
+      "Volume": 0,
+      "RSI": 38.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "DE",
+      "Last Price": 557.53,
+      "Volume": 0,
+      "RSI": 40.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "CVX",
+      "Last Price": 192.09,
+      "Volume": 0,
+      "RSI": 66.3,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CTRA",
+      "Last Price": 35.2,
+      "Volume": 0,
+      "RSI": 53.9,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "DDOG",
+      "Last Price": 135.5,
+      "Volume": 0,
+      "RSI": 63.7,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "DD",
+      "Last Price": 44.31,
+      "Volume": 0,
+      "RSI": 33.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "CTAS",
+      "Last Price": 172.93,
+      "Volume": 0,
+      "RSI": 48.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "CVS",
+      "Last Price": 83.29,
+      "Volume": 0,
+      "RSI": 71.9,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "RSI=71.9, Near Resistance"
+    },
+    {
+      "Ticker": "CSX",
+      "Last Price": 44.68,
+      "Volume": 0,
+      "RSI": 45.8,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "DUK",
+      "Last Price": 126.06,
+      "Volume": 0,
+      "RSI": 34.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ECL",
+      "Last Price": 255.0,
+      "Volume": 0,
+      "RSI": 41.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "DVA",
+      "Last Price": 152.5,
+      "Volume": 0,
+      "RSI": 54.3,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "DOW",
+      "Last Price": 39.4,
+      "Volume": 0,
+      "RSI": 65.2,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "FANG",
+      "Last Price": 205.74,
+      "Volume": 0,
+      "RSI": 63.3,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "EXC",
+      "Last Price": 46.32,
+      "Volume": 0,
+      "RSI": 38.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "EW",
+      "Last Price": 80.92,
+      "Volume": 0,
+      "RSI": 40.0,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "EXR",
+      "Last Price": 138.52,
+      "Volume": 0,
+      "RSI": 43.5,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ES",
+      "Last Price": 68.5,
+      "Volume": 0,
+      "RSI": 48.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "EXPE",
+      "Last Price": 249.46,
+      "Volume": 0,
+      "RSI": 56.7,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "EVRG",
+      "Last Price": 80.78,
+      "Volume": 0,
+      "RSI": 39.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "EQT",
+      "Last Price": 59.08,
+      "Volume": 0,
+      "RSI": 44.4,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "EME",
+      "Last Price": 849.0,
+      "Volume": 0,
+      "RSI": 46.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "ETN",
+      "Last Price": 411.12,
+      "Volume": 0,
+      "RSI": 46.1,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ELV",
+      "Last Price": 374.76,
+      "Volume": 0,
+      "RSI": 62.8,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "ESS",
+      "Last Price": 265.0,
+      "Volume": 0,
+      "RSI": 50.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "EL",
+      "Last Price": 75.92,
+      "Volume": 0,
+      "RSI": 43.6,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "EPAM",
+      "Last Price": 112.9,
+      "Volume": 0,
+      "RSI": 43.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "EOG",
+      "Last Price": 138.9,
+      "Volume": 0,
+      "RSI": 60.3,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "EIX",
+      "Last Price": 67.75,
+      "Volume": 0,
+      "RSI": 44.2,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "EA",
+      "Last Price": 201.99,
+      "Volume": 0,
+      "RSI": 49.8,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "EMR",
+      "Last Price": 135.25,
+      "Volume": 0,
+      "RSI": 27.2,
+      "Bullish Signals": "RSI=27.2, Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "DXCM",
+      "Last Price": 57.55,
+      "Volume": 0,
+      "RSI": 39.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "EFX",
+      "Last Price": 170.0,
+      "Volume": 0,
+      "RSI": 39.8,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    },
+    {
+      "Ticker": "DVN",
+      "Last Price": 51.08,
+      "Volume": 0,
+      "RSI": 74.8,
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "RSI=74.8, Near Resistance"
+    },
+    {
+      "Ticker": "ED",
+      "Last Price": 108.06,
+      "Volume": 0,
+      "RSI": 38.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "DPZ",
+      "Last Price": 331.0,
+      "Volume": 0,
+      "RSI": 38.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "\u2014"
+    },
+    {
+      "Ticker": "XYZ",
+      "Last Price": 69.5,
+      "Volume": 0,
+      "RSI": 45.9,
+      "Bullish Signals": "Near Support",
+      "Bearish Signals": "Near Resistance"
+    }
+  ]
+}
