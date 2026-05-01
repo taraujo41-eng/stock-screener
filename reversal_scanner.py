@@ -118,158 +118,105 @@ def compute_rsi(series, length=14):
 
 
 # =====================================================================
-# Candlestick pattern helpers
+# VWAP and RVOL helpers
 # =====================================================================
 
-def _body(o, c):
-    return abs(c - o)
+def compute_vwap(df):
+    """Calculate daily VWAP."""
+    typical_price = (df['High'] + df['Low'] + df['Close']) / 3
+    dates = df.index.date
+    vwap = (typical_price * df['Volume']).groupby(dates).cumsum() / df['Volume'].groupby(dates).cumsum()
+    return vwap
 
-def _upper_shadow(h, o, c):
-    return h - max(o, c)
-
-def _lower_shadow(l, o, c):
-    return min(o, c) - l
-
-def detect_patterns(df):
-    """Simple candlestick pattern detection on the last 3 bars."""
-    bullish, bearish = [], []
-    if len(df) < 3:
-        return bullish, bearish
-
-    o1, h1, l1, c1 = (float(df['Open'].iloc[-3]), float(df['High'].iloc[-3]),
-                       float(df['Low'].iloc[-3]),  float(df['Close'].iloc[-3]))
-    o2, h2, l2, c2 = (float(df['Open'].iloc[-2]), float(df['High'].iloc[-2]),
-                       float(df['Low'].iloc[-2]),  float(df['Close'].iloc[-2]))
-    o3, h3, l3, c3 = (float(df['Open'].iloc[-1]), float(df['High'].iloc[-1]),
-                       float(df['Low'].iloc[-1]),  float(df['Close'].iloc[-1]))
-
-    body3 = _body(o3, c3)
-    avg_body = (_body(o1, c1) + _body(o2, c2) + body3) / 3 or 0.01
-
-    # Bullish Engulfing
-    if c2 < o2 and c3 > o3 and o3 <= c2 and c3 >= o2:
-        bullish.append("Bullish Engulfing")
-
-    # Bearish Engulfing
-    if c2 > o2 and c3 < o3 and o3 >= c2 and c3 <= o2:
-        bearish.append("Bearish Engulfing")
-
-    # Hammer (bullish)
-    lower = _lower_shadow(l3, o3, c3)
-    upper = _upper_shadow(h3, o3, c3)
-    if body3 > 0 and lower >= 2 * body3 and upper <= body3 * 0.3:
-        bullish.append("Hammer")
-
-    # Shooting Star (bearish)
-    if body3 > 0 and upper >= 2 * body3 and lower <= body3 * 0.3:
-        bearish.append("Shooting Star")
-
-    # Morning Star (bullish, 3-bar)
-    body1 = _body(o1, c1)
-    body2 = _body(o2, c2)
-    if (c1 < o1 and body1 > avg_body and
-        body2 < body1 * 0.3 and
-        c3 > o3 and c3 > (o1 + c1) / 2):
-        bullish.append("Morning Star")
-
-    # Evening Star (bearish, 3-bar)
-    if (c1 > o1 and body1 > avg_body and
-        body2 < body1 * 0.3 and
-        c3 < o3 and c3 < (o1 + c1) / 2):
-        bearish.append("Evening Star")
-
-    # Piercing Line (bullish, 2-bar)
-    if (c2 < o2 and c3 > o3 and
-        o3 < l2 and c3 > (o2 + c2) / 2 and c3 < o2):
-        bullish.append("Piercing Line")
-
-    # Dark Cloud Cover (bearish, 2-bar)
-    if (c2 > o2 and c3 < o3 and
-        o3 > h2 and c3 < (o2 + c2) / 2 and c3 > o2):
-        bearish.append("Dark Cloud Cover")
-
-    # Three White Soldiers (bullish)
-    if (c1 > o1 and c2 > o2 and c3 > o3 and
-        c2 > c1 and c3 > c2 and
-        o2 > o1 and o3 > o2):
-        bullish.append("Three White Soldiers")
-
-    # Three Black Crows (bearish)
-    if (c1 < o1 and c2 < o2 and c3 < o3 and
-        c2 < c1 and c3 < c2 and
-        o2 < o1 and o3 < o2):
-        bearish.append("Three Black Crows")
-
-    return bullish, bearish
-
-
-# =====================================================================
-# Swing high / low helpers
-# =====================================================================
-
-def is_near_swing_low(df, lookback=20, tolerance=0.03):
-    if len(df) < lookback:
-        return False
-    recent_low = float(df['Low'].iloc[-lookback:].min())
-    last_close = float(df['Close'].iloc[-1])
-    if recent_low == 0:
-        return False
-    return (last_close - recent_low) / recent_low <= tolerance
-
-def is_near_swing_high(df, lookback=20, tolerance=0.03):
-    if len(df) < lookback:
-        return False
-    recent_high = float(df['High'].iloc[-lookback:].max())
-    last_close = float(df['Close'].iloc[-1])
-    if recent_high == 0:
-        return False
-    return (recent_high - last_close) / recent_high <= tolerance
+def compute_rvol(df):
+    """Calculate daily relative volume (Total Volume Today / Average Daily Volume)."""
+    dates = df.index.date
+    daily_volume = df['Volume'].groupby(dates).sum()
+    if len(daily_volume) < 2:
+        return 1.0
+    
+    today_vol = float(daily_volume.iloc[-1])
+    avg_vol = float(daily_volume.iloc[:-1].mean())
+    if avg_vol == 0:
+        return 0.0
+    return today_vol / avg_vol
 
 
 # =====================================================================
 # Analyze a single stock DataFrame
 # =====================================================================
 
-def _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh,
-                   swing_lookback, swing_tolerance):
-    """Run full reversal analysis on one stock. Returns dict or None."""
+def _analyze_stock(sym, df, rsi_bull_thresh=20, rsi_bear_thresh=80, swing_tolerance=0.03):
+    """Run high probability reversal analysis on one stock."""
     try:
-        last_vol = float(df['Volume'].iloc[-1])
         last_price = float(df['Close'].iloc[-1])
-
+        
+        fiftyTwoWeekHigh = df.attrs.get("fiftyTwoWeekHigh")
+        fiftyTwoWeekLow = df.attrs.get("fiftyTwoWeekLow")
+        previousClose = df.attrs.get("previousClose")
+        
+        if not previousClose or not fiftyTwoWeekHigh or not fiftyTwoWeekLow:
+            return None
+            
+        # 1. Change %
+        change_pct = ((last_price - previousClose) / previousClose) * 100
+        
+        # 2. RVOL
+        rvol = compute_rvol(df)
+        
+        # 3. 5-min RSI
         rsi_series = compute_rsi(df['Close'], 14)
         rsi_val = float(rsi_series.iloc[-1])
-        bull_pats, bear_pats = detect_patterns(df)
-        near_support = is_near_swing_low(df, swing_lookback, swing_tolerance)
-        near_resist  = is_near_swing_high(df, swing_lookback, swing_tolerance)
-
-        bullish_signals = []
-        bearish_signals = []
-
-        if not np.isnan(rsi_val):
-            if rsi_val < rsi_bull_thresh:
-                bullish_signals.append(f"RSI={rsi_val:.1f}")
-            if rsi_val > rsi_bear_thresh:
-                bearish_signals.append(f"RSI={rsi_val:.1f}")
-
-        bullish_signals.extend(bull_pats)
-        bearish_signals.extend(bear_pats)
-
-        if near_support:
-            bullish_signals.append("Near Support")
-        if near_resist:
-            bearish_signals.append("Near Resistance")
-
-        if bullish_signals or bearish_signals:
+        
+        # 4. VWAP Distance
+        vwap_series = compute_vwap(df)
+        current_vwap = float(vwap_series.iloc[-1])
+        vwap_dist = ((last_price - current_vwap) / current_vwap) * 100
+        
+        # 5. 52-Week Distance
+        dist_to_high = abs((last_price - fiftyTwoWeekHigh) / fiftyTwoWeekHigh)
+        dist_to_low = abs((last_price - fiftyTwoWeekLow) / fiftyTwoWeekLow)
+        
+        is_near_high = dist_to_high <= swing_tolerance
+        is_near_low = dist_to_low <= swing_tolerance
+        
+        # Fade (Short) Conditions
+        fade_conditions = [
+            change_pct > 5.0,
+            rvol > 2.0,
+            rsi_val > rsi_bear_thresh,
+            vwap_dist > 2.5,
+            is_near_high
+        ]
+        
+        # Bounce (Long) Conditions
+        bounce_conditions = [
+            change_pct < -5.0,
+            rvol > 2.0,
+            rsi_val < rsi_bull_thresh,
+            vwap_dist < -2.5,
+            is_near_low
+        ]
+        
+        is_fade = all(fade_conditions)
+        is_bounce = all(bounce_conditions)
+        
+        if is_fade or is_bounce:
+            reasons = f"Chg: {change_pct:+.1f}%, RVOL: {rvol:.1f}x, RSI: {rsi_val:.0f}, VWAP dist: {vwap_dist:+.1f}%"
+            if is_fade:
+                reasons += f", Near 52w High"
+            else:
+                reasons += f", Near 52w Low"
+                
             return {
                 "Ticker": sym,
                 "Last Price": round(last_price, 2),
-                "Volume": int(last_vol),
+                "Volume": int(df['Volume'].iloc[-1]),
                 "RSI": round(rsi_val, 1) if not np.isnan(rsi_val) else None,
-                "Bullish Signals": ", ".join(bullish_signals) if bullish_signals else "—",
-                "Bearish Signals": ", ".join(bearish_signals) if bearish_signals else "—",
+                "Bullish Signals": reasons if is_bounce else "—",
+                "Bearish Signals": reasons if is_fade else "—",
             }
-    except:
+    except Exception as e:
         pass
     return None
 
@@ -279,8 +226,8 @@ def _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh,
 # =====================================================================
 
 def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
-                     rsi_bull_thresh=30, rsi_bear_thresh=70,
-                     swing_lookback=20, swing_tolerance=0.03, extended_hours=False):
+                     rsi_bull_thresh=20, rsi_bear_thresh=80,
+                     swing_tolerance=0.03, extended_hours=False):
     """Scan a watchlist using direct Yahoo Finance API (cloud-safe)."""
     _reset_progress()
     scan_progress["status"] = "running"
@@ -299,9 +246,9 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
         _update_progress("downloading", f"Downloading {sym}...", i, tot,
                          ticker=sym, found=0)
 
-    interval = "1h" if extended_hours else "1d"
+    interval = "5m"
     includePrePost = "true" if extended_hours else "false"
-    fetch_days = 30 if extended_hours else 180
+    fetch_days = 10
 
     stock_data = fetch_batch(tickers, days=fetch_days, delay=0.05,
                              on_progress=_on_dl_progress, interval=interval, includePrePost=includePrePost)
@@ -328,11 +275,8 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
                          ticker=sym, found=len(results))
 
         try:
-            if extended_hours:
-                # 1h interval with extended hours produces ~16 candles per day. Check cumulative 24h volume.
-                recent_vol = float(df['Volume'].tail(16).sum())
-            else:
-                recent_vol = float(df['Volume'].iloc[-1])
+            today_date = df.index.date[-1]
+            recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
 
             last_price = float(df['Close'].iloc[-1])
 
@@ -341,8 +285,7 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
                 skipped_filter += 1
                 continue
 
-            result = _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh,
-                                    swing_lookback, swing_tolerance)
+            result = _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh, swing_tolerance)
             if result:
                 results.append(result)
                 print(f"  [{i+1}/{len(stock_data)}] {sym}... ✓ signal")
@@ -376,8 +319,8 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
 # =====================================================================
 
 def full_market_scan(min_volume=500_000, min_price=5.0,
-                     rsi_bull_thresh=30, rsi_bear_thresh=70,
-                     swing_lookback=20, swing_tolerance=0.03, extended_hours=False):
+                     rsi_bull_thresh=20, rsi_bear_thresh=80,
+                     swing_tolerance=0.03, extended_hours=False):
     """
     Scan the entire US stock market:
       1. Fetch all US ticker symbols
@@ -432,10 +375,8 @@ def full_market_scan(min_volume=500_000, min_price=5.0,
     candidates = []
     for sym, df in stock_data.items():
         try:
-            if extended_hours:
-                recent_vol = float(df['Volume'].tail(16).sum())
-            else:
-                recent_vol = float(df['Volume'].iloc[-1])
+            today_date = df.index.date[-1]
+            recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
 
             price = float(df['Close'].iloc[-1])
             if recent_vol >= min_volume and price >= min_price:
@@ -466,8 +407,7 @@ def full_market_scan(min_volume=500_000, min_price=5.0,
                          ticker=sym, found=len(results))
         scan_progress["eta_seconds"] = int(remaining)
 
-        result = _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh,
-                                swing_lookback, swing_tolerance)
+        result = _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh, swing_tolerance)
         if result:
             results.append(result)
 

@@ -121,6 +121,8 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false"):
         if not timestamps:
             return None
 
+        meta = result.get("meta", {})
+        
         quote = result["indicators"]["quote"][0]
 
         df = pd.DataFrame(
@@ -142,6 +144,10 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false"):
 
         # Convert Volume to int where possible
         df["Volume"] = df["Volume"].fillna(0).astype(np.int64)
+
+        df.attrs["fiftyTwoWeekHigh"] = meta.get("fiftyTwoWeekHigh")
+        df.attrs["fiftyTwoWeekLow"] = meta.get("fiftyTwoWeekLow")
+        df.attrs["previousClose"] = meta.get("previousClose", meta.get("chartPreviousClose"))
 
         return df if not df.empty else None
 
