@@ -146,7 +146,7 @@ def compute_rvol(df):
 # Analyze a single stock DataFrame
 # =====================================================================
 
-def _analyze_stock(sym, df, rsi_bull_thresh=20, rsi_bear_thresh=80, swing_tolerance=0.03):
+def _analyze_stock(sym, df, rsi_bull_thresh=25, rsi_bear_thresh=75, swing_tolerance=0.05):
     """Run high probability reversal analysis on one stock."""
     try:
         last_price = float(df['Close'].iloc[-1])
@@ -182,19 +182,19 @@ def _analyze_stock(sym, df, rsi_bull_thresh=20, rsi_bear_thresh=80, swing_tolera
         
         # Fade (Short) Conditions
         fade_conditions = [
-            change_pct > 5.0,
-            rvol > 2.0,
+            change_pct > 3.0,
+            rvol > 1.5,
             rsi_val > rsi_bear_thresh,
-            vwap_dist > 2.5,
+            vwap_dist > 1.5,
             is_near_high
         ]
         
         # Bounce (Long) Conditions
         bounce_conditions = [
-            change_pct < -5.0,
-            rvol > 2.0,
+            change_pct < -3.0,
+            rvol > 1.5,
             rsi_val < rsi_bull_thresh,
-            vwap_dist < -2.5,
+            vwap_dist < -1.5,
             is_near_low
         ]
         
@@ -226,8 +226,8 @@ def _analyze_stock(sym, df, rsi_bull_thresh=20, rsi_bear_thresh=80, swing_tolera
 # =====================================================================
 
 def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
-                     rsi_bull_thresh=20, rsi_bear_thresh=80,
-                     swing_tolerance=0.03, extended_hours=False):
+                     rsi_bull_thresh=25, rsi_bear_thresh=75,
+                     swing_tolerance=0.05, extended_hours=False):
     """Scan a watchlist using direct Yahoo Finance API (cloud-safe)."""
     _reset_progress()
     scan_progress["status"] = "running"
@@ -319,8 +319,8 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
 # =====================================================================
 
 def full_market_scan(min_volume=500_000, min_price=5.0,
-                     rsi_bull_thresh=20, rsi_bear_thresh=80,
-                     swing_tolerance=0.03, extended_hours=False):
+                     rsi_bull_thresh=25, rsi_bear_thresh=75,
+                     swing_tolerance=0.05, extended_hours=False):
     """
     Scan the entire US stock market:
       1. Fetch all US ticker symbols
