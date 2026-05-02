@@ -239,15 +239,19 @@ function showSkeleton() {
 // ── Build a single card ────────────────────────────────────
 
 function buildCard(item, index) {
-  const bullish = item["Bullish Signals"] && item["Bullish Signals"] !== "—"
-    ? item["Bullish Signals"].split(", ") : [];
-  const bearish = item["Bearish Signals"] && item["Bearish Signals"] !== "—"
-    ? item["Bearish Signals"].split(", ") : [];
+  const parseSignals = (str) => {
+    if (!str || str === "—") return [];
+    // Split by pipe first, then comma to get all individual reasons
+    return str.split(" | ").flatMap(s => s.split(", ")).map(s => s.trim());
+  };
+
+  const bullish = parseSignals(item["Bullish Signals"]);
+  const bearish = parseSignals(item["Bearish Signals"]);
 
   const rsi = item.RSI;
   const rsiCls = rsiClass(rsi);
 
-  const maxVol = Math.max(...scanData.map(d => d.Volume));
+  const maxVol = Math.max(...scanData.map(d => d.Volume), 1);
   const volPct = Math.round((item.Volume / maxVol) * 100);
 
   const bullPills = bullish.map(s =>

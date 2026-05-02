@@ -94,11 +94,28 @@ def get_us_tickers():
     except Exception as e:
         print(f"  Source 2 (NASDAQ 100): failed ({e})")
 
+    # ── Source 3: Major ETFs ──
+    etfs = {
+        "SPY", "QQQ", "IWM", "DIA", "VTI", "VEU", "VWO", "GLD", "SLV", "USO",
+        "XLF", "XLK", "XLE", "XLI", "XLV", "XLP", "XLU", "XLB", "XLY", "XLRE",
+        "XBI", "SMH", "KRE", "KBE", "GDX", "GDXJ", "TLT", "IEF", "LQD", "HYG",
+        "ARKK", "ARKG", "ARKF", "EEM", "EFA", "EWJ", "FXI", "VGK", "TQQQ", "SQQQ",
+        "SOXL", "SOXS", "LABU", "LABD", "UVXY", "VIXY", "UNG", "BOIL", "KOLD"
+    }
+    added_etfs = 0
+    for sym in etfs:
+        if sym not in tickers:
+            tickers.add(sym)
+            added_etfs += 1
+    print(f"  Source 3 (Major ETFs): added {added_etfs} unique ETFs (Total list: {len(etfs)})")
+    if "SPY" in tickers: print("  ✓ Verified: SPY is in the scan list")
+    if "QQQ" in tickers: print("  ✓ Verified: QQQ is in the scan list")
+
     # Remove known non-equity / test symbols
     exclude = {"TRUE", "NONE", "NULL", "CTEST", "NTEST", "ZTEST"}
     tickers -= exclude
 
-    print(f"  Total big cap tickers: {len(tickers)}")
+    print(f"  Final Ticker Count: {len(tickers)}")
     return sorted(tickers)
 
 
@@ -141,83 +158,149 @@ def compute_rvol(df):
         return 0.0
     return today_vol / avg_vol
 
+def compute_sma(series, length=200):
+    """Simple Moving Average."""
+    return series.rolling(window=length).mean()
+
+# =====================================================================
+# Candlestick Patterns & Trend Context
+# =====================================================================
+
+def detect_patterns(df):
+    """Identify Hammer, Shooting Star, and Engulfing patterns."""
+    if len(df) < 2:
+        return {"hammer": False, "star": False, "bull_engulf": False, "bear_engulf": False}
+    
+    curr = df.iloc[-1]
+    prev = df.iloc[-2]
+    
+    body = abs(curr['Close'] - curr['Open'])
+    total_range = curr['High'] - curr['Low']
+    if total_range == 0: total_range = 0.001
+    
+    upper_wick = curr['High'] - max(curr['Close'], curr['Open'])
+    lower_wick = min(curr['Close'], curr['Open']) - curr['Low']
+    
+    # 1. Hammer (Small body, long lower wick, tiny upper wick)
+    is_hammer = (lower_wick > 2 * body) and (upper_wick < 0.1 * total_range) and (body > 0)
+    
+    # 2. Shooting Star (Small body, long upper wick, tiny lower wick)
+    is_star = (upper_wick > 2 * body) and (lower_wick < 0.1 * total_range) and (body > 0)
+    
+    # 3. Bullish Engulfing (Green candle wraps previous Red candle)
+    is_bull_engulf = (curr['Close'] > curr['Open']) and (prev['Close'] < prev['Open']) and \
+                     (curr['Close'] >= prev['Open']) and (curr['Open'] <= prev['Close'])
+    
+    # 4. Bearish Engulfing (Red candle wraps previous Green candle)
+    is_bear_engulf = (curr['Close'] < curr['Open']) and (prev['Close'] > prev['Open']) and \
+                     (curr['Close'] <= prev['Open']) and (curr['Open'] >= prev['Close'])
+    
+    return {
+        "hammer": is_hammer,
+        "star": is_star,
+        "bull_engulf": is_bull_engulf,
+        "bear_engulf": is_bear_engulf
+    }
+
+def get_trend_context(df, days=5):
+    """Check if the prior trend was bullish or bearish."""
+    if len(df) < days + 1:
+        return "neutral"
+    
+    # Compare current price to price 5 days ago
+    start_price = df['Close'].iloc[-(days+1)]
+    end_price = df['Close'].iloc[-2] # Look at the trend UP TO yesterday
+    
+    change = ((end_price - start_price) / start_price) * 100
+    
+    if change < -2.0: return "downtrend"
+    if change > 2.0: return "uptrend"
+    return "flat"
+
 
 # =====================================================================
 # Analyze a single stock DataFrame
 # =====================================================================
 
-def _analyze_stock(sym, df, rsi_bull_thresh=25, rsi_bear_thresh=75, swing_tolerance=0.05):
-    """Run high probability reversal analysis on one stock."""
+def _analyze_stock(sym, df, rsi_bull_thresh=30, rsi_bear_thresh=70, swing_tolerance=0.03):
+    """Run institutional-grade reversal analysis based on new criteria."""
     try:
-        last_price = float(df['Close'].iloc[-1])
+        if len(df) < 20: return None
         
+        curr = df.iloc[-1]
+        last_price = float(curr['Close'])
+        
+        # 1. Metadata
         fiftyTwoWeekHigh = df.attrs.get("fiftyTwoWeekHigh")
         fiftyTwoWeekLow = df.attrs.get("fiftyTwoWeekLow")
         previousClose = df.attrs.get("previousClose")
+        if not previousClose: previousClose = df['Close'].iloc[-2]
         
-        if not previousClose or not fiftyTwoWeekHigh or not fiftyTwoWeekLow:
-            return None
-            
-        # 1. Change %
-        change_pct = ((last_price - previousClose) / previousClose) * 100
-        
-        # 2. RVOL
+        # 2. RVOL (20-day avg)
         rvol = compute_rvol(df)
         
-        # 3. 5-min RSI
+        # 3. RSI
         rsi_series = compute_rsi(df['Close'], 14)
         rsi_val = float(rsi_series.iloc[-1])
         
-        # 4. VWAP Distance
-        vwap_series = compute_vwap(df)
-        current_vwap = float(vwap_series.iloc[-1])
-        vwap_dist = ((last_price - current_vwap) / current_vwap) * 100
+        # 4. SMA 200
+        sma200_series = compute_sma(df['Close'], 200)
+        sma200 = float(sma200_series.iloc[-1]) if not np.isnan(sma200_series.iloc[-1]) else None
         
-        # 5. 52-Week Distance
-        dist_to_high = abs((last_price - fiftyTwoWeekHigh) / fiftyTwoWeekHigh)
-        dist_to_low = abs((last_price - fiftyTwoWeekLow) / fiftyTwoWeekLow)
+        # 5. Range Positioning (Close vs High/Low of the day)
+        day_range = curr['High'] - curr['Low']
+        if day_range == 0: day_range = 0.01
+        range_pos = (curr['Close'] - curr['Low']) / day_range # 0 to 1
         
-        is_near_high = dist_to_high <= swing_tolerance
-        is_near_low = dist_to_low <= swing_tolerance
+        # 6. Candlestick Patterns & Trend
+        patterns = detect_patterns(df)
+        trend = get_trend_context(df, days=5)
         
-        # Fade (Short) Conditions
-        fade_conditions = [
-            change_pct > 3.0,
-            rvol > 1.5,
-            rsi_val > rsi_bear_thresh,
-            vwap_dist > 1.5,
-            is_near_high
-        ]
-        
-        # Bounce (Long) Conditions
-        bounce_conditions = [
-            change_pct < -3.0,
-            rvol > 1.5,
-            rsi_val < rsi_bull_thresh,
-            vwap_dist < -1.5,
-            is_near_low
-        ]
-        
-        is_fade = all(fade_conditions)
-        is_bounce = all(bounce_conditions)
-        
-        if is_fade or is_bounce:
-            reasons = f"Chg: {change_pct:+.1f}%, RVOL: {rvol:.1f}x, RSI: {rsi_val:.0f}, VWAP dist: {vwap_dist:+.1f}%"
-            if is_fade:
-                reasons += f", Near 52w High"
-            else:
-                reasons += f", Near 52w Low"
-                
+        # 7. Support/Resistance Distance
+        near_200sma = abs((last_price - sma200) / sma200) < 0.02 if sma200 else False
+        near_52w_low = abs((last_price - fiftyTwoWeekLow) / fiftyTwoWeekLow) < 0.03 if fiftyTwoWeekLow else False
+        near_52w_high = abs((last_price - fiftyTwoWeekHigh) / fiftyTwoWeekHigh) < 0.03 if fiftyTwoWeekHigh else False
+
+        # --- BULLISH REVERSAL (BOUNCE) ---
+        is_bullish = (
+            (patterns['hammer'] or patterns['bull_engulf']) and
+            (rsi_val < rsi_bull_thresh) and
+            (rvol > 1.4) and
+            (range_pos > 0.50) and
+            (near_200sma or near_52w_low or trend == "downtrend")
+        )
+
+        # --- BEARISH REVERSAL (FADE) ---
+        is_bearish = (
+            (patterns['star'] or patterns['bear_engulf']) and
+            (rsi_val > rsi_bear_thresh) and
+            (rvol > 1.4) and
+            (range_pos < 0.50) and
+            (near_200sma or near_52w_high or trend == "uptrend")
+        )
+
+        if is_bullish or is_bearish:
+            type_str = "Bullish Reversal" if is_bullish else "Bearish Reversal"
+            signal_desc = []
+            if patterns['hammer']: signal_desc.append("Hammer")
+            if patterns['bull_engulf']: signal_desc.append("Bull Engulfing")
+            if patterns['star']: signal_desc.append("Shooting Star")
+            if patterns['bear_engulf']: signal_desc.append("Bear Engulfing")
+            
+            reasons = f"{', '.join(signal_desc)} | RSI: {rsi_val:.0f} | RVOL: {rvol:.1f}x | Range: {range_pos*100:.0f}%"
+            if near_200sma: reasons += " | Near 200 SMA"
+            if trend != "neutral": reasons += f" | Prior {trend}"
+
             return {
                 "Ticker": sym,
                 "Last Price": round(last_price, 2),
-                "Volume": int(df['Volume'].iloc[-1]),
-                "RSI": round(rsi_val, 1) if not np.isnan(rsi_val) else None,
-                "Bullish Signals": reasons if is_bounce else "—",
-                "Bearish Signals": reasons if is_fade else "—",
+                "Volume": int(curr['Volume']),
+                "RSI": round(rsi_val, 1),
+                "Bullish Signals": reasons if is_bullish else "—",
+                "Bearish Signals": reasons if is_bearish else "—",
             }
     except Exception as e:
-        pass
+        print(f"  Error analyzing {sym}: {e}")
     return None
 
 
@@ -248,7 +331,8 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
 
     interval = "5m"
     includePrePost = "true" if extended_hours else "false"
-    fetch_days = 10
+    # Need enough bars for 200 SMA on 5m chart (200 * 5m = ~17 hours, 10 days is plenty)
+    fetch_days = 10 
 
     stock_data = fetch_batch(tickers, days=fetch_days, delay=0.05,
                              on_progress=_on_dl_progress, interval=interval, includePrePost=includePrePost)
@@ -361,7 +445,8 @@ def full_market_scan(min_volume=500_000, min_price=5.0,
 
     interval = "1h" if extended_hours else "1d"
     includePrePost = "true" if extended_hours else "false"
-    fetch_days = 30 if extended_hours else 180
+    # 260+ days ensures we have a full year of data for the 200 SMA
+    fetch_days = 60 if extended_hours else 280 
 
     stock_data = fetch_batch_concurrent(
         all_tickers, days=fetch_days, max_workers=8,
