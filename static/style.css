@@ -593,6 +593,37 @@ body {
   border: 1px solid rgba(239, 68, 68, 0.2);
 }
 
+/* Option Recommendation */
+.card__option {
+  margin-top: 16px;
+  padding: 12px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px dashed var(--accent);
+  border-radius: var(--radius-md);
+  position: relative;
+}
+
+.option-tag {
+  position: absolute;
+  top: -9px;
+  left: 12px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.05em;
+}
+
+.option-val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
 /* ── Empty / Loading states ──────────────────────────────── */
 
 .empty-state {

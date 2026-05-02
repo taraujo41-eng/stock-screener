@@ -155,6 +155,63 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false"):
         return None
 
 
+# ── Options Chain Download ──────────────────────────────────────────
+
+def fetch_options_chain(ticker):
+    """
+    Fetch the option chain for a ticker.
+    Returns {expirations: [], chains: []} or None.
+    """
+    session, crumb = _ensure_session()
+    
+    url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker}"
+    params = {}
+    if crumb: params["crumb"] = crumb
+
+    try:
+        resp = session.get(url, params=params, timeout=15)
+        if resp.status_code != 200:
+            return None
+        
+        data = resp.json()
+        result = data.get("optionChain", {}).get("result", [])
+        if not result:
+            return None
+        
+        result = result[0]
+        expirations = result.get("expirationDates", [])
+        
+        # We need to fetch chains for specific expirations later in the scanner
+        # For now, return the metadata and the first chain (usually front month)
+        return {
+            "ticker": ticker,
+            "expirations": expirations,
+            "underlyingPrice": result.get("quote", {}).get("regularMarketPrice"),
+            "firstChain": result.get("options", [{}])[0]
+        }
+    except Exception:
+        return None
+
+def fetch_options_for_expiration(ticker, expiration_ts):
+    """Fetch the full option chain for a specific expiration date."""
+    session, crumb = _ensure_session()
+    url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker}"
+    params = {"date": expiration_ts}
+    if crumb: params["crumb"] = crumb
+
+    try:
+        resp = session.get(url, params=params, timeout=15)
+        if resp.status_code != 200: return None
+        
+        data = resp.json()
+        result = data.get("optionChain", {}).get("result", [])
+        if not result: return None
+        
+        return result[0].get("options", [{}])[0]
+    except Exception:
+        return None
+
+
 # ── Batch download (sequential — for watchlists) ────────────────────
 
 def fetch_batch(tickers, days=180, delay=0.05, on_progress=None, interval="1d", includePrePost="false"):

@@ -17,7 +17,10 @@ from datetime import datetime, timedelta
 from io import StringIO
 import time
 import warnings
-from data_fetcher import fetch_batch, fetch_batch_concurrent, test_connection
+from data_fetcher import (
+    fetch_batch, fetch_batch_concurrent, test_connection,
+    fetch_options_chain, fetch_options_for_expiration
+)
 
 warnings.filterwarnings("ignore")
 
@@ -217,6 +220,93 @@ def get_trend_context(df, days=5):
     if change > 2.0: return "uptrend"
     return "flat"
 
+# =====================================================================
+# Options Strategy: Directional Selection
+# =====================================================================
+
+def find_best_option(ticker, signal_type, last_price):
+    """
+    Find the ideal contract:
+    - 30-60 DTE
+    - Delta 0.40-0.70 (Approx by ITM/ATM strikes)
+    - High Volume & OI (>500)
+    - Tight Spread (<10%)
+    """
+    try:
+        chain_meta = fetch_options_chain(ticker)
+        if not chain_meta: return None
+        
+        now = time.time()
+        # 1. Filter for 30-60 DTE
+        valid_exps = []
+        for exp in chain_meta["expirations"]:
+            dte = (exp - now) / 86400
+            if 25 <= dte <= 65: # Allow slight buffer around 30-60
+                valid_exps.append(exp)
+        
+        if not valid_exps: return None
+        
+        # We'll check the most liquid looking expiration in our range
+        best_contract = None
+        
+        for exp_ts in valid_exps:
+            chain = fetch_options_for_expiration(ticker, exp_ts)
+            if not chain: continue
+            
+            contracts = chain.get("calls" if signal_type == "bullish" else "puts", [])
+            
+            for c in contracts:
+                strike = c.get("strike")
+                vol = c.get("volume", 0)
+                oi = c.get("openInterest", 0)
+                bid = c.get("bid", 0)
+                ask = c.get("ask", 0)
+                iv = c.get("impliedVolatility", 0)
+                
+                # Liquidity Filter
+                if vol < 300 or oi < 300: continue # Adjusted slightly lower for scan
+                
+                mid = (bid + ask) / 2
+                if mid <= 0: continue
+                spread_pct = ((ask - bid) / mid) * 100
+                if spread_pct > 12: continue # Tight spread rule
+                
+                # Delta Approximation (0.40-0.70)
+                # For Calls: 0.70 delta is ~3% ITM, 0.40 delta is ~2% OTM
+                # For Puts: Inverse
+                dist_pct = (strike - last_price) / last_price
+                
+                is_valid_strike = False
+                if signal_type == "bullish":
+                    # Call: Strike should be between -4% (ITM) and +1% (ATM/OTM)
+                    if -0.05 <= dist_pct <= 0.01: is_valid_strike = True
+                else:
+                    # Put: Strike should be between -1% (OTM/ATM) and +5% (ITM)
+                    if -0.01 <= dist_pct <= 0.05: is_valid_strike = True
+                
+                if not is_valid_strike: continue
+                
+                # Pick the contract with the highest Volume + OI (Liquidity King)
+                score = vol + oi
+                if not best_contract or score > best_contract["score"]:
+                    dte_days = int((exp_ts - now) / 86400)
+                    best_contract = {
+                        "symbol": c.get("contractSymbol"),
+                        "strike": strike,
+                        "type": "CALL" if signal_type == "bullish" else "PUT",
+                        "exp": datetime.fromtimestamp(exp_ts).strftime("%b %d"),
+                        "dte": dte_days,
+                        "mid": round(mid, 2),
+                        "iv": round(iv * 100, 1),
+                        "score": score
+                    }
+            
+            if best_contract: break # Found a solid candidate in this expiration
+            
+        return best_contract
+    except Exception:
+        return None
+
 
 # =====================================================================
 # Analyze a single stock DataFrame
@@ -291,6 +381,10 @@ def _analyze_stock(sym, df, rsi_bull_thresh=30, rsi_bear_thresh=70, swing_tolera
             if near_200sma: reasons += " | Near 200 SMA"
             if trend != "neutral": reasons += f" | Prior {trend}"
 
+            # --- FIND BEST OPTION CONTRACT ---
+            opt = find_best_option(sym, "bullish" if is_bullish else "bearish", last_price)
+            opt_str = f"{opt['exp']} ${opt['strike']} {opt['type']} (@${opt['mid']}, IV: {opt['iv']}%)" if opt else "No liquid contract found"
+
             return {
                 "Ticker": sym,
                 "Last Price": round(last_price, 2),
@@ -298,6 +392,7 @@ def _analyze_stock(sym, df, rsi_bull_thresh=30, rsi_bear_thresh=70, swing_tolera
                 "RSI": round(rsi_val, 1),
                 "Bullish Signals": reasons if is_bullish else "—",
                 "Bearish Signals": reasons if is_bearish else "—",
+                "Suggested Option": opt_str
             }
     except Exception as e:
         print(f"  Error analyzing {sym}: {e}")

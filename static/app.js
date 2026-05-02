@@ -284,6 +284,12 @@ function buildCard(item, index) {
         ${bullish.length ? `<div class="signal-row"><span class="signal-row__icon">🟢</span>${bullPills}</div>` : ""}
         ${bearish.length ? `<div class="signal-row"><span class="signal-row__icon">🔴</span>${bearPills}</div>` : ""}
       </div>
+      ${item["Suggested Option"] && item["Suggested Option"] !== "—" ? `
+        <div class="card__option">
+          <div class="option-tag">TRADE IDEA</div>
+          <div class="option-val">${item["Suggested Option"]}</div>
+        </div>
+      ` : ""}
     </div>
   `;
 }
