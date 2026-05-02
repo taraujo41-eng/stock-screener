@@ -353,20 +353,14 @@ def _analyze_stock(sym, df, rsi_bull_thresh=30, rsi_bear_thresh=70, swing_tolera
 
         # --- BULLISH REVERSAL (BOUNCE) ---
         is_bullish = (
-            (patterns['hammer'] or patterns['bull_engulf']) and
-            (rsi_val < rsi_bull_thresh) and
-            (rvol > 1.4) and
-            (range_pos > 0.50) and
-            (near_200sma or near_52w_low or trend == "downtrend")
+            (rsi_val < 60) and
+            (rvol > 0.5)
         )
 
         # --- BEARISH REVERSAL (FADE) ---
         is_bearish = (
-            (patterns['star'] or patterns['bear_engulf']) and
-            (rsi_val > rsi_bear_thresh) and
-            (rvol > 1.4) and
-            (range_pos < 0.50) and
-            (near_200sma or near_52w_high or trend == "uptrend")
+            (rsi_val > 40) and
+            (rvol > 0.5)
         )
 
         if is_bullish or is_bearish:
