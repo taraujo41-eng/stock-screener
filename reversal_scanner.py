@@ -347,16 +347,16 @@ def _analyze_stock(sym, df, rsi_bull_thresh=30, rsi_bear_thresh=70, swing_tolera
         trend = get_trend_context(df, days=5)
         
         # 7. Support/Resistance Distance
-        near_200sma = abs((last_price - sma200) / sma200) < 0.02 if sma200 else False
-        near_52w_low = abs((last_price - fiftyTwoWeekLow) / fiftyTwoWeekLow) < 0.03 if fiftyTwoWeekLow else False
-        near_52w_high = abs((last_price - fiftyTwoWeekHigh) / fiftyTwoWeekHigh) < 0.03 if fiftyTwoWeekHigh else False
+        near_200sma = abs((last_price - sma200) / sma200) < 0.05 if sma200 else False
+        near_52w_low = abs((last_price - fiftyTwoWeekLow) / fiftyTwoWeekLow) < 0.05 if fiftyTwoWeekLow else False
+        near_52w_high = abs((last_price - fiftyTwoWeekHigh) / fiftyTwoWeekHigh) < 0.05 if fiftyTwoWeekHigh else False
 
         # --- BULLISH REVERSAL (BOUNCE) ---
         is_bullish = (
             (patterns['hammer'] or patterns['bull_engulf']) and
             (rsi_val < rsi_bull_thresh) and
-            (rvol > 1.4) and
-            (range_pos > 0.50) and
+            (rvol > 1.1) and
+            (range_pos > 0.35) and
             (near_200sma or near_52w_low or trend == "downtrend")
         )
 
@@ -364,8 +364,8 @@ def _analyze_stock(sym, df, rsi_bull_thresh=30, rsi_bear_thresh=70, swing_tolera
         is_bearish = (
             (patterns['star'] or patterns['bear_engulf']) and
             (rsi_val > rsi_bear_thresh) and
-            (rvol > 1.4) and
-            (range_pos < 0.50) and
+            (rvol > 1.1) and
+            (range_pos < 0.65) and
             (near_200sma or near_52w_high or trend == "uptrend")
         )
 
@@ -404,7 +404,7 @@ def _analyze_stock(sym, df, rsi_bull_thresh=30, rsi_bear_thresh=70, swing_tolera
 # =====================================================================
 
 def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
-                     rsi_bull_thresh=25, rsi_bear_thresh=75,
+                     rsi_bull_thresh=35, rsi_bear_thresh=65,
                      swing_tolerance=0.05, extended_hours=False):
     """Scan a watchlist using direct Yahoo Finance API (cloud-safe)."""
     _reset_progress()
@@ -498,7 +498,7 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
 # =====================================================================
 
 def full_market_scan(min_volume=500_000, min_price=5.0,
-                     rsi_bull_thresh=25, rsi_bear_thresh=75,
+                     rsi_bull_thresh=35, rsi_bear_thresh=65,
                      swing_tolerance=0.05, extended_hours=False):
     """
     Scan the entire US stock market:
