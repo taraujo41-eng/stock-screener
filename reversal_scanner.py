@@ -165,6 +165,45 @@ def compute_sma(series, length=200):
     """Simple Moving Average."""
     return series.rolling(window=length).mean()
 
+def compute_macd(series, fast=12, slow=26, signal=9):
+    """Calculate MACD Line, Signal Line, and Histogram."""
+    ema_fast = series.ewm(span=fast, adjust=False).mean()
+    ema_slow = series.ewm(span=slow, adjust=False).mean()
+    macd_line = ema_fast - ema_slow
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    histogram = macd_line - signal_line
+    return macd_line, signal_line, histogram
+
+def detect_rsi_divergence(price_series, rsi_series, lookback=20):
+    """
+    Check for RSI Divergence in the last `lookback` periods.
+    Returns (bull_div, bear_div)
+    """
+    if len(price_series) < lookback + 2:
+        return False, False
+        
+    # The current candle
+    curr_price = float(price_series.iloc[-1])
+    curr_rsi = float(rsi_series.iloc[-1])
+    
+    # The lookback window (excluding the last 2 candles to ensure a distinct swing)
+    window_price = price_series.iloc[-(lookback+2):-2]
+    window_rsi = rsi_series.iloc[-(lookback+2):-2]
+    
+    lowest_price_in_window = float(window_price.min())
+    highest_price_in_window = float(window_price.max())
+    
+    lowest_rsi_in_window = float(window_rsi[window_price == lowest_price_in_window].min()) if not window_price[window_price == lowest_price_in_window].empty else 100
+    highest_rsi_in_window = float(window_rsi[window_price == highest_price_in_window].max()) if not window_price[window_price == highest_price_in_window].empty else 0
+
+    # Bullish Divergence: Price made a lower low, but RSI made a higher low (must be oversold territory)
+    bull_div = (curr_price < lowest_price_in_window) and (curr_rsi > lowest_rsi_in_window) and (curr_rsi < 45)
+    
+    # Bearish Divergence: Price made a higher high, but RSI made a lower high (must be overbought territory)
+    bear_div = (curr_price > highest_price_in_window) and (curr_rsi < highest_rsi_in_window) and (curr_rsi > 55)
+    
+    return bull_div, bear_div
+
 # =====================================================================
 # Candlestick Patterns & Trend Context
 # =====================================================================
@@ -359,35 +398,60 @@ def _analyze_stock(sym, df, rsi_bull_thresh=30, rsi_bear_thresh=70, swing_tolera
         near_52w_low = abs((last_price - fiftyTwoWeekLow) / fiftyTwoWeekLow) < 0.05 if fiftyTwoWeekLow else False
         near_52w_high = abs((last_price - fiftyTwoWeekHigh) / fiftyTwoWeekHigh) < 0.05 if fiftyTwoWeekHigh else False
 
+        # 8. MACD
+        macd_line, signal_line, macd_hist = compute_macd(df['Close'])
+        is_macd_bull_cross = (macd_hist.iloc[-1] > 0) and (macd_hist.iloc[-2] < 0) and (macd_line.iloc[-1] < 0)
+        is_macd_bear_cross = (macd_hist.iloc[-1] < 0) and (macd_hist.iloc[-2] > 0) and (macd_line.iloc[-1] > 0)
+
+        # 9. RSI Divergence
+        bull_div, bear_div = detect_rsi_divergence(df['Close'], rsi_series, lookback=20)
+
+        # 10. Rubber Band Extension (20 SMA)
+        sma20_series = compute_sma(df['Close'], 20)
+        sma20 = float(sma20_series.iloc[-1]) if not np.isnan(sma20_series.iloc[-1]) else None
+        bull_ext = (last_price < sma20 * 0.92) if sma20 else False # >8% below SMA20
+        bear_ext = (last_price > sma20 * 1.08) if sma20 else False # >8% above SMA20
+
         # --- BULLISH REVERSAL (BOUNCE) ---
-        is_bullish = (
+        is_bull_candle = (
             (patterns['hammer'] or patterns['bull_engulf'] or patterns['bottoming_tail']) and
             (rsi_val < rsi_bull_thresh) and
             (rvol > 1.1) and
             (range_pos > 0.35) and
             (near_200sma or near_52w_low or trend == "downtrend")
         )
+        is_bullish = is_bull_candle or bull_div or is_macd_bull_cross or bull_ext
 
         # --- BEARISH REVERSAL (FADE) ---
-        is_bearish = (
+        is_bear_candle = (
             (patterns['star'] or patterns['bear_engulf'] or patterns['topping_tail']) and
             (rsi_val > rsi_bear_thresh) and
             (rvol > 1.1) and
             (range_pos < 0.65) and
             (near_200sma or near_52w_high or trend == "uptrend")
         )
+        is_bearish = is_bear_candle or bear_div or is_macd_bear_cross or bear_ext
 
         if is_bullish or is_bearish:
             type_str = "Bullish Reversal" if is_bullish else "Bearish Reversal"
-            signal_desc = []
-            if patterns['hammer']: signal_desc.append("Hammer")
-            if patterns['bull_engulf']: signal_desc.append("Bull Engulfing")
-            if patterns['bottoming_tail']: signal_desc.append("Bottoming Tail")
-            if patterns['star']: signal_desc.append("Shooting Star")
-            if patterns['bear_engulf']: signal_desc.append("Bear Engulfing")
-            if patterns['topping_tail']: signal_desc.append("Topping Tail")
             
-            reasons = f"{', '.join(signal_desc)} | RSI: {rsi_val:.0f} | RVOL: {rvol:.1f}x | Range: {range_pos*100:.0f}%"
+            # Identify which strategy triggered
+            strat_tags = []
+            if (is_bull_candle if is_bullish else is_bear_candle):
+                if patterns['hammer']: strat_tags.append("Hammer")
+                if patterns['bull_engulf']: strat_tags.append("Bull Engulfing")
+                if patterns['bottoming_tail']: strat_tags.append("Bottoming Tail")
+                if patterns['star']: strat_tags.append("Shooting Star")
+                if patterns['bear_engulf']: strat_tags.append("Bear Engulfing")
+                if patterns['topping_tail']: strat_tags.append("Topping Tail")
+            
+            if (bull_div if is_bullish else bear_div): strat_tags.append("RSI Divergence")
+            if (is_macd_bull_cross if is_bullish else is_macd_bear_cross): strat_tags.append("MACD Cross")
+            if (bull_ext if is_bullish else bear_ext): strat_tags.append("Extension (>8%)")
+            
+            reasons = f"[{' | '.join(strat_tags)}] RSI: {rsi_val:.0f} | RVOL: {rvol:.1f}x"
+            if (is_bull_candle if is_bullish else is_bear_candle):
+                reasons += f" | Range: {range_pos*100:.0f}%"
             if near_200sma: reasons += " | Near 200 SMA"
             if trend != "neutral": reasons += f" | Prior {trend}"
 
