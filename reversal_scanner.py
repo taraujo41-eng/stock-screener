@@ -170,9 +170,9 @@ def compute_sma(series, length=200):
 # =====================================================================
 
 def detect_patterns(df):
-    """Identify Hammer, Shooting Star, and Engulfing patterns."""
+    """Identify Hammer, Shooting Star, Engulfing, and Tail patterns."""
     if len(df) < 2:
-        return {"hammer": False, "star": False, "bull_engulf": False, "bear_engulf": False}
+        return {"hammer": False, "star": False, "bull_engulf": False, "bear_engulf": False, "bottoming_tail": False, "topping_tail": False}
     
     curr = df.iloc[-1]
     prev = df.iloc[-2]
@@ -198,11 +198,19 @@ def detect_patterns(df):
     is_bear_engulf = (curr['Close'] < curr['Open']) and (prev['Close'] > prev['Open']) and \
                      (curr['Close'] <= prev['Open']) and (curr['Open'] >= prev['Close'])
     
+    # 5. Bottoming Tail (Lower wick >= 75%, body <= 25%)
+    is_bottoming_tail = (lower_wick >= 0.75 * total_range) and (body <= 0.25 * total_range)
+    
+    # 6. Topping Tail (Upper wick >= 75%, body <= 25%)
+    is_topping_tail = (upper_wick >= 0.75 * total_range) and (body <= 0.25 * total_range)
+    
     return {
         "hammer": is_hammer,
         "star": is_star,
         "bull_engulf": is_bull_engulf,
-        "bear_engulf": is_bear_engulf
+        "bear_engulf": is_bear_engulf,
+        "bottoming_tail": is_bottoming_tail,
+        "topping_tail": is_topping_tail
     }
 
 def get_trend_context(df, days=5):
@@ -353,7 +361,7 @@ def _analyze_stock(sym, df, rsi_bull_thresh=30, rsi_bear_thresh=70, swing_tolera
 
         # --- BULLISH REVERSAL (BOUNCE) ---
         is_bullish = (
-            (patterns['hammer'] or patterns['bull_engulf']) and
+            (patterns['hammer'] or patterns['bull_engulf'] or patterns['bottoming_tail']) and
             (rsi_val < rsi_bull_thresh) and
             (rvol > 1.1) and
             (range_pos > 0.35) and
@@ -362,7 +370,7 @@ def _analyze_stock(sym, df, rsi_bull_thresh=30, rsi_bear_thresh=70, swing_tolera
 
         # --- BEARISH REVERSAL (FADE) ---
         is_bearish = (
-            (patterns['star'] or patterns['bear_engulf']) and
+            (patterns['star'] or patterns['bear_engulf'] or patterns['topping_tail']) and
             (rsi_val > rsi_bear_thresh) and
             (rvol > 1.1) and
             (range_pos < 0.65) and
@@ -374,8 +382,10 @@ def _analyze_stock(sym, df, rsi_bull_thresh=30, rsi_bear_thresh=70, swing_tolera
             signal_desc = []
             if patterns['hammer']: signal_desc.append("Hammer")
             if patterns['bull_engulf']: signal_desc.append("Bull Engulfing")
+            if patterns['bottoming_tail']: signal_desc.append("Bottoming Tail")
             if patterns['star']: signal_desc.append("Shooting Star")
             if patterns['bear_engulf']: signal_desc.append("Bear Engulfing")
+            if patterns['topping_tail']: signal_desc.append("Topping Tail")
             
             reasons = f"{', '.join(signal_desc)} | RSI: {rsi_val:.0f} | RVOL: {rvol:.1f}x | Range: {range_pos*100:.0f}%"
             if near_200sma: reasons += " | Near 200 SMA"
