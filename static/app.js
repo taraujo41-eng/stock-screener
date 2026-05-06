@@ -241,8 +241,9 @@ function showSkeleton() {
 function buildCard(item, index) {
   const parseSignals = (str) => {
     if (!str || str === "—") return [];
-    // Split by pipe first, then comma to get all individual reasons
-    return str.split(" | ").flatMap(s => s.split(", ")).map(s => s.trim());
+    // Remove outer brackets, then split by pipe
+    const inner = str.replace(/^\[/, '').replace(/\]$/, '');
+    return inner.split(" | ").map(s => s.trim()).filter(s => s);
   };
 
   const bullish = parseSignals(item["Bullish Signals"]);
@@ -253,6 +254,10 @@ function buildCard(item, index) {
 
   const maxVol = Math.max(...scanData.map(d => d.Volume), 1);
   const volPct = Math.round((item.Volume / maxVol) * 100);
+
+  const grade = item.Grade || "B";
+  const score = item.Score || 0;
+  const gradeCls = grade === "A+" ? "grade--aplus" : grade === "A" ? "grade--a" : "grade--b";
 
   const bullPills = bullish.map(s =>
     `<span class="pill pill--bull">${s}</span>`
@@ -265,7 +270,10 @@ function buildCard(item, index) {
   return `
     <div class="card" style="animation-delay: ${Math.min(index * 0.04, 1.2)}s">
       <div class="card__top">
-        <div class="card__ticker">${item.Ticker}</div>
+        <div class="card__ticker-wrap">
+          <div class="card__ticker">${item.Ticker}</div>
+          <div class="grade-badge ${gradeCls}">${grade} <span class="grade-badge__score">(${score}pts)</span></div>
+        </div>
         <div class="card__price">$${item["Last Price"].toFixed(2)}</div>
       </div>
       <div class="card__meta">
@@ -342,7 +350,7 @@ function updateStats() {
 // ── Display results (shared logic) ─────────────────────────
 
 function displayResults(data) {
-  scanData = data.results || [];
+  scanData = (data.results || []).sort((a, b) => (b.Score || 0) - (a.Score || 0));
 
   document.getElementById("statsBar").classList.remove("hidden");
   document.getElementById("timestamp").classList.remove("hidden");
