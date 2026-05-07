@@ -469,7 +469,7 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
         # WEIGHTED SCORING SYSTEM
         # ═══════════════════════════════════════════════════════
         
-        MIN_SCORE = 4  # Minimum points to fire a signal
+        MIN_SCORE = 7  # Only A+ signals (highest confidence)
 
         # --- BULLISH SCORE ---
         bull_score = 0
