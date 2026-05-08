@@ -31,18 +31,61 @@ function fmtEta(seconds) {
   return `~${m}m ${s}s left`;
 }
 
+// ── Local storage helpers for watchlist persistence ────────
+
+function saveWatchlistLocal(list) {
+  try {
+    localStorage.setItem("scanner_watchlist", JSON.stringify(list));
+  } catch (e) {
+    console.warn("Failed to save watchlist to localStorage:", e);
+  }
+}
+
+function loadWatchlistLocal() {
+  try {
+    const raw = localStorage.getItem("scanner_watchlist");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (e) {
+    console.warn("Failed to load watchlist from localStorage:", e);
+  }
+  return null;
+}
+
 // ── Load watchlist on startup ──────────────────────────────
 
 async function loadWatchlist() {
-  try {
-    const res = await fetch("/api/watchlist");
-    const data = await res.json();
-    if (data.ok) {
-      watchlist = data.watchlist;
-      updateModeDesc();
+  // 1. Check localStorage first (persists across server restarts)
+  const localList = loadWatchlistLocal();
+
+  if (localList) {
+    // Use the locally saved watchlist and sync it to the server
+    watchlist = localList;
+    updateModeDesc();
+    try {
+      await fetch("/api/watchlist", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ watchlist: localList }),
+      });
+    } catch (e) {
+      console.warn("Failed to sync watchlist to server:", e);
     }
-  } catch (e) {
-    console.error("Failed to load watchlist:", e);
+  } else {
+    // No local data — load from server (first visit)
+    try {
+      const res = await fetch("/api/watchlist");
+      const data = await res.json();
+      if (data.ok) {
+        watchlist = data.watchlist;
+        saveWatchlistLocal(watchlist);
+        updateModeDesc();
+      }
+    } catch (e) {
+      console.error("Failed to load watchlist:", e);
+    }
   }
 }
 
@@ -179,6 +222,7 @@ async function addTicker() {
 
     if (data.ok) {
       watchlist = data.watchlist;
+      saveWatchlistLocal(watchlist);
       input.value = "";
       renderWatchlistEditor();
       showWatchlistMsg(`${ticker} added ✓`);
@@ -208,6 +252,7 @@ async function removeTicker(ticker) {
 
     if (data.ok) {
       watchlist = data.watchlist;
+      saveWatchlistLocal(watchlist);
       setTimeout(() => renderWatchlistEditor(), 200);
     }
   } catch (e) {
