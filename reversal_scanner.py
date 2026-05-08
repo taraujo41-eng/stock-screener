@@ -387,6 +387,102 @@ def find_best_option(ticker, signal_type, last_price):
 
 
 # =====================================================================
+# Unusual Options Activity Detector
+# =====================================================================
+
+def detect_unusual_options(sym):
+    """
+    Detect unusual options activity by analyzing the front-month chain.
+    
+    Checks for:
+      1. Contracts with Volume/OI ratio > 2.0 (unusual flow)
+      2. Call vs Put volume skew (directional bias)
+      3. High absolute volume on individual contracts
+    
+    Returns: (bull_unusual, bear_unusual, detail_str)
+    """
+    try:
+        chain_meta = fetch_options_chain(sym)
+        if not chain_meta or not chain_meta.get("firstChain"):
+            return False, False, ""
+        
+        chain = chain_meta["firstChain"]
+        calls = chain.get("calls", [])
+        puts = chain.get("puts", [])
+        
+        if not calls and not puts:
+            return False, False, ""
+        
+        # --- Aggregate volume and find unusual contracts ---
+        total_call_vol = 0
+        total_put_vol = 0
+        unusual_call_contracts = 0
+        unusual_put_contracts = 0
+        max_call_vol_oi = 0.0
+        max_put_vol_oi = 0.0
+        
+        for c in calls:
+            vol = c.get("volume", 0) or 0
+            oi = c.get("openInterest", 0) or 0
+            total_call_vol += vol
+            if oi > 50 and vol > 100:  # Minimum thresholds to avoid noise
+                ratio = vol / oi
+                if ratio > 2.0:
+                    unusual_call_contracts += 1
+                    max_call_vol_oi = max(max_call_vol_oi, ratio)
+        
+        for p in puts:
+            vol = p.get("volume", 0) or 0
+            oi = p.get("openInterest", 0) or 0
+            total_put_vol += vol
+            if oi > 50 and vol > 100:
+                ratio = vol / oi
+                if ratio > 2.0:
+                    unusual_put_contracts += 1
+                    max_put_vol_oi = max(max_put_vol_oi, ratio)
+        
+        # --- Determine directional bias ---
+        total_vol = total_call_vol + total_put_vol
+        if total_vol < 500:  # Not enough options activity to matter
+            return False, False, ""
+        
+        call_pct = total_call_vol / total_vol if total_vol > 0 else 0.5
+        
+        # Bullish unusual: heavy call flow + unusual call contracts
+        bull_unusual = (
+            (unusual_call_contracts >= 2 and call_pct > 0.60) or
+            (unusual_call_contracts >= 3) or
+            (max_call_vol_oi >= 5.0 and call_pct > 0.55)
+        )
+        
+        # Bearish unusual: heavy put flow + unusual put contracts
+        bear_unusual = (
+            (unusual_put_contracts >= 2 and call_pct < 0.40) or
+            (unusual_put_contracts >= 3) or
+            (max_put_vol_oi >= 5.0 and call_pct < 0.45)
+        )
+        
+        # Build detail string
+        details = []
+        if bull_unusual:
+            details.append(f"Calls {call_pct*100:.0f}%")
+            if max_call_vol_oi >= 3.0:
+                details.append(f"V/OI {max_call_vol_oi:.1f}x")
+        if bear_unusual:
+            details.append(f"Puts {(1-call_pct)*100:.0f}%")
+            if max_put_vol_oi >= 3.0:
+                details.append(f"V/OI {max_put_vol_oi:.1f}x")
+        
+        detail_str = ", ".join(details) if details else ""
+        
+        return bull_unusual, bear_unusual, detail_str
+        
+    except Exception as e:
+        print(f"  Options activity check failed for {sym}: {e}")
+        return False, False, ""
+
+
+# =====================================================================
 # Analyze a single stock DataFrame
 # =====================================================================
 
@@ -546,6 +642,24 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
             bear_score += 1; bear_tags.append("Prior Uptrend +1")
         if vol_above_avg and has_bear_pattern:
             bear_score += 1; bear_tags.append("Vol > Avg +1")
+
+        # --- UNUSUAL OPTIONS ACTIVITY (check if either side has potential) ---
+        # Only fetch options data if the stock already shows some technical signals
+        # to keep scan times reasonable (1 API call per check)
+        if bull_score >= 4 or bear_score >= 4:
+            bull_unusual, bear_unusual, opts_detail = detect_unusual_options(sym)
+            if bull_unusual:
+                bull_score += 2
+                tag = f"Unusual Opts +2"
+                if opts_detail:
+                    tag = f"Unusual Opts ({opts_detail}) +2"
+                bull_tags.append(tag)
+            if bear_unusual:
+                bear_score += 2
+                tag = f"Unusual Opts +2"
+                if opts_detail:
+                    tag = f"Unusual Opts ({opts_detail}) +2"
+                bear_tags.append(tag)
 
         # ═══════════════════════════════════════════════════════
         # SIGNAL DECISION — requires minimum score
