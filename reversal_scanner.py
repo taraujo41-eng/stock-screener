@@ -624,10 +624,10 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
         _update_progress("downloading", f"Downloading {sym}...", i, tot,
                          ticker=sym, found=0)
 
-    interval = "5m"
+    interval = "1h" if extended_hours else "1d"
     includePrePost = "true" if extended_hours else "false"
-    # Need enough bars for 200 SMA on 5m chart (200 * 5m = ~17 hours, 10 days is plenty)
-    fetch_days = 10 
+    # Need enough bars for 200 SMA on daily chart (same as full market scan)
+    fetch_days = 60 if extended_hours else 280
 
     stock_data = fetch_batch(tickers, days=fetch_days, delay=0.05,
                              on_progress=_on_dl_progress, interval=interval, includePrePost=includePrePost)
