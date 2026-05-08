@@ -18,6 +18,7 @@ import os
 import traceback
 
 app = Flask(__name__, static_folder="static", static_url_path="")
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0  # No browser caching of static files
 CORS(app)
 
 # ── Watchlist & Scan Persistence ───────────────────────────────────────
