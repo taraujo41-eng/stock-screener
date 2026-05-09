@@ -561,6 +561,30 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
         vol_sma20 = float(df['Volume'].rolling(20).mean().iloc[-1]) if len(df) >= 20 else 0
         vol_above_avg = float(curr['Volume']) > vol_sma20 if vol_sma20 > 0 else False
 
+        # 12. Parabolic regime detection — suppress reversal signals on massive moves
+        price_5d_ago = float(df['Close'].iloc[-6]) if len(df) >= 6 else last_price
+        move_5d_pct = ((last_price - price_5d_ago) / price_5d_ago) * 100
+        is_parabolic_bull = move_5d_pct > 15   # stock surged → suppress bearish reversals
+        is_parabolic_bear = move_5d_pct < -15  # stock crashed → suppress bullish reversals
+
+        # 13. RSI overbought/oversold streak (duration filter)
+        overbought_streak = 0
+        for i in range(-1, -min(len(rsi_series), 10) - 1, -1):
+            if float(rsi_series.iloc[i]) > 70:
+                overbought_streak += 1
+            else:
+                break
+
+        oversold_streak = 0
+        for i in range(-1, -min(len(rsi_series), 10) - 1, -1):
+            if float(rsi_series.iloc[i]) < 30:
+                oversold_streak += 1
+            else:
+                break
+
+        # 14. Current candle direction (for RVOL context)
+        is_green_candle = curr['Close'] > curr['Open']
+
         # ═══════════════════════════════════════════════════════
         # WEIGHTED SCORING SYSTEM
         # ═══════════════════════════════════════════════════════
@@ -583,10 +607,10 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
             if patterns['bull_engulf']: bull_tags.append("Bull Engulfing +2")
             if patterns['bottoming_tail']: bull_tags.append("Bottoming Tail +2")
 
-        if rsi_val < 25:
-            bull_score += 2; bull_tags.append(f"RSI {rsi_val:.0f} +2")
-        elif rsi_val < 35:
-            bull_score += 1; bull_tags.append(f"RSI {rsi_val:.0f} +1")
+        if rsi_val < 25 and oversold_streak >= 3:
+            bull_score += 2; bull_tags.append(f"RSI {rsi_val:.0f} ({oversold_streak}d) +2")
+        elif rsi_val < 30 and oversold_streak >= 3:
+            bull_score += 1; bull_tags.append(f"RSI {rsi_val:.0f} ({oversold_streak}d) +1")
 
         if bull_div:
             bull_score += 3; bull_tags.append("RSI Divergence +3")
@@ -594,14 +618,15 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
             bull_score += 2; bull_tags.append("MACD Cross +2")
         if bull_ext:
             bull_score += 1; bull_tags.append("Extension >8% +1")
-        if rvol > 1.5:
+        if rvol > 1.5 and not is_green_candle:
             bull_score += 1; bull_tags.append(f"RVOL {rvol:.1f}x +1")
-        if near_200sma or near_52w_low:
-            bull_score += 1
-            if near_200sma: bull_tags.append("Near 200 SMA +1")
-            if near_52w_low: bull_tags.append("Near 52w Low +1")
-        if trend == "downtrend" and not has_bull_pattern:
-            bull_score += 1; bull_tags.append("Prior Downtrend +1")
+        if has_bull_pattern:
+            if near_52w_low:
+                bull_score += 1; bull_tags.append("Near 52w Low +1")
+            elif near_200sma:
+                bull_score += 1; bull_tags.append("Near 200 SMA +1")
+            elif trend == "downtrend":
+                bull_score += 1; bull_tags.append("Prior Downtrend +1")
         if vol_above_avg and has_bull_pattern:
             bull_score += 1; bull_tags.append("Vol > Avg +1")
 
@@ -621,10 +646,10 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
             if patterns['bear_engulf']: bear_tags.append("Bear Engulfing +2")
             if patterns['topping_tail']: bear_tags.append("Topping Tail +2")
 
-        if rsi_val > 75:
-            bear_score += 2; bear_tags.append(f"RSI {rsi_val:.0f} +2")
-        elif rsi_val > 65:
-            bear_score += 1; bear_tags.append(f"RSI {rsi_val:.0f} +1")
+        if rsi_val > 75 and overbought_streak >= 3:
+            bear_score += 2; bear_tags.append(f"RSI {rsi_val:.0f} ({overbought_streak}d) +2")
+        elif rsi_val > 70 and overbought_streak >= 3:
+            bear_score += 1; bear_tags.append(f"RSI {rsi_val:.0f} ({overbought_streak}d) +1")
 
         if bear_div:
             bear_score += 3; bear_tags.append("RSI Divergence +3")
@@ -632,14 +657,15 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
             bear_score += 2; bear_tags.append("MACD Cross +2")
         if bear_ext:
             bear_score += 1; bear_tags.append("Extension >8% +1")
-        if rvol > 1.5:
+        if rvol > 1.5 and is_green_candle:
             bear_score += 1; bear_tags.append(f"RVOL {rvol:.1f}x +1")
-        if near_200sma or near_52w_high:
-            bear_score += 1
-            if near_200sma: bear_tags.append("Near 200 SMA +1")
-            if near_52w_high: bear_tags.append("Near 52w High +1")
-        if trend == "uptrend" and not has_bear_pattern:
-            bear_score += 1; bear_tags.append("Prior Uptrend +1")
+        if has_bear_pattern:
+            if near_52w_high:
+                bear_score += 1; bear_tags.append("Near 52w High +1")
+            elif near_200sma:
+                bear_score += 1; bear_tags.append("Near 200 SMA +1")
+            elif trend == "uptrend":
+                bear_score += 1; bear_tags.append("Prior Uptrend +1")
         if vol_above_avg and has_bear_pattern:
             bear_score += 1; bear_tags.append("Vol > Avg +1")
 
@@ -667,6 +693,19 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
 
         is_bullish = bull_score >= MIN_SCORE
         is_bearish = bear_score >= MIN_SCORE
+
+        # Parabolic regime gate — kill opposite-direction signals
+        if is_parabolic_bull:
+            is_bearish = False  # Can't short a parabolic rally
+        if is_parabolic_bear:
+            is_bullish = False  # Can't buy a parabolic crash
+
+        # Candle pattern requirement — pure indicator signals are unreliable
+        # Exception: score >= 9 (multiple strong independent signals)
+        if is_bullish and not has_bull_pattern and bull_score < 9:
+            is_bullish = False
+        if is_bearish and not has_bear_pattern and bear_score < 9:
+            is_bearish = False
 
         if not is_bullish and not is_bearish:
             return None
