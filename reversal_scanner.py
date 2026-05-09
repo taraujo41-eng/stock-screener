@@ -963,6 +963,257 @@ def full_market_scan(min_volume=500_000, min_price=5.0,
 
 
 # =====================================================================
+# Momentum Analysis Scoring
+# =====================================================================
+
+def _analyze_momentum(sym, df):
+    """
+    Momentum/Breakout scoring system.
+    Identifies stocks with strong directional thrust (like the INTC rally).
+    """
+    try:
+        if len(df) < 50: return None
+        
+        curr = df.iloc[-1]
+        prev = df.iloc[-2]
+        last_price = float(curr['Close'])
+        open_price = float(curr['Open'])
+        prev_close = float(prev['Close'])
+        
+        # 1. Metadata
+        fiftyTwoWeekHigh = df.attrs.get("fiftyTwoWeekHigh")
+        fiftyTwoWeekLow = df.attrs.get("fiftyTwoWeekLow")
+        
+        # 2. RVOL (20-day avg)
+        rvol = compute_rvol(df)
+        
+        # 3. RSI
+        rsi_series = compute_rsi(df['Close'], 14)
+        rsi_val = float(rsi_series.iloc[-1])
+        
+        # 4. Moving Averages
+        sma20 = float(compute_sma(df['Close'], 20).iloc[-1])
+        sma50 = float(compute_sma(df['Close'], 50).iloc[-1])
+        sma200 = float(compute_sma(df['Close'], 200).iloc[-1])
+        
+        # 5. MACD
+        macd_line, signal_line, macd_hist = compute_macd(df['Close'])
+        macd_val = float(macd_line.iloc[-1])
+        sig_val = float(signal_line.iloc[-1])
+        hist_val = float(macd_hist.iloc[-1])
+
+        # 6. Returns
+        day_chg_pct = ((last_price - prev_close) / prev_close) * 100
+        gap_pct = ((open_price - prev_close) / prev_close) * 100
+        five_day_ret = ((last_price - df['Close'].iloc[-6]) / df['Close'].iloc[-6]) * 100 if len(df) >= 6 else 0
+        
+        # 7. Candle Shape
+        total_range = curr['High'] - curr['Low'] if curr['High'] != curr['Low'] else 0.01
+        upper_wick = curr['High'] - max(curr['Close'], curr['Open'])
+        lower_wick = min(curr['Close'], curr['Open']) - curr['Low']
+        is_green = last_price > open_price
+        
+        MIN_MOMENTUM_SCORE = 5
+
+        # --- BULLISH MOMENTUM (BREAKOUT) ---
+        bull_score = 0
+        bull_tags = []
+
+        if gap_pct > 3.0:
+            bull_score += 2; bull_tags.append(f"Gap Up {gap_pct:.1f}% +2")
+        
+        if fiftyTwoWeekHigh and last_price >= fiftyTwoWeekHigh * 0.98:
+            bull_score += 3; bull_tags.append("At 52w High +3")
+        
+        if rvol > 2.0:
+            bull_score += 2; bull_tags.append(f"RVOL {rvol:.1f}x +2")
+            if rvol > 3.0:
+                bull_score += 1; bull_tags.append("Extreme Vol +1")
+        
+        if rsi_val > 70:
+            bull_score += 1; bull_tags.append(f"RSI {rsi_val:.0f} (Strength) +1")
+            
+        if last_price > sma20 and last_price > sma50 and last_price > sma200:
+            bull_score += 1; bull_tags.append("Above SMAs +1")
+            
+        if hist_val > 0 and macd_val > sig_val:
+            bull_score += 1; bull_tags.append("MACD Bullish +1")
+            
+        if five_day_ret > 10:
+            bull_score += 1; bull_tags.append(f"5d Ret {five_day_ret:.0f}% +1")
+            
+        if is_green and upper_wick < 0.2 * total_range:
+            bull_score += 1; bull_tags.append("Strong Close +1")
+
+        # --- BEARISH MOMENTUM (BREAKDOWN) ---
+        bear_score = 0
+        bear_tags = []
+
+        if gap_pct < -3.0:
+            bear_score += 2; bear_tags.append(f"Gap Down {abs(gap_pct):.1f}% +2")
+            
+        if fiftyTwoWeekLow and last_price <= fiftyTwoWeekLow * 1.02:
+            bear_score += 3; bear_tags.append("At 52w Low +3")
+            
+        if rvol > 2.0:
+            bear_score += 2; bear_tags.append(f"RVOL {rvol:.1f}x +2")
+            if rvol > 3.0:
+                bear_score += 1; bear_tags.append("Extreme Vol +1")
+                
+        if rsi_val < 30:
+            bear_score += 1; bear_tags.append(f"RSI {rsi_val:.0f} (Weakness) +1")
+            
+        if last_price < sma20 and last_price < sma50 and last_price < sma200:
+            bear_score += 1; bear_tags.append("Below SMAs +1")
+            
+        if hist_val < 0 and macd_val < sig_val:
+            bear_score += 1; bear_tags.append("MACD Bearish +1")
+            
+        if five_day_ret < -10:
+            bear_score += 1; bear_tags.append(f"5d Ret {five_day_ret:.0f}% +1")
+            
+        if not is_green and lower_wick < 0.2 * total_range:
+            bear_score += 1; bear_tags.append("Weak Close +1")
+
+        # --- DECISION ---
+        is_bullish = bull_score >= MIN_MOMENTUM_SCORE
+        is_bearish = bear_score >= MIN_MOMENTUM_SCORE
+
+        if not is_bullish and not is_bearish:
+            return None
+
+        # Use stronger direction
+        if is_bullish and is_bearish:
+            if bull_score >= bear_score: is_bearish = False
+            else: is_bullish = False
+
+        score = bull_score if is_bullish else bear_score
+        tags = bull_tags if is_bullish else bear_tags
+        
+        if score >= 8: grade = "A+"
+        elif score >= 6: grade = "A"
+        else: grade = "B"
+
+        reasons = f"[{' | '.join(tags)}]"
+
+        return {
+            "Ticker": sym,
+            "Last Price": round(last_price, 2),
+            "Volume": int(curr['Volume']),
+            "RSI": round(rsi_val, 1),
+            "Score": score,
+            "Grade": grade,
+            "Bullish Signals": reasons if is_bullish else "—",
+            "Bearish Signals": reasons if is_bearish else "—",
+            "Suggested Option": "—" # Momentum trades usually need different strategy
+        }
+    except Exception as e:
+        print(f"  Error analyzing momentum for {sym}: {e}")
+    return None
+
+# =====================================================================
+# Momentum Scanners
+# =====================================================================
+
+def momentum_watchlist_scan(tickers, min_volume=500_000, min_price=5.0, extended_hours=False):
+    _reset_progress()
+    scan_progress["status"] = "running"
+    start_time = time.time()
+    
+    results = []
+    total = len(tickers)
+    _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
+    
+    def _on_dl_progress(i, tot, sym):
+        _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=len(results))
+
+    interval = "1h" if extended_hours else "1d"
+    includePrePost = "true" if extended_hours else "false"
+    fetch_days = 60 if extended_hours else 280
+
+    stock_data = fetch_batch(tickers, days=fetch_days, delay=0.05, on_progress=_on_dl_progress, interval=interval, includePrePost=includePrePost)
+
+    for i, (sym, df) in enumerate(stock_data.items()):
+        _update_progress("analyzing", f"Analyzing {sym}...", i, len(stock_data), ticker=sym, found=len(results))
+        try:
+            today_date = df.index.date[-1]
+            recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
+            last_price = float(df['Close'].iloc[-1])
+
+            if recent_vol < min_volume or last_price < min_price:
+                continue
+
+            result = _analyze_momentum(sym, df)
+            if result:
+                results.append(result)
+        except:
+            continue
+
+    scan_progress.update({
+        "status": "done", "phase": "complete",
+        "phase_label": f"Done — {len(results)} momentum signals found",
+        "current": total, "total": total,
+        "found": len(results), "pct": 100, "eta_seconds": 0,
+    })
+    
+    if not results: return pd.DataFrame()
+    return pd.DataFrame(results).sort_values(by="Score", ascending=False)
+
+def momentum_full_market_scan(min_volume=500_000, min_price=5.0, extended_hours=False):
+    _reset_progress()
+    scan_progress["status"] = "running"
+    start_time = time.time()
+    
+    all_tickers = get_us_tickers()
+    if not all_tickers: return pd.DataFrame()
+    
+    total_tickers = len(all_tickers)
+    
+    def _on_dl_progress(done, tot, sym):
+        _update_progress("downloading", f"Downloading... ({done}/{tot})", done, tot, ticker=sym, found=0)
+        elapsed = time.time() - start_time
+        if done > 0:
+            rate = elapsed / done
+            scan_progress["eta_seconds"] = int((tot - done) * rate)
+
+    fetch_days = 60 if extended_hours else 280 
+    stock_data = fetch_batch_concurrent(all_tickers, days=fetch_days, max_workers=8, on_progress=_on_dl_progress, delay=0.05, interval="1d", includePrePost="false")
+
+    candidates = []
+    for sym, df in stock_data.items():
+        try:
+            today_date = df.index.date[-1]
+            recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
+            price = float(df['Close'].iloc[-1])
+            if recent_vol >= min_volume and price >= min_price:
+                candidates.append((sym, df))
+        except: continue
+
+    results = []
+    total_candidates = len(candidates)
+    phase3_start = time.time()
+
+    for j, (sym, df) in enumerate(candidates):
+        _update_progress("analyzing", f"Analyzing {sym}...", j, total_candidates, ticker=sym, found=len(results))
+        elapsed = time.time() - phase3_start
+        if j > 0:
+            rate = elapsed / j
+            scan_progress["eta_seconds"] = int((total_candidates - j) * rate)
+
+        result = _analyze_momentum(sym, df)
+        if result: results.append(result)
+
+    scan_progress.update({
+        "status": "done", "phase": "complete",
+        "phase_label": f"Done — {len(results)} momentum signals found",
+        "current": total_candidates, "total": total_candidates,
+        "found": len(results), "pct": 100, "eta_seconds": 0,
+    })
+    
+    if not results: return pd.DataFrame()
+    return pd.DataFrame(results).sort_values(by="Score", ascending=False)
+
+# =====================================================================
 # Watchlist (for quick scans)
 # =====================================================================
 

@@ -95,8 +95,11 @@ function updateModeDesc() {
   if (scanMode === "watchlist") {
     desc.textContent = `Scans ${watchlist.length} tickers — takes ~${Math.max(10, watchlist.length * 1.5).toFixed(0)}s`;
     editBtn.classList.remove("hidden");
-  } else {
+  } else if (scanMode === "full") {
     desc.textContent = "Scans entire US market — takes 3-8 minutes";
+    editBtn.classList.add("hidden");
+  } else if (scanMode === "momentum") {
+    desc.textContent = "Scans market for breakouts/breakdowns — takes 3-8 minutes";
     editBtn.classList.add("hidden");
   }
 }
@@ -120,11 +123,8 @@ async function setMode(mode, btn) {
         <div class="empty-state__text">Click the button above to scan your watchlist</div>
       </div>
     `;
-    document.getElementById("statsBar").classList.add("hidden");
-    document.getElementById("timestamp").classList.add("hidden");
-    document.getElementById("filters").classList.add("hidden");
-    document.getElementById("scanBadge").classList.add("hidden");
-  } else {
+    hideAuxUI();
+  } else if (mode === "full") {
     scanBtn.querySelector(".scan-btn__text").textContent = "🌐  Scan Full Market";
     // Auto-load the persistent full market scan results
     try {
@@ -150,12 +150,41 @@ async function setMode(mode, btn) {
         <div class="empty-state__text">Click the button above to scan the full market</div>
       </div>
     `;
-    document.getElementById("statsBar").classList.add("hidden");
-    document.getElementById("timestamp").classList.add("hidden");
-    document.getElementById("filters").classList.add("hidden");
-    document.getElementById("scanBadge").classList.add("hidden");
+    hideAuxUI();
+  } else if (mode === "momentum") {
+    scanBtn.querySelector(".scan-btn__text").textContent = "🚀  Scan Momentum";
+    try {
+      showSkeleton();
+      const res = await fetch("/api/scan/momentum/full/results");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && data.results) {
+          displayResults(data);
+          updateModeDesc();
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("No saved momentum scan available yet");
+    }
+
+    document.getElementById("results").innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state__icon">🚀</div>
+        <div class="empty-state__title">Ready to scan</div>
+        <div class="empty-state__text">Click the button above to find breakout momentum</div>
+      </div>
+    `;
+    hideAuxUI();
   }
   updateModeDesc();
+}
+
+function hideAuxUI() {
+  document.getElementById("statsBar").classList.add("hidden");
+  document.getElementById("timestamp").classList.add("hidden");
+  document.getElementById("filters").classList.add("hidden");
+  document.getElementById("scanBadge").classList.add("hidden");
 }
 
 // ── Watchlist Editor ───────────────────────────────────────
@@ -304,6 +333,8 @@ function buildCard(item, index) {
   const score = item.Score || 0;
   const gradeCls = grade === "A+" ? "grade--aplus" : grade === "A" ? "grade--a" : "grade--b";
 
+  const isMomentum = (item.mode && item.mode.startsWith("momentum")) || scanMode === "momentum";
+
   const bullPills = bullish.map(s =>
     `<span class="pill pill--bull">${s}</span>`
   ).join("");
@@ -311,6 +342,9 @@ function buildCard(item, index) {
   const bearPills = bearish.map(s =>
     `<span class="pill pill--bear">${s}</span>`
   ).join("");
+
+  const bullIcon = isMomentum ? "🚀" : "🟢";
+  const bearIcon = isMomentum ? "📉" : "🔴";
 
   return `
     <div class="card" style="animation-delay: ${Math.min(index * 0.04, 1.2)}s">
@@ -334,8 +368,8 @@ function buildCard(item, index) {
         </div>
       </div>
       <div class="card__signals">
-        ${bullish.length ? `<div class="signal-row"><span class="signal-row__icon">🟢</span>${bullPills}</div>` : ""}
-        ${bearish.length ? `<div class="signal-row"><span class="signal-row__icon">🔴</span>${bearPills}</div>` : ""}
+        ${bullish.length ? `<div class="signal-row"><span class="signal-row__icon">${bullIcon}</span>${bullPills}</div>` : ""}
+        ${bearish.length ? `<div class="signal-row"><span class="signal-row__icon">${bearIcon}</span>${bearPills}</div>` : ""}
       </div>
       ${item["Suggested Option"] && item["Suggested Option"] !== "—" ? `
         <div class="card__option">
@@ -382,6 +416,8 @@ function renderResults() {
 // ── Stats bar ──────────────────────────────────────────────
 
 function updateStats() {
+  const isMomentum = scanMode === "momentum" || (scanData[0] && scanData[0].mode && scanData[0].mode.startsWith("momentum"));
+  
   const bullCount = scanData.filter(d =>
     d["Bullish Signals"] && d["Bullish Signals"] !== "—").length;
   const bearCount = scanData.filter(d =>
@@ -390,6 +426,9 @@ function updateStats() {
   document.getElementById("statTotal").textContent = scanData.length;
   document.getElementById("statBull").textContent = bullCount;
   document.getElementById("statBear").textContent = bearCount;
+  
+  document.querySelectorAll(".stat__label")[1].textContent = isMomentum ? "Breakout" : "Bullish";
+  document.querySelectorAll(".stat__label")[2].textContent = isMomentum ? "Breakdown" : "Bearish";
 }
 
 // ── Display results (shared logic) ─────────────────────────
@@ -418,12 +457,22 @@ function displayResults(data) {
     b.classList.remove("filter-btn--active"));
   document.querySelector('[data-filter="all"]').classList.add("filter-btn--active");
 
+  const isMomentum = scanMode === "momentum" || (data.mode && data.mode.startsWith("momentum"));
+  const bullLabel = isMomentum ? "🟢 Breakout" : "🟢 Bullish";
+  const bearLabel = isMomentum ? "🔴 Breakdown" : "🔴 Bearish";
+  
+  document.querySelector('[data-filter="bullish"]').textContent = bullLabel;
+  document.querySelector('[data-filter="bearish"]').textContent = bearLabel;
+
   if (scanData.length === 0) {
+    const emptyTitle = isMomentum ? "No breakouts" : "All clear";
+    const emptyText = isMomentum ? "No strong momentum found right now." : "No reversal setups found right now.";
+    
     document.getElementById("results").innerHTML = `
       <div class="empty-state">
         <div class="empty-state__icon">✅</div>
-        <div class="empty-state__title">All clear</div>
-        <div class="empty-state__text">No reversal setups found right now.<br>Check back after the next session.</div>
+        <div class="empty-state__title">${emptyTitle}</div>
+        <div class="empty-state__text">${emptyText}<br>Check back after the next session.</div>
       </div>
     `;
   } else {
@@ -520,10 +569,10 @@ async function runScan() {
   const extHours = document.getElementById("extHoursToggle")?.checked || false;
 
   // Both modes now use the same async pattern
-  const endpoint = scanMode === "watchlist" ? "/api/scan" : "/api/scan/full";
-  const resultsEndpoint = scanMode === "watchlist"
-    ? "/api/scan/results"
-    : "/api/scan/full/results";
+  const isMomentum = scanMode === "momentum";
+  
+  const endpoint = isMomentum ? "/api/scan/momentum/full" : (scanMode === "watchlist" ? "/api/scan" : "/api/scan/full");
+  const resultsEndpoint = isMomentum ? "/api/scan/momentum/full/results" : (scanMode === "watchlist" ? "/api/scan/results" : "/api/scan/full/results");
 
   // Retry logic for Render cold starts
   const maxRetries = 3;
