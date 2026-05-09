@@ -984,6 +984,10 @@ def _analyze_momentum(sym, df):
         fiftyTwoWeekHigh = df.attrs.get("fiftyTwoWeekHigh")
         fiftyTwoWeekLow = df.attrs.get("fiftyTwoWeekLow")
         
+        # Yesterday's High/Low for "Gap and Go" detection
+        yesterday_high = float(prev['High'])
+        yesterday_low = float(prev['Low'])
+        
         # 2. RVOL (20-day avg)
         rvol = compute_rvol(df)
         
@@ -1022,6 +1026,9 @@ def _analyze_momentum(sym, df):
         if gap_pct > 3.0:
             bull_score += 2; bull_tags.append(f"Gap Up {gap_pct:.1f}% +2")
         
+        if last_price > yesterday_high:
+            bull_score += 2; bull_tags.append("Broke Yesterday High +2")
+
         if fiftyTwoWeekHigh and last_price >= fiftyTwoWeekHigh * 0.98:
             bull_score += 3; bull_tags.append("At 52w High +3")
         
@@ -1052,6 +1059,9 @@ def _analyze_momentum(sym, df):
         if gap_pct < -3.0:
             bear_score += 2; bear_tags.append(f"Gap Down {abs(gap_pct):.1f}% +2")
             
+        if last_price < yesterday_low:
+            bear_score += 2; bear_tags.append("Broke Yesterday Low +2")
+
         if fiftyTwoWeekLow and last_price <= fiftyTwoWeekLow * 1.02:
             bear_score += 3; bear_tags.append("At 52w Low +3")
             
