@@ -17,6 +17,7 @@ import threading
 import json
 import os
 import traceback
+import pytz
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0  # No browser caching of static files
@@ -92,11 +93,12 @@ def scan():
         global _scan_running
         _scan_running = True
         try:
+            et_tz = pytz.timezone("America/New_York")
             df = reversal_scanner(user_watchlist, extended_hours=extended_hours)
             app.config["LAST_SCAN_RESULTS"] = {
                 "ok": True,
                 "mode": "watchlist",
-                "timestamp": datetime.now().strftime("%b %d, %Y  %I:%M %p"),
+                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
                 "count": len(df) if not df.empty else 0,
                 "tickers_scanned": len(user_watchlist),
                 "results": df.to_dict(orient="records") if not df.empty else [],
@@ -143,11 +145,12 @@ def scan_full():
         global _scan_running
         _scan_running = True
         try:
+            et_tz = pytz.timezone("America/New_York")
             df = full_market_scan(extended_hours=extended_hours)
             results_data = {
                 "ok": True,
                 "mode": "full_market",
-                "timestamp": datetime.now().strftime("%b %d, %Y  %I:%M %p"),
+                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
                 "count": len(df) if not df.empty else 0,
                 "results": df.to_dict(orient="records") if not df.empty else [],
             }
@@ -209,11 +212,12 @@ def scan_momentum():
         global _scan_running
         _scan_running = True
         try:
+            et_tz = pytz.timezone("America/New_York")
             df = momentum_watchlist_scan(user_watchlist, extended_hours=extended_hours)
             app.config["LAST_MOMENTUM_RESULTS"] = {
                 "ok": True,
                 "mode": "momentum_watchlist",
-                "timestamp": datetime.now().strftime("%b %d, %Y  %I:%M %p"),
+                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
                 "count": len(df) if not df.empty else 0,
                 "tickers_scanned": len(user_watchlist),
                 "results": df.to_dict(orient="records") if not df.empty else [],
@@ -249,11 +253,12 @@ def scan_momentum_full():
         global _scan_running
         _scan_running = True
         try:
+            et_tz = pytz.timezone("America/New_York")
             df = momentum_full_market_scan(extended_hours=extended_hours)
             results_data = {
                 "ok": True,
                 "mode": "momentum_full",
-                "timestamp": datetime.now().strftime("%b %d, %Y  %I:%M %p"),
+                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
                 "count": len(df) if not df.empty else 0,
                 "results": df.to_dict(orient="records") if not df.empty else [],
             }

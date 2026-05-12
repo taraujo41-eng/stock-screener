@@ -125,6 +125,13 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false"):
         
         quote = result["indicators"]["quote"][0]
 
+        # Create index and convert to ET
+        dt_index = pd.to_datetime(timestamps, unit="s", utc=True).tz_convert("America/New_York")
+        
+        # Only normalize (strip time) for daily interval
+        if interval == "1d":
+            dt_index = dt_index.normalize()
+
         df = pd.DataFrame(
             {
                 "Open": quote.get("open"),
@@ -133,13 +140,9 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false"):
                 "Close": quote.get("close"),
                 "Volume": quote.get("volume"),
             },
-            index=pd.DatetimeIndex(
-                pd.to_datetime(timestamps, unit="s", utc=True)
-                .tz_convert("America/New_York")
-                .normalize(),
-                name="Date",
-            ),
+            index=dt_index,
         )
+        df.index.name = "Date"
         df = df.dropna(subset=["Close"])
 
         # Convert Volume to int where possible
