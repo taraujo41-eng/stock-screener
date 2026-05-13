@@ -205,23 +205,23 @@ def detect_rsi_divergence(price_series, rsi_series, lookback=20):
     rsi_at_high = float(window_rsi.iloc[highest_idx])
 
     # Bullish Divergence: Price lower low + RSI higher low
-    # Requires: RSI < 35 (true oversold), magnitude >= 5 pts, swing >= 5 bars apart
+    # Requires: RSI < 35 (true oversold), magnitude >= 3 pts, swing >= 5 bars apart
     rsi_bull_magnitude = curr_rsi - rsi_at_low
     bull_div = (
         (curr_price < lowest_price_in_window) and
         (curr_rsi > rsi_at_low) and
-        (rsi_bull_magnitude >= 5) and
+        (rsi_bull_magnitude >= 3) and
         (curr_rsi < 35) and
         (bars_from_low >= 5)
     )
     
     # Bearish Divergence: Price higher high + RSI lower high
-    # Requires: RSI > 65 (true overbought), magnitude >= 5 pts, swing >= 5 bars apart
+    # Requires: RSI > 65 (true overbought), magnitude >= 3 pts, swing >= 5 bars apart
     rsi_bear_magnitude = rsi_at_high - curr_rsi
     bear_div = (
         (curr_price > highest_price_in_window) and
         (curr_rsi < rsi_at_high) and
-        (rsi_bear_magnitude >= 5) and
+        (rsi_bear_magnitude >= 3) and
         (curr_rsi > 65) and
         (bars_from_high >= 5)
     )
@@ -589,7 +589,7 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
         # WEIGHTED SCORING SYSTEM
         # ═══════════════════════════════════════════════════════
         
-        MIN_SCORE = 7  # Only A+ signals (highest confidence)
+        MIN_SCORE = 5  # Lowered from 7 to include A-grade signals
 
         # --- BULLISH SCORE ---
         bull_score = 0
@@ -701,10 +701,10 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
             is_bullish = False  # Can't buy a parabolic crash
 
         # Candle pattern requirement — pure indicator signals are unreliable
-        # Exception: score >= 9 (multiple strong independent signals)
-        if is_bullish and not has_bull_pattern and bull_score < 9:
+        # Exception: score >= 7 (multiple strong independent signals) - Lowered from 9
+        if is_bullish and not has_bull_pattern and bull_score < 7:
             is_bullish = False
-        if is_bearish and not has_bear_pattern and bear_score < 9:
+        if is_bearish and not has_bear_pattern and bear_score < 7:
             is_bearish = False
 
         if not is_bullish and not is_bearish:
