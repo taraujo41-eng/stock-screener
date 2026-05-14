@@ -777,7 +777,7 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
         _update_progress("downloading", f"Downloading {sym}...", i, tot,
                          ticker=sym, found=0)
 
-    interval = "1h" if extended_hours else "1d"
+    interval = "15m" if extended_hours else "1d"
     includePrePost = "true" if extended_hours else "false"
     # Need enough bars for 200 SMA on daily chart (same as full market scan)
     fetch_days = 60 if extended_hours else 280
@@ -891,7 +891,7 @@ def full_market_scan(min_volume=500_000, min_price=5.0,
             remaining = (tot - done) * rate
             scan_progress["eta_seconds"] = int(remaining)
 
-    interval = "1h" if extended_hours else "1d"
+    interval = "15m" if extended_hours else "1d"
     includePrePost = "true" if extended_hours else "false"
     # 260+ days ensures we have a full year of data for the 200 SMA
     fetch_days = 60 if extended_hours else 280 
