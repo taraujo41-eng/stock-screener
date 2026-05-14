@@ -1157,7 +1157,7 @@ def momentum_watchlist_scan(tickers, min_volume=500_000, min_price=5.0, extended
     def _on_dl_progress(i, tot, sym):
         _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=len(results))
 
-    interval = "5m" if extended_hours else "1d"
+    interval = "15m" if extended_hours else "1d"
     includePrePost = "true" if extended_hours else "false"
     fetch_days = 14 if extended_hours else 280
 
@@ -1206,7 +1206,7 @@ def momentum_full_market_scan(min_volume=500_000, min_price=5.0, extended_hours=
             rate = elapsed / done
             scan_progress["eta_seconds"] = int((tot - done) * rate)
 
-    interval = "5m" if extended_hours else "1d"
+    interval = "15m" if extended_hours else "1d"
     includePrePost = "true" if extended_hours else "false"
     fetch_days = 14 if extended_hours else 280 
 
