@@ -1009,9 +1009,24 @@ def _analyze_momentum(sym, df):
         # 6. Returns
         day_chg_pct = ((last_price - prev_close) / prev_close) * 100
         gap_pct = ((open_price - prev_close) / prev_close) * 100
-        five_day_ret = ((last_price - df['Close'].iloc[-6]) / df['Close'].iloc[-6]) * 100 if len(df) >= 6 else 0
+        five_day_ret = ((last_price - df['Close'].iloc[-max(len(df), 6)]) / df['Close'].iloc[-max(len(df), 6)]) * 100 if len(df) >= 6 else 0
         
-        # 7. Candle Shape
+        # 7. Prior Session High/Low (Robust detection for intraday bars)
+        # Find the high/low of the ACTUAL previous trading day
+        dates = df.index.date
+        unique_dates = sorted(list(set(dates)))
+        if len(unique_dates) >= 2:
+            # unique_dates[-1] is today, unique_dates[-2] is the previous session
+            prior_date = unique_dates[-2]
+            prior_day_df = df[df.index.date == prior_date]
+            prior_high = float(prior_day_df['High'].max())
+            prior_low = float(prior_day_df['Low'].min())
+        else:
+            # Fallback to previous candle if only one day of data exists
+            prior_high = float(prev['High'])
+            prior_low = float(prev['Low'])
+
+        # 8. Candle Shape
         total_range = curr['High'] - curr['Low'] if curr['High'] != curr['Low'] else 0.01
         upper_wick = curr['High'] - max(curr['Close'], curr['Open'])
         lower_wick = min(curr['Close'], curr['Open']) - curr['Low']
@@ -1026,8 +1041,10 @@ def _analyze_momentum(sym, df):
         if gap_pct > 3.0:
             bull_score += 2; bull_tags.append(f"Gap Up {gap_pct:.1f}% +2")
         
-        if last_price > yesterday_high:
-            bull_score += 2; bull_tags.append("Broke Yesterday High +2")
+        if last_price > prior_high:
+            bull_score += 3; bull_tags.append("Broke Prior Day High +3")
+        elif last_price > prior_high * 0.995:
+             bull_score += 1; bull_tags.append("Near Prior Day High +1")
 
         if fiftyTwoWeekHigh and last_price >= fiftyTwoWeekHigh * 0.98:
             bull_score += 3; bull_tags.append("At 52w High +3")
@@ -1059,8 +1076,10 @@ def _analyze_momentum(sym, df):
         if gap_pct < -3.0:
             bear_score += 2; bear_tags.append(f"Gap Down {abs(gap_pct):.1f}% +2")
             
-        if last_price < yesterday_low:
-            bear_score += 2; bear_tags.append("Broke Yesterday Low +2")
+        if last_price < prior_low:
+            bear_score += 3; bear_tags.append("Broke Prior Day Low +3")
+        elif last_price < prior_low * 1.005:
+            bear_score += 1; bear_tags.append("Near Prior Day Low +1")
 
         if fiftyTwoWeekLow and last_price <= fiftyTwoWeekLow * 1.02:
             bear_score += 3; bear_tags.append("At 52w Low +3")
@@ -1106,6 +1125,7 @@ def _analyze_momentum(sym, df):
 
         reasons = f"[{' | '.join(tags)}]"
 
+
         return {
             "Ticker": sym,
             "Last Price": round(last_price, 2),
@@ -1137,9 +1157,9 @@ def momentum_watchlist_scan(tickers, min_volume=500_000, min_price=5.0, extended
     def _on_dl_progress(i, tot, sym):
         _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=len(results))
 
-    interval = "1h" if extended_hours else "1d"
+    interval = "5m" if extended_hours else "1d"
     includePrePost = "true" if extended_hours else "false"
-    fetch_days = 60 if extended_hours else 280
+    fetch_days = 14 if extended_hours else 280
 
     stock_data = fetch_batch(tickers, days=fetch_days, delay=0.05, on_progress=_on_dl_progress, interval=interval, includePrePost=includePrePost)
 
@@ -1186,8 +1206,15 @@ def momentum_full_market_scan(min_volume=500_000, min_price=5.0, extended_hours=
             rate = elapsed / done
             scan_progress["eta_seconds"] = int((tot - done) * rate)
 
-    fetch_days = 60 if extended_hours else 280 
-    stock_data = fetch_batch_concurrent(all_tickers, days=fetch_days, max_workers=8, on_progress=_on_dl_progress, delay=0.05, interval="1d", includePrePost="false")
+    interval = "5m" if extended_hours else "1d"
+    includePrePost = "true" if extended_hours else "false"
+    fetch_days = 14 if extended_hours else 280 
+
+    stock_data = fetch_batch_concurrent(
+        all_tickers, days=fetch_days, max_workers=8, 
+        on_progress=_on_dl_progress, delay=0.05, 
+        interval=interval, includePrePost=includePrePost
+    )
 
     candidates = []
     for sym, df in stock_data.items():
