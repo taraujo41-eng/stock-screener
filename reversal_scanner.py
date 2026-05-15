@@ -1337,9 +1337,9 @@ def _analyze_options_setup(sym, df, iv_history):
     Two-phase options setup analysis:
       Phase A: Lightweight momentum+reversal pre-screen (score >= 3)
       Phase B: Options chain scan with all 6 filters:
-        1. Liquidity (Volume >= 300, OI >= 500, Spread < 10%)
+        1. Liquidity (Volume >= 50, OI >= 100, Spread < 15%)
         2. DTE 20-60
-        3. Delta 0.40-0.70 (strike distance approximation)
+        3. Delta 0.30-0.70 (strike distance approximation)
         4. IV Rank < 30% (from DIY tracker)
         5. Stock momentum/catalyst alignment (Phase A score)
         6. Unusual options flow confirmation
@@ -1368,40 +1368,57 @@ def _analyze_options_setup(sym, df, iv_history):
         bull_reasons = []
         if patterns['hammer'] or patterns['bull_engulf'] or patterns['bottoming_tail']:
             bull_catalyst += 2; bull_reasons.append("Candle Pattern")
-        if rsi_val < 35:
+        if rsi_val < 40:
             bull_catalyst += 1; bull_reasons.append(f"RSI {rsi_val:.0f}")
         bull_div, bear_div = detect_rsi_divergence(df['Close'], rsi_series, lookback=20)
         if bull_div:
             bull_catalyst += 2; bull_reasons.append("RSI Divergence")
         if float(macd_hist.iloc[-1]) > 0 and float(macd_hist.iloc[-2]) < 0:
             bull_catalyst += 1; bull_reasons.append("MACD Cross")
-        if rvol > 1.5:
+        if float(macd_hist.iloc[-1]) > 0:
+            bull_catalyst += 1; bull_reasons.append("MACD Bullish")
+        if rvol > 1.3:
             bull_catalyst += 1; bull_reasons.append(f"RVOL {rvol:.1f}x")
-        if day_chg_pct > 3:
+        if day_chg_pct > 1.5:
             bull_catalyst += 1; bull_reasons.append(f"Day +{day_chg_pct:.1f}%")
         if trend == "downtrend" and (patterns['hammer'] or patterns['bull_engulf']):
             bull_catalyst += 1; bull_reasons.append("Reversal Context")
+        # SMA trend alignment
+        sma20 = df['Close'].rolling(20).mean().iloc[-1]
+        if last_price > float(sma20):
+            bull_catalyst += 1; bull_reasons.append("Above SMA20")
+        if trend == "uptrend":
+            bull_catalyst += 1; bull_reasons.append("Uptrend")
 
         # Bearish catalyst score
         bear_catalyst = 0
         bear_reasons = []
         if patterns['star'] or patterns['bear_engulf'] or patterns['topping_tail']:
             bear_catalyst += 2; bear_reasons.append("Candle Pattern")
-        if rsi_val > 65:
+        if rsi_val > 60:
             bear_catalyst += 1; bear_reasons.append(f"RSI {rsi_val:.0f}")
         if bear_div:
             bear_catalyst += 2; bear_reasons.append("RSI Divergence")
         if float(macd_hist.iloc[-1]) < 0 and float(macd_hist.iloc[-2]) > 0:
             bear_catalyst += 1; bear_reasons.append("MACD Cross")
-        if rvol > 1.5:
+        if float(macd_hist.iloc[-1]) < 0:
+            bear_catalyst += 1; bear_reasons.append("MACD Bearish")
+        if rvol > 1.3:
             bear_catalyst += 1; bear_reasons.append(f"RVOL {rvol:.1f}x")
-        if day_chg_pct < -3:
+        if day_chg_pct < -1.5:
             bear_catalyst += 1; bear_reasons.append(f"Day {day_chg_pct:.1f}%")
         if trend == "uptrend" and (patterns['star'] or patterns['bear_engulf']):
             bear_catalyst += 1; bear_reasons.append("Reversal Context")
+        # SMA trend alignment
+        if last_price < float(sma20):
+            bear_catalyst += 1; bear_reasons.append("Below SMA20")
+        if trend == "downtrend":
+            bear_catalyst += 1; bear_reasons.append("Downtrend")
 
-        # Need at least score 3 on one side to proceed
-        if bull_catalyst < 3 and bear_catalyst < 3:
+        # Need at least score 2 on one side to proceed
+        max_catalyst = max(bull_catalyst, bear_catalyst)
+        print(f"  {sym}: Bull={bull_catalyst} Bear={bear_catalyst} RSI={rsi_val:.1f} Chg={day_chg_pct:.1f}%")
+        if max_catalyst < 2:
             return None
 
         # Determine dominant direction
@@ -1464,26 +1481,26 @@ def _analyze_options_setup(sym, df, iv_history):
                 iv = c.get("impliedVolatility", 0) or 0
 
                 # Filter 1: Liquidity
-                if vol < 300 or oi < 500:
+                if vol < 50 or oi < 100:
                     continue
 
                 mid = (bid + ask) / 2
                 if mid <= 0:
                     continue
                 spread_pct = ((ask - bid) / mid) * 100
-                if spread_pct > 10:
+                if spread_pct > 15:
                     continue  # Spread too wide
 
-                # Filter 3: Delta approximation (0.40-0.70)
+                # Filter 3: Delta approximation (0.30-0.70)
                 dist_pct = (strike - last_price) / last_price
                 is_valid_delta = False
                 if direction == "bullish":
-                    # Call: 0.70Δ ≈ 3-5% ITM, 0.40Δ ≈ 1-2% OTM
-                    if -0.05 <= dist_pct <= 0.02:
+                    # Call: 0.70Δ ≈ 5-7% ITM, 0.30Δ ≈ 3-5% OTM
+                    if -0.07 <= dist_pct <= 0.05:
                         is_valid_delta = True
                 else:
-                    # Put: 0.70Δ ≈ 3-5% ITM, 0.40Δ ≈ 1-2% OTM
-                    if -0.02 <= dist_pct <= 0.05:
+                    # Put: 0.70Δ ≈ 5-7% ITM, 0.30Δ ≈ 3-5% OTM
+                    if -0.05 <= dist_pct <= 0.07:
                         is_valid_delta = True
 
                 if not is_valid_delta:
