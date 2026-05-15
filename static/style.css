@@ -225,9 +225,9 @@ body {
 
 .mode-tab {
   flex: 1;
-  padding: 10px 12px;
+  padding: 10px 6px;
   font-family: 'Inter', sans-serif;
-  font-size: 0.82rem;
+  font-size: 0.72rem;
   font-weight: 600;
   color: var(--text-muted);
   background: transparent;
@@ -236,6 +236,8 @@ body {
   cursor: pointer;
   transition: all 0.25s ease;
   white-space: nowrap;
+  min-width: 0;
+  text-align: center;
 }
 
 .mode-tab:hover {
