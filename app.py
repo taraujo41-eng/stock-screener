@@ -9,6 +9,7 @@ from flask_cors import CORS
 from reversal_scanner import (
     reversal_scanner, full_market_scan, 
     momentum_watchlist_scan, momentum_full_market_scan,
+    options_watchlist_scan, options_full_market_scan,
     scan_progress, WATCHLIST, _reset_progress
 )
 from datetime import datetime, timedelta
@@ -28,6 +29,7 @@ CORS(app)
 WATCHLIST_FILE = os.path.join(os.path.dirname(__file__), "watchlist.json")
 SCAN_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_scan.json")
 MOMENTUM_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_momentum_scan.json")
+OPTIONS_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_options_scan.json")
 
 def load_watchlist():
     """Load watchlist from file, or use default."""
@@ -281,6 +283,96 @@ def scan_momentum_full_results():
         results = load_last_scan(MOMENTUM_RESULTS_FILE)
         if results:
             app.config["LAST_MOMENTUM_FULL_RESULTS"] = results
+
+    if results is None:
+        return jsonify({"ok": False, "error": "No scan results available"}), 404
+    return jsonify(results)
+
+# ── API: Options scans (async) ─────────────────────────────────────
+
+@app.route("/api/scan/options", methods=["POST"])
+def scan_options():
+    """Start an options watchlist scan."""
+    global _scan_running
+    if _scan_running:
+        return jsonify({"ok": False, "error": "A scan is already running"}), 409
+
+    req_data = request.get_json(silent=True) or {}
+    extended_hours = req_data.get("extended_hours", False)
+
+    def _run():
+        global _scan_running
+        _scan_running = True
+        try:
+            et_tz = pytz.timezone("America/New_York")
+            df = options_watchlist_scan(user_watchlist, extended_hours=extended_hours)
+            app.config["LAST_OPTIONS_RESULTS"] = {
+                "ok": True,
+                "mode": "options_watchlist",
+                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
+                "count": len(df) if not df.empty else 0,
+                "tickers_scanned": len(user_watchlist),
+                "results": df.to_dict(orient="records") if not df.empty else [],
+            }
+        except Exception as e:
+            app.config["LAST_OPTIONS_RESULTS"] = {"ok": False, "error": str(e)}
+            scan_progress["status"] = "error"
+            scan_progress["phase_label"] = str(e)
+        finally:
+            _scan_running = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "Options watchlist scan started"})
+
+@app.route("/api/scan/options/results", methods=["GET"])
+def scan_options_results():
+    results = app.config.get("LAST_OPTIONS_RESULTS")
+    if results is None:
+        return jsonify({"ok": False, "error": "No scan results available"}), 404
+    return jsonify(results)
+
+@app.route("/api/scan/options/full", methods=["POST"])
+def scan_options_full():
+    """Start a full market options scan."""
+    global _scan_running
+    if _scan_running:
+        return jsonify({"ok": False, "error": "A scan is already running"}), 409
+
+    req_data = request.get_json(silent=True) or {}
+    extended_hours = req_data.get("extended_hours", False)
+
+    def _run():
+        global _scan_running
+        _scan_running = True
+        try:
+            et_tz = pytz.timezone("America/New_York")
+            df = options_full_market_scan(extended_hours=extended_hours)
+            results_data = {
+                "ok": True,
+                "mode": "options_full",
+                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
+                "count": len(df) if not df.empty else 0,
+                "results": df.to_dict(orient="records") if not df.empty else [],
+            }
+            app.config["LAST_OPTIONS_FULL_RESULTS"] = results_data
+            save_last_scan(results_data, OPTIONS_RESULTS_FILE)
+        except Exception as e:
+            app.config["LAST_OPTIONS_FULL_RESULTS"] = {"ok": False, "error": str(e)}
+            scan_progress["status"] = "error"
+            scan_progress["phase_label"] = str(e)
+        finally:
+            _scan_running = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "Full options scan started"})
+
+@app.route("/api/scan/options/full/results", methods=["GET"])
+def scan_options_full_results():
+    results = app.config.get("LAST_OPTIONS_FULL_RESULTS")
+    if results is None:
+        results = load_last_scan(OPTIONS_RESULTS_FILE)
+        if results:
+            app.config["LAST_OPTIONS_FULL_RESULTS"] = results
 
     if results is None:
         return jsonify({"ok": False, "error": "No scan results available"}), 404

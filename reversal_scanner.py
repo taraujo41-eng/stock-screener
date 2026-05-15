@@ -16,6 +16,8 @@ import requests
 from datetime import datetime, timedelta
 from io import StringIO
 import time
+import json
+import os
 import warnings
 from data_fetcher import (
     fetch_batch, fetch_batch_concurrent, test_connection,
@@ -1249,6 +1251,437 @@ def momentum_full_market_scan(min_volume=500_000, min_price=5.0, extended_hours=
     
     if not results: return pd.DataFrame()
     return pd.DataFrame(results).sort_values(by="Score", ascending=False)
+
+# =====================================================================
+# IV Rank Tracker  (DIY — logs ATM IV per ticker per day)
+# =====================================================================
+
+IV_HISTORY_FILE = os.path.join(os.path.dirname(__file__), "iv_history.json")
+_IV_MAX_ENTRIES = 252  # 1 trading year
+
+def _load_iv_history():
+    """Load IV history from disk."""
+    if os.path.exists(IV_HISTORY_FILE):
+        try:
+            with open(IV_HISTORY_FILE, "r") as f:
+                return json.load(f)
+        except:
+            pass
+    return {}
+
+def _save_iv_history(history):
+    """Save IV history to disk."""
+    try:
+        with open(IV_HISTORY_FILE, "w") as f:
+            json.dump(history, f, indent=1)
+    except Exception as e:
+        print(f"  Failed to save IV history: {e}")
+
+def _update_iv_history(ticker, current_iv, history):
+    """
+    Record today's ATM IV for a ticker.
+    Caps at _IV_MAX_ENTRIES per ticker (rolling window).
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    if ticker not in history:
+        history[ticker] = {}
+    history[ticker][today] = round(current_iv, 4)
+    # Trim to max entries (keep most recent)
+    if len(history[ticker]) > _IV_MAX_ENTRIES:
+        sorted_dates = sorted(history[ticker].keys())
+        for old_date in sorted_dates[:len(history[ticker]) - _IV_MAX_ENTRIES]:
+            del history[ticker][old_date]
+
+def _compute_iv_rank(ticker, current_iv, history):
+    """
+    Compute IV Rank as a percentile (0–100).
+    Returns None if insufficient history (< 5 data points).
+    """
+    if ticker not in history or len(history[ticker]) < 5:
+        return None
+    iv_values = list(history[ticker].values())
+    iv_low = min(iv_values)
+    iv_high = max(iv_values)
+    if iv_high == iv_low:
+        return 50.0  # Flat IV — neutral
+    rank = ((current_iv - iv_low) / (iv_high - iv_low)) * 100
+    return round(max(0, min(100, rank)), 1)
+
+
+# =====================================================================
+# Options Setup Analyzer
+# =====================================================================
+
+def _get_atm_iv(chain_data, last_price, side="calls"):
+    """
+    Find the ATM implied volatility from a chain.
+    Returns the IV of the strike closest to last_price.
+    """
+    contracts = chain_data.get(side, [])
+    if not contracts:
+        return None
+    best = None
+    best_dist = float('inf')
+    for c in contracts:
+        strike = c.get("strike", 0)
+        iv = c.get("impliedVolatility", 0)
+        if iv and iv > 0:
+            dist = abs(strike - last_price)
+            if dist < best_dist:
+                best_dist = dist
+                best = iv
+    return best
+
+def _analyze_options_setup(sym, df, iv_history):
+    """
+    Two-phase options setup analysis:
+      Phase A: Lightweight momentum+reversal pre-screen (score >= 3)
+      Phase B: Options chain scan with all 6 filters:
+        1. Liquidity (Volume >= 300, OI >= 500, Spread < 10%)
+        2. DTE 20-60
+        3. Delta 0.40-0.70 (strike distance approximation)
+        4. IV Rank < 30% (from DIY tracker)
+        5. Stock momentum/catalyst alignment (Phase A score)
+        6. Unusual options flow confirmation
+    """
+    try:
+        if len(df) < 20:
+            return None
+
+        curr = df.iloc[-1]
+        prev = df.iloc[-2]
+        last_price = float(curr['Close'])
+        open_price = float(curr['Open'])
+        prev_close = float(prev['Close'])
+
+        # ── Phase A: Quick Catalyst Pre-Screen ──────────────
+        rsi_series = compute_rsi(df['Close'], 14)
+        rsi_val = float(rsi_series.iloc[-1])
+        macd_line, signal_line, macd_hist = compute_macd(df['Close'])
+        patterns = detect_patterns(df)
+        trend = get_trend_context(df, days=5)
+        rvol = compute_rvol(df)
+        day_chg_pct = ((last_price - prev_close) / prev_close) * 100
+
+        # Bullish catalyst score
+        bull_catalyst = 0
+        bull_reasons = []
+        if patterns['hammer'] or patterns['bull_engulf'] or patterns['bottoming_tail']:
+            bull_catalyst += 2; bull_reasons.append("Candle Pattern")
+        if rsi_val < 35:
+            bull_catalyst += 1; bull_reasons.append(f"RSI {rsi_val:.0f}")
+        bull_div, bear_div = detect_rsi_divergence(df['Close'], rsi_series, lookback=20)
+        if bull_div:
+            bull_catalyst += 2; bull_reasons.append("RSI Divergence")
+        if float(macd_hist.iloc[-1]) > 0 and float(macd_hist.iloc[-2]) < 0:
+            bull_catalyst += 1; bull_reasons.append("MACD Cross")
+        if rvol > 1.5:
+            bull_catalyst += 1; bull_reasons.append(f"RVOL {rvol:.1f}x")
+        if day_chg_pct > 3:
+            bull_catalyst += 1; bull_reasons.append(f"Day +{day_chg_pct:.1f}%")
+        if trend == "downtrend" and (patterns['hammer'] or patterns['bull_engulf']):
+            bull_catalyst += 1; bull_reasons.append("Reversal Context")
+
+        # Bearish catalyst score
+        bear_catalyst = 0
+        bear_reasons = []
+        if patterns['star'] or patterns['bear_engulf'] or patterns['topping_tail']:
+            bear_catalyst += 2; bear_reasons.append("Candle Pattern")
+        if rsi_val > 65:
+            bear_catalyst += 1; bear_reasons.append(f"RSI {rsi_val:.0f}")
+        if bear_div:
+            bear_catalyst += 2; bear_reasons.append("RSI Divergence")
+        if float(macd_hist.iloc[-1]) < 0 and float(macd_hist.iloc[-2]) > 0:
+            bear_catalyst += 1; bear_reasons.append("MACD Cross")
+        if rvol > 1.5:
+            bear_catalyst += 1; bear_reasons.append(f"RVOL {rvol:.1f}x")
+        if day_chg_pct < -3:
+            bear_catalyst += 1; bear_reasons.append(f"Day {day_chg_pct:.1f}%")
+        if trend == "uptrend" and (patterns['star'] or patterns['bear_engulf']):
+            bear_catalyst += 1; bear_reasons.append("Reversal Context")
+
+        # Need at least score 3 on one side to proceed
+        if bull_catalyst < 3 and bear_catalyst < 3:
+            return None
+
+        # Determine dominant direction
+        if bull_catalyst >= bear_catalyst:
+            direction = "bullish"
+            catalyst_score = bull_catalyst
+            catalyst_tags = bull_reasons
+        else:
+            direction = "bearish"
+            catalyst_score = bear_catalyst
+            catalyst_tags = bear_reasons
+
+        # ── Phase B: Options Chain Analysis ─────────────────
+        chain_meta = fetch_options_chain(sym)
+        if not chain_meta:
+            return None
+
+        now = time.time()
+
+        # Step 1: Get ATM IV for IV Rank tracking
+        first_chain = chain_meta.get("firstChain", {})
+        side = "calls" if direction == "bullish" else "puts"
+        atm_iv = _get_atm_iv(first_chain, last_price, side)
+        if atm_iv and atm_iv > 0:
+            _update_iv_history(sym, atm_iv, iv_history)
+
+        # Step 2: IV Rank filter
+        iv_rank = None
+        if atm_iv and atm_iv > 0:
+            iv_rank = _compute_iv_rank(sym, atm_iv, iv_history)
+            if iv_rank is not None and iv_rank > 30:
+                return None  # IV too high — skip
+
+        # Step 3: Find valid expirations (DTE 20-60)
+        valid_exps = []
+        for exp in chain_meta.get("expirations", []):
+            dte = (exp - now) / 86400
+            if 20 <= dte <= 60:
+                valid_exps.append(exp)
+
+        if not valid_exps:
+            return None
+
+        # Step 4: Scan contracts with all filters
+        best_contract = None
+
+        for exp_ts in valid_exps:
+            chain = fetch_options_for_expiration(sym, exp_ts)
+            if not chain:
+                continue
+
+            contracts = chain.get(side, [])
+
+            for c in contracts:
+                strike = c.get("strike", 0)
+                vol = c.get("volume", 0) or 0
+                oi = c.get("openInterest", 0) or 0
+                bid = c.get("bid", 0) or 0
+                ask = c.get("ask", 0) or 0
+                iv = c.get("impliedVolatility", 0) or 0
+
+                # Filter 1: Liquidity
+                if vol < 300 or oi < 500:
+                    continue
+
+                mid = (bid + ask) / 2
+                if mid <= 0:
+                    continue
+                spread_pct = ((ask - bid) / mid) * 100
+                if spread_pct > 10:
+                    continue  # Spread too wide
+
+                # Filter 3: Delta approximation (0.40-0.70)
+                dist_pct = (strike - last_price) / last_price
+                is_valid_delta = False
+                if direction == "bullish":
+                    # Call: 0.70Δ ≈ 3-5% ITM, 0.40Δ ≈ 1-2% OTM
+                    if -0.05 <= dist_pct <= 0.02:
+                        is_valid_delta = True
+                else:
+                    # Put: 0.70Δ ≈ 3-5% ITM, 0.40Δ ≈ 1-2% OTM
+                    if -0.02 <= dist_pct <= 0.05:
+                        is_valid_delta = True
+
+                if not is_valid_delta:
+                    continue
+
+                # Estimate delta from distance
+                abs_dist = abs(dist_pct)
+                if direction == "bullish":
+                    est_delta = 0.50 + (dist_pct * -10)  # ITM increases delta
+                else:
+                    est_delta = 0.50 + (dist_pct * 10)
+                est_delta = max(0.30, min(0.80, est_delta))
+
+                # Score: prefer higher liquidity
+                score = vol + oi
+                dte_days = int((exp_ts - now) / 86400)
+
+                if not best_contract or score > best_contract["_score"]:
+                    best_contract = {
+                        "symbol": c.get("contractSymbol", ""),
+                        "strike": strike,
+                        "type": "CALL" if direction == "bullish" else "PUT",
+                        "exp": datetime.fromtimestamp(exp_ts).strftime("%b %d"),
+                        "dte": dte_days,
+                        "mid": round(mid, 2),
+                        "bid": round(bid, 2),
+                        "ask": round(ask, 2),
+                        "iv": round(iv * 100, 1),
+                        "volume": vol,
+                        "oi": oi,
+                        "spread_pct": round(spread_pct, 1),
+                        "est_delta": round(est_delta, 2),
+                        "_score": score,
+                    }
+
+            if best_contract:
+                break  # Found a good contract in this expiration
+
+        if not best_contract:
+            return None
+
+        # Step 5: Unusual options flow check
+        bull_unusual, bear_unusual, flow_detail = detect_unusual_options(sym)
+        has_unusual_flow = (bull_unusual if direction == "bullish" else bear_unusual)
+        flow_str = flow_detail if has_unusual_flow else ""
+
+        # Build result
+        iv_rank_str = f"{iv_rank:.0f}%" if iv_rank is not None else "Building..."
+        catalyst_str = " | ".join(catalyst_tags)
+
+        return {
+            "Ticker": sym,
+            "Last Price": round(last_price, 2),
+            "Direction": direction.capitalize(),
+            "Catalyst Score": catalyst_score,
+            "Catalyst Tags": catalyst_str,
+            "Contract": f"{best_contract['exp']} ${best_contract['strike']} {best_contract['type']}",
+            "Strike": best_contract["strike"],
+            "Exp": best_contract["exp"],
+            "Type": best_contract["type"],
+            "DTE": best_contract["dte"],
+            "Mid": best_contract["mid"],
+            "Bid": best_contract["bid"],
+            "Ask": best_contract["ask"],
+            "IV": best_contract["iv"],
+            "IV Rank": iv_rank_str,
+            "IV Rank Value": iv_rank if iv_rank is not None else -1,
+            "Volume": best_contract["volume"],
+            "OI": best_contract["oi"],
+            "Spread": f"{best_contract['spread_pct']}%",
+            "Est Delta": best_contract["est_delta"],
+            "Unusual Flow": has_unusual_flow,
+            "Flow Detail": flow_str,
+            "RSI": round(rsi_val, 1),
+        }
+    except Exception as e:
+        print(f"  Error analyzing options for {sym}: {e}")
+    return None
+
+
+# =====================================================================
+# Options Scanners
+# =====================================================================
+
+def options_watchlist_scan(tickers, min_volume=500_000, min_price=5.0, extended_hours=False):
+    """Scan watchlist tickers for options setups."""
+    _reset_progress()
+    scan_progress["status"] = "running"
+    start_time = time.time()
+    iv_history = _load_iv_history()
+
+    results = []
+    total = len(tickers)
+    _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
+
+    def _on_dl_progress(i, tot, sym):
+        _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=len(results))
+
+    stock_data = fetch_batch(tickers, days=280, delay=0.05, on_progress=_on_dl_progress, interval="1d")
+
+    for i, (sym, df) in enumerate(stock_data.items()):
+        _update_progress("analyzing", f"Analyzing {sym} options...", i, len(stock_data), ticker=sym, found=len(results))
+        try:
+            today_date = df.index.date[-1]
+            recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
+            last_price = float(df['Close'].iloc[-1])
+            if recent_vol < min_volume or last_price < min_price:
+                continue
+            result = _analyze_options_setup(sym, df, iv_history)
+            if result:
+                results.append(result)
+        except:
+            continue
+
+    # Save updated IV history
+    _save_iv_history(iv_history)
+
+    total_time = time.time() - start_time
+    scan_progress.update({
+        "status": "done", "phase": "complete",
+        "phase_label": f"Done — {len(results)} options setups found",
+        "current": total, "total": total,
+        "found": len(results), "pct": 100, "eta_seconds": 0,
+    })
+
+    if not results:
+        return pd.DataFrame()
+    return pd.DataFrame(results).sort_values(by="Catalyst Score", ascending=False)
+
+
+def options_full_market_scan(min_volume=500_000, min_price=5.0, extended_hours=False):
+    """Scan full market for options setups."""
+    _reset_progress()
+    scan_progress["status"] = "running"
+    start_time = time.time()
+    iv_history = _load_iv_history()
+
+    all_tickers = get_us_tickers()
+    if not all_tickers:
+        scan_progress["status"] = "error"
+        scan_progress["phase_label"] = "Failed to fetch ticker list"
+        return pd.DataFrame()
+
+    total_tickers = len(all_tickers)
+
+    def _on_dl_progress(done, tot, sym):
+        _update_progress("downloading", f"Downloading... ({done}/{tot})", done, tot, ticker=sym, found=0)
+        elapsed = time.time() - start_time
+        if done > 0:
+            rate = elapsed / done
+            scan_progress["eta_seconds"] = int((tot - done) * rate)
+
+    stock_data = fetch_batch_concurrent(
+        all_tickers, days=280, max_workers=8,
+        on_progress=_on_dl_progress, delay=0.05, interval="1d"
+    )
+
+    # Pre-filter
+    candidates = []
+    for sym, df in stock_data.items():
+        try:
+            today_date = df.index.date[-1]
+            recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
+            price = float(df['Close'].iloc[-1])
+            if recent_vol >= min_volume and price >= min_price:
+                candidates.append((sym, df))
+        except:
+            continue
+
+    results = []
+    total_candidates = len(candidates)
+    phase3_start = time.time()
+
+    for j, (sym, df) in enumerate(candidates):
+        _update_progress("analyzing", f"Analyzing {sym} options...", j, total_candidates, ticker=sym, found=len(results))
+        elapsed = time.time() - phase3_start
+        if j > 0:
+            rate = elapsed / j
+            scan_progress["eta_seconds"] = int((total_candidates - j) * rate)
+
+        result = _analyze_options_setup(sym, df, iv_history)
+        if result:
+            results.append(result)
+
+    # Save updated IV history
+    _save_iv_history(iv_history)
+
+    scan_progress.update({
+        "status": "done", "phase": "complete",
+        "phase_label": f"Done — {len(results)} options setups found",
+        "current": total_candidates, "total": total_candidates,
+        "found": len(results), "pct": 100, "eta_seconds": 0,
+    })
+
+    if not results:
+        return pd.DataFrame()
+    return pd.DataFrame(results).sort_values(by="Catalyst Score", ascending=False)
+
 
 # =====================================================================
 # Watchlist (for quick scans)

@@ -101,6 +101,9 @@ function updateModeDesc() {
   } else if (scanMode === "momentum") {
     desc.textContent = "Scans market for breakouts/breakdowns — takes 3-8 minutes";
     editBtn.classList.add("hidden");
+  } else if (scanMode === "options") {
+    desc.textContent = "Scans for high-probability options setups — takes 3-8 minutes";
+    editBtn.classList.add("hidden");
   }
 }
 
@@ -173,6 +176,31 @@ async function setMode(mode, btn) {
         <div class="empty-state__icon">🚀</div>
         <div class="empty-state__title">Ready to scan</div>
         <div class="empty-state__text">Click the button above to find breakout momentum</div>
+      </div>
+    `;
+    hideAuxUI();
+  } else if (mode === "options") {
+    scanBtn.querySelector(".scan-btn__text").textContent = "🎯  Scan Options";
+    try {
+      showSkeleton();
+      const res = await fetch("/api/scan/options/full/results");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && data.results) {
+          displayResults(data);
+          updateModeDesc();
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("No saved options scan available yet");
+    }
+
+    document.getElementById("results").innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state__icon">🎯</div>
+        <div class="empty-state__title">Ready to scan</div>
+        <div class="empty-state__text">Click above to find high-probability options setups<br>DTE 20-60 · Delta 0.40-0.70 · IV Rank &lt;30%</div>
       </div>
     `;
     hideAuxUI();
@@ -381,22 +409,135 @@ function buildCard(item, index) {
   `;
 }
 
+// ── Build an options card ───────────────────────────────────
+
+function buildOptionsCard(item, index) {
+  const isBullish = item.Direction === "Bullish";
+  const dirIcon = isBullish ? "🟢" : "🔴";
+  const dirClass = isBullish ? "opts-dir--bull" : "opts-dir--bear";
+  const typeClass = isBullish ? "opts-type--call" : "opts-type--put";
+
+  const catalystPills = (item["Catalyst Tags"] || "").split(" | ").filter(s => s).map(s =>
+    `<span class="pill ${isBullish ? 'pill--bull' : 'pill--bear'}">${s}</span>`
+  ).join("");
+
+  const flowBadge = item["Unusual Flow"] ? `
+    <div class="opts-flow-badge">
+      <span class="opts-flow-badge__icon">🔥</span>
+      <span>Unusual Flow${item["Flow Detail"] ? " · " + item["Flow Detail"] : ""}</span>
+    </div>
+  ` : "";
+
+  const ivRankVal = item["IV Rank Value"];
+  const ivRankDisplay = item["IV Rank"] || "Building...";
+  let ivRankClass = "opts-iv--building";
+  if (ivRankVal >= 0 && ivRankVal <= 15) ivRankClass = "opts-iv--low";
+  else if (ivRankVal > 15 && ivRankVal <= 30) ivRankClass = "opts-iv--med";
+  else if (ivRankVal > 30) ivRankClass = "opts-iv--high";
+
+  const catScore = item["Catalyst Score"] || 0;
+  let catGrade = "B";
+  if (catScore >= 6) catGrade = "A+";
+  else if (catScore >= 4) catGrade = "A";
+  const gradeCls = catGrade === "A+" ? "grade--aplus" : catGrade === "A" ? "grade--a" : "grade--b";
+
+  return `
+    <div class="card opts-card" style="animation-delay: ${Math.min(index * 0.04, 1.2)}s">
+      <div class="card__top">
+        <div class="card__ticker-wrap">
+          <div class="card__ticker">${item.Ticker}</div>
+          <div class="opts-dir-badge ${dirClass}">${dirIcon} ${item.Direction}</div>
+          <div class="grade-badge ${gradeCls}">${catGrade} <span class="grade-badge__score">(${catScore}pts)</span></div>
+        </div>
+        <div class="card__price">$${item["Last Price"].toFixed(2)}</div>
+      </div>
+
+      <div class="opts-contract">
+        <div class="opts-contract__tag">CONTRACT</div>
+        <div class="opts-contract__details">
+          <span class="opts-contract__type ${typeClass}">${item.Type}</span>
+          <span class="opts-contract__strike">$${item.Strike}</span>
+          <span class="opts-contract__exp">${item.Exp}</span>
+        </div>
+        <div class="opts-contract__price">@$${item.Mid.toFixed(2)}</div>
+      </div>
+
+      <div class="opts-metrics">
+        <div class="opts-metric">
+          <div class="opts-metric__value">${item.DTE}d</div>
+          <div class="opts-metric__label">DTE</div>
+        </div>
+        <div class="opts-metric">
+          <div class="opts-metric__value">${item["Est Delta"].toFixed(2)}Δ</div>
+          <div class="opts-metric__label">Delta</div>
+        </div>
+        <div class="opts-metric">
+          <div class="opts-metric__value ${ivRankClass}">${ivRankDisplay}</div>
+          <div class="opts-metric__label">IV Rank</div>
+        </div>
+        <div class="opts-metric">
+          <div class="opts-metric__value">${item.IV}%</div>
+          <div class="opts-metric__label">IV</div>
+        </div>
+      </div>
+
+      <div class="opts-liquidity">
+        <div class="opts-liq-item">
+          <span class="opts-liq-label">Vol</span>
+          <span class="opts-liq-value">${fmtVolume(item.Volume)}</span>
+        </div>
+        <div class="opts-liq-item">
+          <span class="opts-liq-label">OI</span>
+          <span class="opts-liq-value">${fmtVolume(item.OI)}</span>
+        </div>
+        <div class="opts-liq-item">
+          <span class="opts-liq-label">Spread</span>
+          <span class="opts-liq-value">${item.Spread}</span>
+        </div>
+        <div class="opts-liq-item">
+          <span class="opts-liq-label">Bid/Ask</span>
+          <span class="opts-liq-value">$${item.Bid.toFixed(2)}/$${item.Ask.toFixed(2)}</span>
+        </div>
+      </div>
+
+      ${flowBadge}
+
+      <div class="card__signals">
+        <div class="signal-row">
+          <span class="signal-row__icon">⚡</span>
+          ${catalystPills}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 // ── Render results ─────────────────────────────────────────
 
 function renderResults() {
   const el = document.getElementById("results");
+  const isOptions = scanMode === "options" || (scanData[0] && scanData[0].Direction);
 
   let filtered = scanData;
-  if (currentFilter === "bullish") {
-    filtered = scanData.filter(d =>
-      d["Bullish Signals"] && d["Bullish Signals"] !== "—");
-  } else if (currentFilter === "bearish") {
-    filtered = scanData.filter(d =>
-      d["Bearish Signals"] && d["Bearish Signals"] !== "—");
-  } else if (currentFilter === "both") {
-    filtered = scanData.filter(d =>
-      (d["Bullish Signals"] && d["Bullish Signals"] !== "—") &&
-      (d["Bearish Signals"] && d["Bearish Signals"] !== "—"));
+  if (isOptions) {
+    // Options mode filters by direction
+    if (currentFilter === "bullish") {
+      filtered = scanData.filter(d => d.Direction === "Bullish");
+    } else if (currentFilter === "bearish") {
+      filtered = scanData.filter(d => d.Direction === "Bearish");
+    }
+  } else {
+    if (currentFilter === "bullish") {
+      filtered = scanData.filter(d =>
+        d["Bullish Signals"] && d["Bullish Signals"] !== "—");
+    } else if (currentFilter === "bearish") {
+      filtered = scanData.filter(d =>
+        d["Bearish Signals"] && d["Bearish Signals"] !== "—");
+    } else if (currentFilter === "both") {
+      filtered = scanData.filter(d =>
+        (d["Bullish Signals"] && d["Bullish Signals"] !== "—") &&
+        (d["Bearish Signals"] && d["Bearish Signals"] !== "—"));
+    }
   }
 
   if (filtered.length === 0) {
@@ -410,31 +551,48 @@ function renderResults() {
     return;
   }
 
-  el.innerHTML = `<div class="cards">${filtered.map(buildCard).join("")}</div>`;
+  const cardBuilder = isOptions ? buildOptionsCard : buildCard;
+  el.innerHTML = `<div class="cards">${filtered.map(cardBuilder).join("")}</div>`;
 }
 
 // ── Stats bar ──────────────────────────────────────────────
 
 function updateStats() {
   const isMomentum = scanMode === "momentum" || (scanData[0] && scanData[0].mode && scanData[0].mode.startsWith("momentum"));
-  
-  const bullCount = scanData.filter(d =>
-    d["Bullish Signals"] && d["Bullish Signals"] !== "—").length;
-  const bearCount = scanData.filter(d =>
-    d["Bearish Signals"] && d["Bearish Signals"] !== "—").length;
+  const isOptions = scanMode === "options" || (scanData[0] && scanData[0].Direction);
 
-  document.getElementById("statTotal").textContent = scanData.length;
-  document.getElementById("statBull").textContent = bullCount;
-  document.getElementById("statBear").textContent = bearCount;
-  
-  document.querySelectorAll(".stat__label")[1].textContent = isMomentum ? "Breakout" : "Bullish";
-  document.querySelectorAll(".stat__label")[2].textContent = isMomentum ? "Breakdown" : "Bearish";
+  if (isOptions) {
+    const bullCount = scanData.filter(d => d.Direction === "Bullish").length;
+    const bearCount = scanData.filter(d => d.Direction === "Bearish").length;
+    document.getElementById("statTotal").textContent = scanData.length;
+    document.getElementById("statBull").textContent = bullCount;
+    document.getElementById("statBear").textContent = bearCount;
+    document.querySelectorAll(".stat__label")[1].textContent = "Calls";
+    document.querySelectorAll(".stat__label")[2].textContent = "Puts";
+  } else {
+    const bullCount = scanData.filter(d =>
+      d["Bullish Signals"] && d["Bullish Signals"] !== "—").length;
+    const bearCount = scanData.filter(d =>
+      d["Bearish Signals"] && d["Bearish Signals"] !== "—").length;
+    document.getElementById("statTotal").textContent = scanData.length;
+    document.getElementById("statBull").textContent = bullCount;
+    document.getElementById("statBear").textContent = bearCount;
+    document.querySelectorAll(".stat__label")[1].textContent = isMomentum ? "Breakout" : "Bullish";
+    document.querySelectorAll(".stat__label")[2].textContent = isMomentum ? "Breakdown" : "Bearish";
+  }
 }
 
 // ── Display results (shared logic) ─────────────────────────
 
 function displayResults(data) {
-  scanData = (data.results || []).sort((a, b) => (b.Score || 0) - (a.Score || 0));
+  const isOptions = scanMode === "options" || (data.mode && data.mode.startsWith("options"));
+  const isMomentum = scanMode === "momentum" || (data.mode && data.mode.startsWith("momentum"));
+
+  if (isOptions) {
+    scanData = (data.results || []).sort((a, b) => (b["Catalyst Score"] || 0) - (a["Catalyst Score"] || 0));
+  } else {
+    scanData = (data.results || []).sort((a, b) => (b.Score || 0) - (a.Score || 0));
+  }
 
   document.getElementById("statsBar").classList.remove("hidden");
   document.getElementById("timestamp").classList.remove("hidden");
@@ -445,7 +603,7 @@ function displayResults(data) {
   if (data.tickers_scanned) {
     badge.textContent = `Scanned ${data.tickers_scanned.toLocaleString()} tickers`;
     badge.classList.remove("hidden");
-  } else if (data.mode === "full_market") {
+  } else if (data.mode === "full_market" || data.mode === "options_full") {
     badge.textContent = `Full market scan`;
     badge.classList.remove("hidden");
   }
@@ -457,16 +615,41 @@ function displayResults(data) {
     b.classList.remove("filter-btn--active"));
   document.querySelector('[data-filter="all"]').classList.add("filter-btn--active");
 
-  const isMomentum = scanMode === "momentum" || (data.mode && data.mode.startsWith("momentum"));
-  const bullLabel = isMomentum ? "🟢 Breakout" : "🟢 Bullish";
-  const bearLabel = isMomentum ? "🔴 Breakdown" : "🔴 Bearish";
-  
+  // Update filter labels
+  let bullLabel, bearLabel;
+  if (isOptions) {
+    bullLabel = "🟢 Calls";
+    bearLabel = "🔴 Puts";
+  } else if (isMomentum) {
+    bullLabel = "🟢 Breakout";
+    bearLabel = "🔴 Breakdown";
+  } else {
+    bullLabel = "🟢 Bullish";
+    bearLabel = "🔴 Bearish";
+  }
   document.querySelector('[data-filter="bullish"]').textContent = bullLabel;
   document.querySelector('[data-filter="bearish"]').textContent = bearLabel;
 
+  // Hide "both" filter for options mode (not applicable)
+  const bothBtn = document.querySelector('[data-filter="both"]');
+  if (isOptions) {
+    bothBtn.classList.add("hidden");
+  } else {
+    bothBtn.classList.remove("hidden");
+  }
+
   if (scanData.length === 0) {
-    const emptyTitle = isMomentum ? "No breakouts" : "All clear";
-    const emptyText = isMomentum ? "No strong momentum found right now." : "No reversal setups found right now.";
+    let emptyTitle, emptyText;
+    if (isOptions) {
+      emptyTitle = "No setups found";
+      emptyText = "No options meeting all criteria right now.";
+    } else if (isMomentum) {
+      emptyTitle = "No breakouts";
+      emptyText = "No strong momentum found right now.";
+    } else {
+      emptyTitle = "All clear";
+      emptyText = "No reversal setups found right now.";
+    }
     
     document.getElementById("results").innerHTML = `
       <div class="empty-state">
@@ -568,11 +751,24 @@ async function runScan() {
 
   const extHours = document.getElementById("extHoursToggle")?.checked || false;
 
-  // Both modes now use the same async pattern
+  // All modes use the same async pattern
   const isMomentum = scanMode === "momentum";
+  const isOptions = scanMode === "options";
   
-  const endpoint = isMomentum ? "/api/scan/momentum/full" : (scanMode === "watchlist" ? "/api/scan" : "/api/scan/full");
-  const resultsEndpoint = isMomentum ? "/api/scan/momentum/full/results" : (scanMode === "watchlist" ? "/api/scan/results" : "/api/scan/full/results");
+  let endpoint, resultsEndpoint;
+  if (isOptions) {
+    endpoint = "/api/scan/options/full";
+    resultsEndpoint = "/api/scan/options/full/results";
+  } else if (isMomentum) {
+    endpoint = "/api/scan/momentum/full";
+    resultsEndpoint = "/api/scan/momentum/full/results";
+  } else if (scanMode === "watchlist") {
+    endpoint = "/api/scan";
+    resultsEndpoint = "/api/scan/results";
+  } else {
+    endpoint = "/api/scan/full";
+    resultsEndpoint = "/api/scan/full/results";
+  }
 
   // Retry logic for Render cold starts
   const maxRetries = 3;
