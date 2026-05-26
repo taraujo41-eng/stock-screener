@@ -8,7 +8,6 @@ from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
 from reversal_scanner import (
     reversal_scanner, full_market_scan, 
-    momentum_watchlist_scan, momentum_full_market_scan,
     options_watchlist_scan, options_full_market_scan,
     scan_progress, WATCHLIST, _reset_progress
 )
@@ -28,7 +27,6 @@ CORS(app)
 
 WATCHLIST_FILE = os.path.join(os.path.dirname(__file__), "watchlist.json")
 SCAN_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_scan.json")
-MOMENTUM_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_momentum_scan.json")
 OPTIONS_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_options_scan.json")
 
 def load_watchlist():
@@ -196,96 +194,6 @@ def scan_full_results():
     if results is None:
         return jsonify({"ok": False, "error": "No scan results available"}), 404
         
-    return jsonify(results)
-
-# ── API: Momentum scans (async) ────────────────────────────────────────
-
-@app.route("/api/scan/momentum", methods=["POST"])
-def scan_momentum():
-    """Start a momentum watchlist scan."""
-    global _scan_running
-    if _scan_running:
-        return jsonify({"ok": False, "error": "A scan is already running"}), 409
-
-    req_data = request.get_json(silent=True) or {}
-    extended_hours = req_data.get("extended_hours", False)
-
-    def _run():
-        global _scan_running
-        _scan_running = True
-        try:
-            et_tz = pytz.timezone("America/New_York")
-            df = momentum_watchlist_scan(user_watchlist, extended_hours=extended_hours)
-            app.config["LAST_MOMENTUM_RESULTS"] = {
-                "ok": True,
-                "mode": "momentum_watchlist",
-                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
-                "count": len(df) if not df.empty else 0,
-                "tickers_scanned": len(user_watchlist),
-                "results": df.to_dict(orient="records") if not df.empty else [],
-            }
-        except Exception as e:
-            app.config["LAST_MOMENTUM_RESULTS"] = {"ok": False, "error": str(e)}
-            scan_progress["status"] = "error"
-            scan_progress["phase_label"] = str(e)
-        finally:
-            _scan_running = False
-
-    threading.Thread(target=_run, daemon=True).start()
-    return jsonify({"ok": True, "message": "Momentum scan started"})
-
-@app.route("/api/scan/momentum/results", methods=["GET"])
-def scan_momentum_results():
-    results = app.config.get("LAST_MOMENTUM_RESULTS")
-    if results is None:
-        return jsonify({"ok": False, "error": "No scan results available"}), 404
-    return jsonify(results)
-
-@app.route("/api/scan/momentum/full", methods=["POST"])
-def scan_momentum_full():
-    """Start a full market momentum scan."""
-    global _scan_running
-    if _scan_running:
-        return jsonify({"ok": False, "error": "A scan is already running"}), 409
-
-    req_data = request.get_json(silent=True) or {}
-    extended_hours = req_data.get("extended_hours", False)
-
-    def _run():
-        global _scan_running
-        _scan_running = True
-        try:
-            et_tz = pytz.timezone("America/New_York")
-            df = momentum_full_market_scan(extended_hours=extended_hours)
-            results_data = {
-                "ok": True,
-                "mode": "momentum_full",
-                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
-                "count": len(df) if not df.empty else 0,
-                "results": df.to_dict(orient="records") if not df.empty else [],
-            }
-            app.config["LAST_MOMENTUM_FULL_RESULTS"] = results_data
-            save_last_scan(results_data, MOMENTUM_RESULTS_FILE)
-        except Exception as e:
-            app.config["LAST_MOMENTUM_FULL_RESULTS"] = {"ok": False, "error": str(e)}
-            scan_progress["status"] = "error"
-            scan_progress["phase_label"] = str(e)
-        finally:
-            _scan_running = False
-
-    threading.Thread(target=_run, daemon=True).start()
-    return jsonify({"ok": True, "message": "Full momentum scan started"})
-
-@app.route("/api/scan/momentum/full/results", methods=["GET"])
-def scan_momentum_full_results():
-    results = app.config.get("LAST_MOMENTUM_FULL_RESULTS")
-    if results is None:
-        results = load_last_scan(MOMENTUM_RESULTS_FILE)
-        if results:
-            app.config["LAST_MOMENTUM_FULL_RESULTS"] = results
-
-    if results is None:
-        return jsonify({"ok": False, "error": "No scan results available"}), 404
     return jsonify(results)
 
 # ── API: Options scans (async) ─────────────────────────────────────

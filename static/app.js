@@ -98,9 +98,6 @@ function updateModeDesc() {
   } else if (scanMode === "full") {
     desc.textContent = "Scans entire US market — takes 3-8 minutes";
     editBtn.classList.add("hidden");
-  } else if (scanMode === "momentum") {
-    desc.textContent = "Scans market for breakouts/breakdowns — takes 3-8 minutes";
-    editBtn.classList.add("hidden");
   } else if (scanMode === "options") {
     desc.textContent = "Scans for high-probability options setups — takes 3-8 minutes";
     editBtn.classList.add("hidden");
@@ -151,31 +148,6 @@ async function setMode(mode, btn) {
         <div class="empty-state__icon">🌐</div>
         <div class="empty-state__title">Ready to scan</div>
         <div class="empty-state__text">Click the button above to scan the full market</div>
-      </div>
-    `;
-    hideAuxUI();
-  } else if (mode === "momentum") {
-    scanBtn.querySelector(".scan-btn__text").textContent = "🚀  Scan Momentum";
-    try {
-      showSkeleton();
-      const res = await fetch("/api/scan/momentum/full/results");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.ok && data.results) {
-          displayResults(data);
-          updateModeDesc();
-          return;
-        }
-      }
-    } catch (e) {
-      console.error("No saved momentum scan available yet");
-    }
-
-    document.getElementById("results").innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state__icon">🚀</div>
-        <div class="empty-state__title">Ready to scan</div>
-        <div class="empty-state__text">Click the button above to find breakout momentum</div>
       </div>
     `;
     hideAuxUI();
@@ -361,8 +333,6 @@ function buildCard(item, index) {
   const score = item.Score || 0;
   const gradeCls = grade === "A+" ? "grade--aplus" : grade === "A" ? "grade--a" : "grade--b";
 
-  const isMomentum = (item.mode && item.mode.startsWith("momentum")) || scanMode === "momentum";
-
   const bullPills = bullish.map(s =>
     `<span class="pill pill--bull">${s}</span>`
   ).join("");
@@ -371,8 +341,8 @@ function buildCard(item, index) {
     `<span class="pill pill--bear">${s}</span>`
   ).join("");
 
-  const bullIcon = isMomentum ? "🚀" : "🟢";
-  const bearIcon = isMomentum ? "📉" : "🔴";
+  const bullIcon = "🟢";
+  const bearIcon = "🔴";
 
   return `
     <div class="card" style="animation-delay: ${Math.min(index * 0.04, 1.2)}s">
@@ -558,7 +528,6 @@ function renderResults() {
 // ── Stats bar ──────────────────────────────────────────────
 
 function updateStats() {
-  const isMomentum = scanMode === "momentum" || (scanData[0] && scanData[0].mode && scanData[0].mode.startsWith("momentum"));
   const isOptions = scanMode === "options" || (scanData[0] && scanData[0].Direction);
 
   if (isOptions) {
@@ -577,8 +546,8 @@ function updateStats() {
     document.getElementById("statTotal").textContent = scanData.length;
     document.getElementById("statBull").textContent = bullCount;
     document.getElementById("statBear").textContent = bearCount;
-    document.querySelectorAll(".stat__label")[1].textContent = isMomentum ? "Breakout" : "Bullish";
-    document.querySelectorAll(".stat__label")[2].textContent = isMomentum ? "Breakdown" : "Bearish";
+    document.querySelectorAll(".stat__label")[1].textContent = "Bullish";
+    document.querySelectorAll(".stat__label")[2].textContent = "Bearish";
   }
 }
 
@@ -586,7 +555,6 @@ function updateStats() {
 
 function displayResults(data) {
   const isOptions = scanMode === "options" || (data.mode && data.mode.startsWith("options"));
-  const isMomentum = scanMode === "momentum" || (data.mode && data.mode.startsWith("momentum"));
 
   if (isOptions) {
     scanData = (data.results || []).sort((a, b) => (b["Catalyst Score"] || 0) - (a["Catalyst Score"] || 0));
@@ -620,9 +588,6 @@ function displayResults(data) {
   if (isOptions) {
     bullLabel = "🟢 Calls";
     bearLabel = "🔴 Puts";
-  } else if (isMomentum) {
-    bullLabel = "🟢 Breakout";
-    bearLabel = "🔴 Breakdown";
   } else {
     bullLabel = "🟢 Bullish";
     bearLabel = "🔴 Bearish";
@@ -643,9 +608,6 @@ function displayResults(data) {
     if (isOptions) {
       emptyTitle = "No setups found";
       emptyText = "No options meeting all criteria right now.";
-    } else if (isMomentum) {
-      emptyTitle = "No breakouts";
-      emptyText = "No strong momentum found right now.";
     } else {
       emptyTitle = "All clear";
       emptyText = "No reversal setups found right now.";
@@ -752,16 +714,12 @@ async function runScan() {
   const extHours = document.getElementById("extHoursToggle")?.checked || false;
 
   // All modes use the same async pattern
-  const isMomentum = scanMode === "momentum";
   const isOptions = scanMode === "options";
   
   let endpoint, resultsEndpoint;
   if (isOptions) {
     endpoint = "/api/scan/options/full";
     resultsEndpoint = "/api/scan/options/full/results";
-  } else if (isMomentum) {
-    endpoint = "/api/scan/momentum/full";
-    resultsEndpoint = "/api/scan/momentum/full/results";
   } else if (scanMode === "watchlist") {
     endpoint = "/api/scan";
     resultsEndpoint = "/api/scan/results";
