@@ -7,3 +7,8 @@ last_scan.json
 last_momentum_scan.json
 last_options_scan.json
 iv_history.json
+did.bin
+webull_credentials.json
+webull_data_sdk.log
+last_orb_scan.json
+conf/

@@ -4,6 +4,12 @@ Cloud-safe stock data fetcher.
 Uses Yahoo Finance's chart API directly with browser-like headers
 and proper cookie/crumb authentication. This bypasses the
 bot-detection that blocks the yfinance library on cloud servers.
+
+Now integrates:
+1. Official Webull OpenAPI (Option A) support.
+2. Unofficial Webull SDK (Option B) support which logs in using account credentials,
+   allowing users to inherit their personal real-time stock and options data subscriptions!
+3. Seamless, automatic fallback to Yahoo Finance on permission or access errors.
 """
 
 import requests
@@ -14,10 +20,138 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import warnings
 import traceback as tb
+import os
+import pickle
+from dotenv import load_dotenv
+
+# Load credentials from .env
+load_dotenv()
 
 warnings.filterwarnings("ignore")
 
-# ── Session management ──────────────────────────────────────────────
+# ── Webull Unofficial Client Loader (Option B — inherits personal subscriptions) ──
+
+_unofficial_client = None
+_unofficial_initialized = False
+
+def get_unofficial_client():
+    """Retrieve and initialize the unofficial Webull client using account credentials."""
+    global _unofficial_client, _unofficial_initialized
+    if _unofficial_initialized:
+        return _unofficial_client
+        
+    email = os.getenv("WEBULL_EMAIL")
+    password = os.getenv("WEBULL_PASSWORD")
+    trade_pin = os.getenv("WEBULL_TRADE_PIN")
+    
+    if email and email != "your_email_here" and password and password != "your_password_here":
+        try:
+            from webull import webull
+            wb = webull()
+            token_path = os.path.dirname(__file__)
+            credentials_file = os.path.join(token_path, "webull_credentials.json")
+            
+            # 1. Try to load cached token
+            if os.path.exists(credentials_file):
+                try:
+                    with open(credentials_file, "rb") as f:
+                        token_data = pickle.load(f)
+                    
+                    wb._access_token = token_data.get("accessToken")
+                    wb._refresh_token = token_data.get("refreshToken")
+                    wb._token_expire = token_data.get("tokenExpireTime")
+                    wb._uuid = token_data.get("uuid")
+                    
+                    if wb.is_logged_in():
+                        wb._account_id = token_data.get("account_id") or wb.get_account_id()
+                        print("[Webull Unofficial] Successfully logged in using cached credentials.")
+                        _unofficial_client = wb
+                        _unofficial_initialized = True
+                        return _unofficial_client
+                except Exception as e:
+                    print(f"[Webull Unofficial] Cached token load failed: {e}")
+            
+            # 2. Perform Login if cached token fails/does not exist
+            print(f"[Webull Unofficial] Logging in as '{email}'...")
+            res = wb.login(email, password, save_token=True, token_path=token_path)
+            
+            if 'accessToken' in res:
+                wb._account_id = wb.get_account_id()
+                print("[Webull Unofficial] Login successful!")
+                
+                # Cache the account_id inside credentials file too
+                try:
+                    res['account_id'] = wb._account_id
+                    wb._save_token(res, token_path)
+                except Exception:
+                    pass
+                
+                # If Trade PIN is provided, unlock trading token as well
+                if trade_pin:
+                    try:
+                        wb.get_trade_token(trade_pin)
+                        print("[Webull Unofficial] Trade token verified.")
+                    except Exception as e:
+                        print(f"[Webull Unofficial] Trade PIN verification error: {e}")
+                        
+                _unofficial_client = wb
+            else:
+                print(f"[Webull Unofficial] Login failed: {res}")
+                _unofficial_client = None
+                
+        except Exception as e:
+            print(f"[Webull Unofficial] Login exception: {e}")
+            _unofficial_client = None
+    else:
+        _unofficial_client = None
+        
+    _unofficial_initialized = True
+    return _unofficial_client
+
+
+# ── Webull OpenAPI Lazy Client Loader (Option A) ─────────────────────────
+
+_webull_client = None
+_webull_initialized = False
+
+def get_webull_client():
+    """Retrieve and initialize the Webull OpenAPI client dynamically."""
+    global _webull_client, _webull_initialized
+    if _webull_initialized:
+        return _webull_client
+    
+    app_key = os.getenv("WEBULL_APP_KEY")
+    app_secret = os.getenv("WEBULL_APP_SECRET")
+    region_str = os.getenv("WEBULL_REGION", "us").lower()
+    
+    if app_key and app_key != "your_app_key_here" and app_secret and app_secret != "your_app_secret_here":
+        try:
+            from webull.core.client import ApiClient
+            from webull.core.common.region import Region
+            from webull.data.data_client import DataClient
+            
+            # Map region string to Region enum
+            region = Region.US.value
+            for r in Region:
+                if r.value == region_str:
+                    region = r.value
+                    break
+            
+            print(f"[Webull OpenAPI] Initializing client for region '{region}'...")
+            api_client = ApiClient(app_key, app_secret, region)
+            _webull_client = DataClient(api_client)
+            print("[Webull OpenAPI] Client initialized successfully.")
+        except Exception as e:
+            print(f"[Webull OpenAPI] Error initializing client: {e}")
+            _webull_client = None
+    else:
+        _webull_client = None
+        
+    _webull_initialized = True
+    return _webull_client
+
+
+# ── Session management for Yahoo Finance Fallback ──────────────────────
 
 _HEADERS = {
     "User-Agent": (
@@ -74,13 +208,174 @@ def _ensure_session():
     return session, crumb
 
 
-# ── Single ticker download ──────────────────────────────────────────
+# ── Webull OpenAPI Fetcher (Option A) ───────────────────────────────────
 
-def fetch_one(ticker, days=180, interval="1d", includePrePost="false"):
-    """
-    Fetch OHLCV data for one ticker.
-    Returns a pandas DataFrame or None on failure.
-    """
+def _fetch_webull_openapi_one(ticker, days=180, interval="1d", includePrePost="false"):
+    """Query historical candlestick data from Webull OpenAPI."""
+    client = get_webull_client()
+    if not client:
+        return None
+        
+    try:
+        from webull.data.common.category import Category
+        from webull.data.common.timespan import Timespan
+        
+        # Mapped intervals
+        interval_map = {
+            "1d": Timespan.D,
+            "5m": Timespan.M5,
+            "15m": Timespan.M15,
+            "30m": Timespan.M30,
+            "60m": Timespan.M60
+        }
+        timespan = interval_map.get(interval, Timespan.D)
+        
+        # K-line count
+        if interval == "1d":
+            count = str(min(1200, days))
+        else:
+            count = "600"
+            
+        print(f"[Webull OpenAPI] Fetching {ticker} historical bars ({interval}, count={count})...")
+        
+        resp = client.market_data.get_history_bar(
+            symbol=ticker,
+            category=Category.US_STOCK,
+            timespan=timespan,
+            count=count
+        )
+        
+        if resp.status_code != 200:
+            return None
+            
+        res_data = resp.json()
+        bars_list = []
+        if isinstance(res_data, list):
+            bars_list = res_data
+        elif isinstance(res_data, dict):
+            bars_list = res_data.get("data", res_data.get("bars", res_data.get("results", [])))
+            
+        if not bars_list:
+            return None
+            
+        records = []
+        for bar in bars_list:
+            t = bar.get("time") or bar.get("t")
+            o = bar.get("open") or bar.get("o")
+            h = bar.get("high") or bar.get("h")
+            l = bar.get("low") or bar.get("l")
+            c = bar.get("close") or bar.get("c")
+            v = bar.get("volume") or bar.get("v")
+            
+            if t is not None and c is not None:
+                records.append({
+                    "Date": t,
+                    "Open": float(o) if o is not None else None,
+                    "High": float(h) if h is not None else None,
+                    "Low": float(l) if l is not None else None,
+                    "Close": float(c),
+                    "Volume": int(float(v)) if v is not None else 0
+                })
+                
+        if not records:
+            return None
+            
+        df = pd.DataFrame(records)
+        df["Date"] = pd.to_datetime(df["Date"], utc=True)
+        df = df.set_index("Date")
+        df.index = df.index.tz_convert("America/New_York")
+        df = df.sort_index()
+        
+        df["Volume"] = df["Volume"].fillna(0).astype(np.int64)
+        
+        pre_close = float(df["Close"].iloc[-2]) if len(df) > 1 else float(df["Close"].iloc[0])
+        high_52w = float(df["High"].max())
+        low_52w = float(df["Low"].min())
+        
+        try:
+            snapshot_resp = client.market_data.get_snapshot([ticker], Category.US_STOCK)
+            if snapshot_resp.status_code == 200:
+                snap_data = snapshot_resp.json()
+                snap_list = snap_data if isinstance(snap_data, list) else snap_data.get("data", [])
+                if snap_list:
+                    snap = snap_list[0]
+                    pre_close = float(snap.get("pre_close", pre_close))
+        except Exception:
+            pass
+            
+        df.attrs["fiftyTwoWeekHigh"] = high_52w
+        df.attrs["fiftyTwoWeekLow"] = low_52w
+        df.attrs["previousClose"] = pre_close
+        
+        print(f"[Webull OpenAPI] Successfully fetched {ticker} ({len(df)} rows)")
+        return df
+        
+    except Exception as e:
+        print(f"[Webull OpenAPI] Error fetching {ticker}: {e}")
+        return None
+
+
+# ── Webull Unofficial Fetcher (Option B) ────────────────────────────────
+
+def _fetch_webull_unofficial_one(ticker, days=180, interval="1d", includePrePost="false"):
+    """Query historical candlestick data from Webull using unofficial credentials login."""
+    wb_un = get_unofficial_client()
+    if not wb_un:
+        return None
+        
+    try:
+        # Map intervals
+        mapped_interval = "d1" if interval == "1d" else interval
+        count = days if interval == "1d" else 600
+        extend = 1 if includePrePost == "true" else 0
+        
+        print(f"[Webull Unofficial] Fetching {ticker} bars ({interval}, count={count})...")
+        df = wb_un.get_bars(stock=ticker, interval=mapped_interval, count=count, extendTrading=extend)
+        
+        if df is not None and not df.empty:
+            # Map index and columns to capitalization
+            df = df.rename(columns={
+                "open": "Open",
+                "high": "High",
+                "low": "Low",
+                "close": "Close",
+                "volume": "Volume"
+            })
+            df.index.name = "Date"
+            df.index = df.index.tz_convert("America/New_York")
+            df = df.sort_index()
+            
+            df["Volume"] = df["Volume"].fillna(0).astype(np.int64)
+            
+            # Fetch 52-week metrics
+            high_52w = float(df["High"].max())
+            low_52w = float(df["Low"].min())
+            pre_close = float(df["Close"].iloc[-2]) if len(df) > 1 else float(df["Close"].iloc[0])
+            
+            try:
+                quote = wb_un.get_quote(stock=ticker)
+                if quote:
+                    pre_close = float(quote.get("close", pre_close))
+            except Exception:
+                pass
+                
+            df.attrs["fiftyTwoWeekHigh"] = high_52w
+            df.attrs["fiftyTwoWeekLow"] = low_52w
+            df.attrs["previousClose"] = pre_close
+            
+            print(f"[Webull Unofficial] Successfully fetched {ticker} ({len(df)} rows)")
+            return df
+            
+        return None
+    except Exception as e:
+        print(f"[Webull Unofficial] Error fetching {ticker}: {e}")
+        return None
+
+
+# ── Yahoo Finance Fetcher ─────────────────────────────────────────────
+
+def _fetch_yahoo_one(ticker, days=180, interval="1d", includePrePost="false"):
+    """Fetch OHLCV data using direct Yahoo Finance chart API."""
     session, crumb = _ensure_session()
 
     end_ts = int(datetime.now().timestamp())
@@ -99,7 +394,6 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false"):
     try:
         resp = session.get(url, params=params, timeout=15)
 
-        # On 401/403, refresh session and retry once
         if resp.status_code in (401, 403):
             session, crumb = _get_session(force_new=True)
             if crumb:
@@ -122,13 +416,9 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false"):
             return None
 
         meta = result.get("meta", {})
-        
         quote = result["indicators"]["quote"][0]
 
-        # Create index and convert to ET
         dt_index = pd.to_datetime(timestamps, unit="s", utc=True).tz_convert("America/New_York")
-        
-        # Only normalize (strip time) for daily interval
         if interval == "1d":
             dt_index = dt_index.normalize()
 
@@ -144,8 +434,6 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false"):
         )
         df.index.name = "Date"
         df = df.dropna(subset=["Close"])
-
-        # Convert Volume to int where possible
         df["Volume"] = df["Volume"].fillna(0).astype(np.int64)
 
         df.attrs["fiftyTwoWeekHigh"] = meta.get("fiftyTwoWeekHigh")
@@ -158,13 +446,38 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false"):
         return None
 
 
-# ── Options Chain Download ──────────────────────────────────────────
+# ── Unified Single Ticker Fetcher (Resilient Ordering) ────────────────
 
-def fetch_options_chain(ticker):
+def fetch_one(ticker, days=180, interval="1d", includePrePost="false"):
     """
-    Fetch the option chain for a ticker.
-    Returns {expirations: [], chains: []} or None.
+    Fetch OHLCV data for one ticker.
+    Resilient multi-layered ordering:
+    1. Try Unofficial Webull account credentials (Option B — inherits user's real-time subscriptions).
+    2. Try Official Webull OpenAPI developer credentials (Option A).
+    3. Seamless, automatic fallback to Yahoo Finance chart scraping.
     """
+    # 1. Try Option B (Unofficial Session — Inherits all real-time quotes subscriptions)
+    wb_un = get_unofficial_client()
+    if wb_un:
+        df = _fetch_webull_unofficial_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
+        if df is not None:
+            return df
+            
+    # 2. Try Option A (Official OpenAPI — Requires separate developer subscription toggles)
+    wb_openapi = get_webull_client()
+    if wb_openapi:
+        df = _fetch_webull_openapi_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
+        if df is not None:
+            return df
+
+    # 3. Fallback to Yahoo Finance
+    return _fetch_yahoo_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
+
+
+# ── Options Chain Download (Webull Unofficial & Yahoo) ───────────────
+
+def _fetch_yahoo_options_chain(ticker):
+    """Fetch option chain metadata using Yahoo Finance fallback."""
     session, crumb = _ensure_session()
     
     url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker}"
@@ -184,8 +497,6 @@ def fetch_options_chain(ticker):
         result = result[0]
         expirations = result.get("expirationDates", [])
         
-        # We need to fetch chains for specific expirations later in the scanner
-        # For now, return the metadata and the first chain (usually front month)
         return {
             "ticker": ticker,
             "expirations": expirations,
@@ -195,8 +506,88 @@ def fetch_options_chain(ticker):
     except Exception:
         return None
 
-def fetch_options_for_expiration(ticker, expiration_ts):
-    """Fetch the full option chain for a specific expiration date."""
+
+def fetch_options_chain(ticker):
+    """
+    Fetch options chain with dynamic inheritance of Webull subscriptions.
+    1. Try Unofficial Webull Account Client (Option B — fetches real-time options data).
+    2. Fallback to Yahoo Finance options data.
+    """
+    wb_un = get_unofficial_client()
+    if wb_un:
+        try:
+            print(f"[Webull Unofficial] Fetching options chain for {ticker}...")
+            exp_dates = wb_un.get_options_expiration_dates(stock=ticker)
+            if exp_dates:
+                # Convert dates list to unix timestamps (seconds)
+                expirations = []
+                for d_entry in exp_dates:
+                    try:
+                        d_str = d_entry.get("date") if isinstance(d_entry, dict) else d_entry
+                        ts = int(datetime.strptime(d_str, "%Y-%m-%d").timestamp())
+                        expirations.append(ts)
+                    except Exception:
+                        pass
+                
+                # Fetch first chain (usually front month)
+                first_date_entry = exp_dates[0]
+                first_date_str = first_date_entry.get("date") if isinstance(first_date_entry, dict) else first_date_entry
+                webull_chain = wb_un.get_options(stock=ticker, expireDate=first_date_str)
+                
+                calls = []
+                puts = []
+                for entry in webull_chain:
+                    strike = float(entry.get("strikePrice", 0))
+                    
+                    if "call" in entry:
+                        c_data = entry["call"]
+                        calls.append({
+                            "contractSymbol": c_data.get("symbol"),
+                            "strike": strike,
+                            "bid": float(c_data.get("bid", 0)) if c_data.get("bid") else None,
+                            "ask": float(c_data.get("ask", 0)) if c_data.get("ask") else None,
+                            "volume": int(float(c_data.get("volume", 0))) if c_data.get("volume") else None,
+                            "openInterest": int(float(c_data.get("openInterest", 0))) if c_data.get("openInterest") else None,
+                            "impliedVolatility": float(c_data.get("impliedVolatility", 0)) if c_data.get("impliedVolatility") else None
+                        })
+                    if "put" in entry:
+                        p_data = entry["put"]
+                        puts.append({
+                            "contractSymbol": p_data.get("symbol"),
+                            "strike": strike,
+                            "bid": float(p_data.get("bid", 0)) if p_data.get("bid") else None,
+                            "ask": float(p_data.get("ask", 0)) if p_data.get("ask") else None,
+                            "volume": int(float(p_data.get("volume", 0))) if p_data.get("volume") else None,
+                            "openInterest": int(float(p_data.get("openInterest", 0))) if p_data.get("openInterest") else None,
+                            "impliedVolatility": float(p_data.get("impliedVolatility", 0)) if p_data.get("impliedVolatility") else None
+                        })
+                
+                underlyingPrice = None
+                try:
+                    quote = wb_un.get_quote(stock=ticker)
+                    underlyingPrice = float(quote.get("close")) if quote.get("close") else None
+                except Exception:
+                    pass
+                
+                print(f"[Webull Unofficial] Option chain parsed successfully for {ticker} ({first_date_str})")
+                return {
+                    "ticker": ticker,
+                    "expirations": expirations,
+                    "underlyingPrice": underlyingPrice,
+                    "firstChain": {
+                        "calls": calls,
+                        "puts": puts
+                    }
+                }
+        except Exception as e:
+            print(f"[Webull Unofficial] Error fetching option chain for {ticker}: {e}")
+            
+    # Fallback to Yahoo
+    return _fetch_yahoo_options_chain(ticker)
+
+
+def _fetch_yahoo_options_for_expiration(ticker, expiration_ts):
+    """Fetch the full option chain for a specific expiration date from Yahoo Finance."""
     session, crumb = _ensure_session()
     url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker}"
     params = {"date": expiration_ts}
@@ -213,6 +604,54 @@ def fetch_options_for_expiration(ticker, expiration_ts):
         return result[0].get("options", [{}])[0]
     except Exception:
         return None
+
+
+def fetch_options_for_expiration(ticker, expiration_ts):
+    """Fetch options for a specific expiration timestamp from Webull or Yahoo."""
+    wb_un = get_unofficial_client()
+    if wb_un:
+        try:
+            date_str = datetime.fromtimestamp(expiration_ts).strftime("%Y-%m-%d")
+            print(f"[Webull Unofficial] Fetching options chain for {ticker} at {date_str}...")
+            
+            webull_chain = wb_un.get_options(stock=ticker, expireDate=date_str)
+            calls = []
+            puts = []
+            for entry in webull_chain:
+                strike = float(entry.get("strikePrice", 0))
+                
+                if "call" in entry:
+                    c_data = entry["call"]
+                    calls.append({
+                        "contractSymbol": c_data.get("symbol"),
+                        "strike": strike,
+                        "bid": float(c_data.get("bid", 0)) if c_data.get("bid") else None,
+                        "ask": float(c_data.get("ask", 0)) if c_data.get("ask") else None,
+                        "volume": int(float(c_data.get("volume", 0))) if c_data.get("volume") else None,
+                        "openInterest": int(float(c_data.get("openInterest", 0))) if c_data.get("openInterest") else None,
+                        "impliedVolatility": float(c_data.get("impliedVolatility", 0)) if c_data.get("impliedVolatility") else None
+                    })
+                if "put" in entry:
+                    p_data = entry["put"]
+                    puts.append({
+                        "contractSymbol": p_data.get("symbol"),
+                        "strike": strike,
+                        "bid": float(p_data.get("bid", 0)) if p_data.get("bid") else None,
+                        "ask": float(p_data.get("ask", 0)) if p_data.get("ask") else None,
+                        "volume": int(float(p_data.get("volume", 0))) if p_data.get("volume") else None,
+                        "openInterest": int(float(p_data.get("openInterest", 0))) if p_data.get("openInterest") else None,
+                        "impliedVolatility": float(p_data.get("impliedVolatility", 0)) if p_data.get("impliedVolatility") else None
+                    })
+            
+            return {
+                "calls": calls,
+                "puts": puts
+            }
+        except Exception as e:
+            print(f"[Webull Unofficial] Error fetching options at expiration timestamp {expiration_ts}: {e}")
+            
+    # Fallback to Yahoo
+    return _fetch_yahoo_options_for_expiration(ticker, expiration_ts)
 
 
 # ── Batch download (sequential — for watchlists) ────────────────────
@@ -252,7 +691,6 @@ def fetch_batch_concurrent(tickers, days=180, max_workers=8,
     total = len(tickers)
 
     def _fetch(i, ticker):
-        # Small stagger to spread requests
         time.sleep(delay * (i % max_workers))
         return ticker, fetch_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
 
@@ -277,26 +715,68 @@ def fetch_batch_concurrent(tickers, days=180, max_workers=8,
 # ── Connectivity test ────────────────────────────────────────────────
 
 def test_connection(ticker="AAPL"):
-    """Test if we can download data. Returns diagnostic dict."""
+    """Test connection for all layers (Webull Unofficial, Webull OpenAPI, and Yahoo)."""
     diag = {"ticker": ticker, "time": datetime.now().isoformat()}
 
+    # 1. Test Webull Unofficial (Option B)
+    wb_un = get_unofficial_client()
+    diag["webull_unofficial_configured"] = wb_un is not None
+    if wb_un:
+        try:
+            df = wb_un.get_bars(stock=ticker, interval="d1", count=10)
+            diag["webull_unofficial_ok"] = df is not None and not df.empty
+            if diag["webull_unofficial_ok"]:
+                diag["webull_unofficial_rows"] = len(df)
+        except Exception as e:
+            diag["webull_unofficial_ok"] = False
+            diag["webull_unofficial_error"] = str(e)
+    else:
+        diag["webull_unofficial_ok"] = False
+        diag["webull_unofficial_error"] = "Account credentials not configured in .env"
+
+    # 2. Test Webull OpenAPI (Option A)
+    wb_client = get_webull_client()
+    diag["webull_openapi_configured"] = wb_client is not None
+    if wb_client:
+        try:
+            from webull.data.common.category import Category
+            from webull.data.common.timespan import Timespan
+            
+            resp = wb_client.market_data.get_history_bar(
+                symbol=ticker,
+                category=Category.US_STOCK,
+                timespan=Timespan.D,
+                count="10"
+            )
+            diag["webull_openapi_ok"] = resp.status_code == 200
+            diag["webull_openapi_status_code"] = resp.status_code
+            if resp.status_code == 200:
+                diag["webull_openapi_data_sample"] = str(resp.json()[:2])
+            else:
+                diag["webull_openapi_error"] = f"HTTP {resp.status_code}: {resp.text}"
+        except Exception as e:
+            diag["webull_openapi_ok"] = False
+            diag["webull_openapi_error"] = str(e)
+    else:
+        diag["webull_openapi_ok"] = False
+        diag["webull_openapi_error"] = "OpenAPI credentials not configured in .env"
+
+    # 3. Test Yahoo
     try:
         session, crumb = _ensure_session()
-        diag["has_crumb"] = crumb is not None
+        diag["yahoo_has_crumb"] = crumb is not None
 
-        df = fetch_one(ticker, days=30)
+        df = _fetch_yahoo_one(ticker, days=30)
         if df is not None:
-            diag["ok"] = True
-            diag["rows"] = len(df)
-            diag["last_date"] = str(df.index[-1].date())
-            diag["last_close"] = round(float(df["Close"].iloc[-1]), 2)
-            diag["last_volume"] = int(df["Volume"].iloc[-1])
+            diag["yahoo_ok"] = True
+            diag["yahoo_rows"] = len(df)
+            diag["yahoo_last_close"] = round(float(df["Close"].iloc[-1]), 2)
         else:
-            diag["ok"] = False
-            diag["error"] = "No data returned — API may be rate-limiting or blocking"
+            diag["yahoo_ok"] = False
+            diag["yahoo_error"] = "No data returned from Yahoo"
     except Exception as e:
-        diag["ok"] = False
-        diag["error"] = str(e)
-        diag["traceback"] = tb.format_exc()
+        diag["yahoo_ok"] = False
+        diag["yahoo_error"] = str(e)
 
+    diag["ok"] = diag["webull_unofficial_ok"] or diag["webull_openapi_ok"] or diag["yahoo_ok"]
     return diag
