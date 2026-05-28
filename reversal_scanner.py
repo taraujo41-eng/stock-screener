@@ -784,8 +784,10 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
     # Need enough bars for 200 SMA on daily chart (same as full market scan)
     fetch_days = 60 if extended_hours else 280
 
-    stock_data = fetch_batch(tickers, days=fetch_days, delay=0.05,
-                             on_progress=_on_dl_progress, interval=interval, includePrePost=includePrePost)
+    stock_data = fetch_batch_concurrent(
+        tickers, days=fetch_days, max_workers=4,
+        on_progress=_on_dl_progress, delay=0.05, interval=interval, includePrePost=includePrePost
+    )
 
     log.append(f"Downloaded: {len(stock_data)}/{total} tickers have data")
     print(f"  Downloaded {len(stock_data)}/{total} tickers")
@@ -1154,7 +1156,10 @@ def momentum_watchlist_scan(tickers, min_volume=500_000, min_price=5.0, extended
     includePrePost = "true" if extended_hours else "false"
     fetch_days = 14 if extended_hours else 280
 
-    stock_data = fetch_batch(tickers, days=fetch_days, delay=0.05, on_progress=_on_dl_progress, interval=interval, includePrePost=includePrePost)
+    stock_data = fetch_batch_concurrent(
+        tickers, days=fetch_days, max_workers=4,
+        on_progress=_on_dl_progress, delay=0.05, interval=interval, includePrePost=includePrePost
+    )
 
     for i, (sym, df) in enumerate(stock_data.items()):
         _update_progress("analyzing", f"Analyzing {sym}...", i, len(stock_data), ticker=sym, found=len(results))
@@ -1590,7 +1595,10 @@ def options_watchlist_scan(tickers, min_volume=500_000, min_price=5.0, extended_
     def _on_dl_progress(i, tot, sym):
         _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=len(results))
 
-    stock_data = fetch_batch(tickers, days=280, delay=0.05, on_progress=_on_dl_progress, interval="1d")
+    stock_data = fetch_batch_concurrent(
+        tickers, days=280, max_workers=4,
+        on_progress=_on_dl_progress, delay=0.05, interval="1d"
+    )
 
     for i, (sym, df) in enumerate(stock_data.items()):
         _update_progress("analyzing", f"Analyzing {sym} options...", i, len(stock_data), ticker=sym, found=len(results))
