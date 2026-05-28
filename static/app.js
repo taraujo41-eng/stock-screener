@@ -233,19 +233,41 @@ function showWatchlistMsg(msg, isError = false) {
 
 async function addTicker() {
   const input = document.getElementById("addTickerInput");
-  const ticker = input.value.trim().toUpperCase();
+  const rawInput = input.value.trim().toUpperCase();
 
-  if (!ticker) return;
-  if (!/^[A-Z]{1,5}$/.test(ticker)) {
-    showWatchlistMsg("Use 1-5 letters only (e.g. AAPL)", true);
+  if (!rawInput) return;
+  
+  // Split by commas, spaces, semicolons, or newlines
+  const newTickers = rawInput.split(/[\s,;\n]+/)
+    .map(t => t.replace(/[^A-Z]/g, '').trim())
+    .filter(t => t.length >= 1 && t.length <= 5);
+
+  if (newTickers.length === 0) {
+    showWatchlistMsg("Invalid ticker format", true);
+    return;
+  }
+
+  // Merge with existing watchlist, ignoring duplicates
+  const updatedList = [...watchlist];
+  let addedCount = 0;
+  for (const t of newTickers) {
+    if (!updatedList.includes(t)) {
+      updatedList.push(t);
+      addedCount++;
+    }
+  }
+
+  if (addedCount === 0) {
+    showWatchlistMsg("All tickers already in watchlist", true);
+    input.value = "";
     return;
   }
 
   try {
-    const res = await fetch("/api/watchlist/add", {
-      method: "POST",
+    const res = await fetch("/api/watchlist", {
+      method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticker }),
+      body: JSON.stringify({ watchlist: updatedList }),
     });
     const data = await res.json();
 
@@ -254,7 +276,7 @@ async function addTicker() {
       saveWatchlistLocal(watchlist);
       input.value = "";
       renderWatchlistEditor();
-      showWatchlistMsg(`${ticker} added ✓`);
+      showWatchlistMsg(`Added ${addedCount} ticker(s) ✓`);
     } else {
       showWatchlistMsg(data.error || "Failed to add", true);
     }
