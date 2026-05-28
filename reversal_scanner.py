@@ -898,64 +898,55 @@ def full_market_scan(min_volume=500_000, min_price=5.0,
     # 260+ days ensures we have a full year of data for the 200 SMA
     fetch_days = 60 if extended_hours else 280 
 
-    stock_data = fetch_batch_concurrent(
-        all_tickers, days=fetch_days, max_workers=8,
-        on_progress=_on_dl_progress, delay=0.05, interval=interval, includePrePost=includePrePost
-    )
+    found_signals = []
 
-    log.append(f"Downloaded: {len(stock_data)}/{total_tickers} tickers")
-    print(f"\n  Downloaded: {len(stock_data)} tickers with data")
-
-    # ── Phase 2b: Pre-filter by volume & price ──────────────
-    candidates = []
-    for sym, df in stock_data.items():
+    def process_ticker(sym, df):
         try:
+            # Must have enough bars for SMA 200 (if Daily) or RSI/VWAP (if Intraday)
+            if len(df) < 50:
+                return None
             today_date = df.index.date[-1]
             recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
-
             price = float(df['Close'].iloc[-1])
             if recent_vol >= min_volume and price >= min_price:
-                candidates.append((sym, df))
-        except:
-            continue
+                result = _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh, swing_tolerance)
+                if result:
+                    found_signals.append(sym)
+                    return result
+        except Exception:
+            pass
+        return None
 
-    log.append(f"Pre-filter: {len(candidates)} candidates pass vol/price filters")
-    print(f"  Pre-filter: {len(candidates)} candidates from {len(stock_data)} tickers")
+    def _on_dl_progress(done, tot, sym):
+        _update_progress("downloading",
+                         f"Downloading & Analyzing... ({done}/{tot})",
+                         done, tot,
+                         ticker=sym, found=len(found_signals))
+        elapsed = time.time() - start_time
+        if done > 0:
+            rate = elapsed / done
+            remaining = (tot - done) * rate
+            scan_progress["eta_seconds"] = int(remaining)
 
-    # ── Phase 3: Analyze candidates ─────────────────────────
-    print(f"\n[Phase 3] Analyzing {len(candidates)} candidates...")
-    results = []
-    total_candidates = len(candidates)
-    phase3_start = time.time()
+    # Use max_workers=4 to be gentle on RAM and CPU in shared hosting
+    stock_results = fetch_batch_concurrent(
+        all_tickers, days=fetch_days, max_workers=4,
+        on_progress=_on_dl_progress, delay=0.05, interval=interval, includePrePost=includePrePost,
+        process_fn=process_ticker
+    )
 
-    for j, (sym, df) in enumerate(candidates):
-        elapsed = time.time() - phase3_start
-        if j > 0:
-            rate = elapsed / j
-            remaining = (total_candidates - j) * rate
-        else:
-            remaining = 0
-
-        _update_progress("analyzing",
-                         f"Analyzing {sym}...",
-                         j, total_candidates,
-                         ticker=sym, found=len(results))
-        scan_progress["eta_seconds"] = int(remaining)
-
-        result = _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh, swing_tolerance)
-        if result:
-            results.append(result)
+    results = [r for r in stock_results.values() if r is not None]
 
     # ── Done ────────────────────────────────────────────────
     total_time = time.time() - start_time
-    summary = f"Done in {total_time:.0f}s: {len(results)} signals from {total_candidates} candidates"
+    summary = f"Done in {total_time:.0f}s: {len(results)} signals found out of {total_tickers} tickers scanned"
     log.append(summary)
     print(f"\n[Done] {summary}")
 
     scan_progress.update({
         "status": "done", "phase": "complete",
         "phase_label": f"Done — {len(results)} signals found",
-        "current": total_candidates, "total": total_candidates,
+        "current": total_tickers, "total": total_tickers,
         "found": len(results), "pct": 100, "eta_seconds": 0,
     })
 
@@ -1646,44 +1637,38 @@ def options_full_market_scan(min_volume=500_000, min_price=5.0, extended_hours=F
 
     total_tickers = len(all_tickers)
 
+    found_setups = []
+
+    def process_options(sym, df):
+        try:
+            if len(df) < 50:
+                return None
+            today_date = df.index.date[-1]
+            recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
+            price = float(df['Close'].iloc[-1])
+            if recent_vol >= min_volume and price >= min_price:
+                result = _analyze_options_setup(sym, df, iv_history)
+                if result:
+                    found_setups.append(sym)
+                    return result
+        except Exception:
+            pass
+        return None
+
     def _on_dl_progress(done, tot, sym):
-        _update_progress("downloading", f"Downloading... ({done}/{tot})", done, tot, ticker=sym, found=0)
+        _update_progress("downloading", f"Downloading & Analyzing... ({done}/{tot})", done, tot, ticker=sym, found=len(found_setups))
         elapsed = time.time() - start_time
         if done > 0:
             rate = elapsed / done
             scan_progress["eta_seconds"] = int((tot - done) * rate)
 
-    stock_data = fetch_batch_concurrent(
-        all_tickers, days=280, max_workers=8,
-        on_progress=_on_dl_progress, delay=0.05, interval="1d"
+    stock_results = fetch_batch_concurrent(
+        all_tickers, days=280, max_workers=4,
+        on_progress=_on_dl_progress, delay=0.05, interval="1d",
+        process_fn=process_options
     )
 
-    # Pre-filter
-    candidates = []
-    for sym, df in stock_data.items():
-        try:
-            today_date = df.index.date[-1]
-            recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
-            price = float(df['Close'].iloc[-1])
-            if recent_vol >= min_volume and price >= min_price:
-                candidates.append((sym, df))
-        except:
-            continue
-
-    results = []
-    total_candidates = len(candidates)
-    phase3_start = time.time()
-
-    for j, (sym, df) in enumerate(candidates):
-        _update_progress("analyzing", f"Analyzing {sym} options...", j, total_candidates, ticker=sym, found=len(results))
-        elapsed = time.time() - phase3_start
-        if j > 0:
-            rate = elapsed / j
-            scan_progress["eta_seconds"] = int((total_candidates - j) * rate)
-
-        result = _analyze_options_setup(sym, df, iv_history)
-        if result:
-            results.append(result)
+    results = [r for r in stock_results.values() if r is not None]
 
     # Save updated IV history
     _save_iv_history(iv_history)
@@ -1691,7 +1676,7 @@ def options_full_market_scan(min_volume=500_000, min_price=5.0, extended_hours=F
     scan_progress.update({
         "status": "done", "phase": "complete",
         "phase_label": f"Done — {len(results)} options setups found",
-        "current": total_candidates, "total": total_candidates,
+        "current": total_tickers, "total": total_tickers,
         "found": len(results), "pct": 100, "eta_seconds": 0,
     })
 

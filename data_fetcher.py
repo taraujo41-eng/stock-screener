@@ -715,10 +715,12 @@ def fetch_batch(tickers, days=180, delay=0.05, on_progress=None, interval="1d", 
 # ── Batch download (concurrent — for full market scan) ───────────────
 
 def fetch_batch_concurrent(tickers, days=180, max_workers=8,
-                           on_progress=None, delay=0.05, interval="1d", includePrePost="false"):
+                           on_progress=None, delay=0.05, interval="1d", includePrePost="false",
+                           process_fn=None):
     """
     Download data for many tickers using a thread pool.
-    Returns dict of {ticker: DataFrame}.
+    If process_fn is provided, it processes each DataFrame on-the-fly and returns the result,
+    completely discarding the DataFrame to keep memory footprint close to zero!
     """
     data = {}
     completed = 0
@@ -726,7 +728,18 @@ def fetch_batch_concurrent(tickers, days=180, max_workers=8,
 
     def _fetch(i, ticker):
         time.sleep(delay * (i % max_workers))
-        return ticker, fetch_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
+        df = fetch_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
+        if df is not None:
+            if process_fn:
+                try:
+                    res = process_fn(ticker, df)
+                    return ticker, res
+                except Exception as e:
+                    print(f"[fetch_batch_concurrent] Error in process_fn for {ticker}: {e}")
+                    return ticker, None
+            else:
+                return ticker, df
+        return ticker, None
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(_fetch, i, t): t for i, t in enumerate(tickers)}
@@ -734,9 +747,9 @@ def fetch_batch_concurrent(tickers, days=180, max_workers=8,
         for future in as_completed(futures):
             completed += 1
             try:
-                ticker, df = future.result(timeout=20)
-                if df is not None and len(df) >= 50:
-                    data[ticker] = df
+                ticker, res = future.result(timeout=20)
+                if res is not None:
+                    data[ticker] = res
                 if on_progress:
                     on_progress(completed, total, ticker)
             except Exception as e:
