@@ -352,11 +352,18 @@ def _fetch_webull_unofficial_one(ticker, days=180, interval="1d", includePrePost
         
     try:
         # Map intervals
-        mapped_interval = "d1" if interval == "1d" else interval
+        interval_map = {
+            "1d": "d1",
+            "5m": "m5",
+            "15m": "m15",
+            "30m": "m30",
+            "60m": "h1"
+        }
+        mapped_interval = interval_map.get(interval, "d1")
         count = days if interval == "1d" else 600
         extend = 1 if includePrePost == "true" else 0
         
-        print(f"[Webull Unofficial] Fetching {ticker} bars ({interval}, count={count})...")
+        print(f"[Webull Unofficial] Fetching {ticker} bars ({interval} -> {mapped_interval}, count={count}, extend={extend})...")
         df = wb_un.get_bars(stock=ticker, interval=mapped_interval, count=count, extendTrading=extend)
         
         if df is not None and not df.empty:
