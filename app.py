@@ -335,6 +335,16 @@ def watchlist_remove():
         save_watchlist(user_watchlist)
     return jsonify({"ok": True, "watchlist": user_watchlist})
 
+# ── API: Reset Stuck Scan State ─────────────────────────────────────
+
+@app.route("/api/scan/reset", methods=["POST"])
+def scan_reset():
+    """Reset the scan running status to idle."""
+    global _scan_running
+    _scan_running = False
+    _reset_progress()
+    return jsonify({"ok": True, "message": "Scan status reset to idle"})
+
 # ── API: Diagnostics ────────────────────────────────────────────────
 
 @app.route("/api/test", methods=["GET"])

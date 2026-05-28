@@ -734,12 +734,13 @@ def fetch_batch_concurrent(tickers, days=180, max_workers=8,
         for future in as_completed(futures):
             completed += 1
             try:
-                ticker, df = future.result()
+                ticker, df = future.result(timeout=20)
                 if df is not None and len(df) >= 50:
                     data[ticker] = df
                 if on_progress:
                     on_progress(completed, total, ticker)
-            except Exception:
+            except Exception as e:
+                print(f"[fetch_batch_concurrent] Error/timeout downloading {futures[future]}: {e}")
                 if on_progress:
                     on_progress(completed, total, futures[future])
 

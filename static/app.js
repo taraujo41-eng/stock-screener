@@ -754,17 +754,66 @@ async function runScan() {
       return; // success — exit the retry loop
     } catch (err) {
       if (attempt === maxRetries) {
-        document.getElementById("results").innerHTML = `
+        let errorHtml = `
           <div class="empty-state">
             <div class="empty-state__icon">⚠️</div>
             <div class="empty-state__title">Scan error</div>
-            <div class="empty-state__text">${err.message}<br><small>The server may be starting up — try again in 30 seconds.</small></div>
-          </div>
+            <div class="empty-state__text">${err.message}</div>
         `;
+        
+        if (err.message.includes("already running") || err.message.includes("409")) {
+          errorHtml += `
+            <button class="reset-btn" onclick="resetServerScanState(this)" style="margin-top: 15px; padding: 10px 20px; background: linear-gradient(135deg, #ef4444, #f87171); border: none; border-radius: 6px; color: white; font-weight: 600; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);">
+              🔓 Reset Server Scan State
+            </button>
+          `;
+        } else {
+          errorHtml += `<small style="display:block;margin-top:10px;opacity:0.7;">The server may be starting up — try again in 30 seconds.</small>`;
+        }
+        
+        errorHtml += `</div>`;
+        document.getElementById("results").innerHTML = errorHtml;
         btn.classList.remove("scan-btn--loading");
         btn.disabled = false;
         document.getElementById("modeTabs").classList.remove("hidden");
       }
+    }
+  }
+}
+
+// ── Self-Healing Scan State Reset ───────────────────────────
+
+async function resetServerScanState(btnEl) {
+  if (btnEl) {
+    btnEl.disabled = true;
+    btnEl.textContent = "Resetting...";
+    btnEl.style.opacity = "0.7";
+  }
+  try {
+    const res = await fetch("/api/scan/reset", { method: "POST" });
+    const data = await res.json();
+    if (data.ok) {
+      document.getElementById("results").innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state__icon">🔓</div>
+          <div class="empty-state__title">Scan Reset</div>
+          <div class="empty-state__text">The server has been reset to idle. You can start a new scan now!</div>
+        </div>
+      `;
+    } else {
+      alert("Failed to reset: " + (data.error || "Unknown error"));
+      if (btnEl) {
+        btnEl.disabled = false;
+        btnEl.textContent = "🔓 Reset Server Scan State";
+        btnEl.style.opacity = "1";
+      }
+    }
+  } catch (e) {
+    alert("Network error resetting scan state: " + e.message);
+    if (btnEl) {
+      btnEl.disabled = false;
+      btnEl.textContent = "🔓 Reset Server Scan State";
+      btnEl.style.opacity = "1";
     }
   }
 }
