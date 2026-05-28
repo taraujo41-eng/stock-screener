@@ -30,10 +30,7 @@
 
     <!-- Scan Mode Tabs -->
     <div class="mode-tabs" id="modeTabs">
-      <button class="mode-tab mode-tab--active" data-mode="watchlist" onclick="setMode('watchlist', this)">
-        ⚡ Watchlist
-      </button>
-      <button class="mode-tab" data-mode="full" onclick="setMode('full', this)">
+      <button class="mode-tab mode-tab--active" data-mode="full" onclick="setMode('full', this)">
         🌐 Full Market
       </button>
       <button class="mode-tab" data-mode="options" onclick="setMode('options', this)">
@@ -41,10 +38,9 @@
       </button>
     </div>
 
-    <!-- Mode description + Edit link -->
+    <!-- Mode description -->
     <div class="mode-info">
-      <p class="mode-desc" id="modeDesc">Scans 22 tickers — takes ~30 seconds</p>
-      <button class="edit-link" id="editWatchlistBtn" onclick="openWatchlistEditor()">✏️ Edit</button>
+      <p class="mode-desc" id="modeDesc">Scans entire US market — takes 2-3 minutes</p>
     </div>
 
     <!-- Extended Hours Toggle -->
@@ -59,7 +55,7 @@
     <!-- Scan Button -->
     <button class="scan-btn" id="scanBtn" onclick="runScan()">
       <div class="scan-btn__spinner"></div>
-      <span class="scan-btn__text">🔍  Scan Watchlist</span>
+      <span class="scan-btn__text">🌐  Scan Full Market</span>
     </button>
 
     <!-- Progress bar (full scan only) -->
@@ -120,49 +116,8 @@
 
   </div>
 
-  <!-- ═══════════════════════════════════════════════════════
-       Watchlist Editor Modal
-       ═══════════════════════════════════════════════════════ -->
-  <div class="modal-overlay hidden" id="watchlistModal" onclick="closeWatchlistEditor(event)">
-    <div class="modal" onclick="event.stopPropagation()">
 
-      <div class="modal__header">
-        <h2 class="modal__title">📋 Edit Watchlist</h2>
-        <button class="modal__close" onclick="closeWatchlistEditor()">&times;</button>
-      </div>
 
-      <!-- Add ticker input -->
-      <div class="modal__add">
-        <input
-          class="modal__input"
-          id="addTickerInput"
-          type="text"
-          placeholder="Paste list (e.g. AAPL, MSFT, TSLA)"
-          autocomplete="off"
-          autocapitalize="characters"
-          spellcheck="false"
-          onkeydown="if(event.key==='Enter') addTicker()"
-        >
-        <button class="modal__add-btn" onclick="addTicker()">+ Add</button>
-      </div>
-
-      <!-- Error/success message -->
-      <div class="modal__msg hidden" id="watchlistMsg"></div>
-
-      <!-- Ticker count -->
-      <div class="modal__count" id="watchlistCount">0 tickers</div>
-
-      <!-- Ticker list -->
-      <div class="modal__list" id="watchlistList">
-        <!-- filled by JS -->
-      </div>
-
-      <!-- Done button -->
-      <button class="modal__done-btn" onclick="closeWatchlistEditor()">Done</button>
-
-    </div>
-  </div>
-
-  <script src="/app.js?v=4.0"></script>
+  <script src="/app.js?v=5.0"></script>
 </body>
 </html>

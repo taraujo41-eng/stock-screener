@@ -1,12 +1,11 @@
 /* ============================================================
-   Stock Reversal Scanner – Frontend Logic (Full Market + Watchlist Editor)
+   Stock Reversal Scanner – Frontend Logic (Full Market + Options)
    ============================================================ */
 
 let scanData = [];
 let currentFilter = "all";
-let scanMode = "watchlist";
+let scanMode = "full";
 let pollTimer = null;
-let watchlist = [];
 
 // ── Format helpers ─────────────────────────────────────────
 
@@ -31,76 +30,12 @@ function fmtEta(seconds) {
   return `~${m}m ${s}s left`;
 }
 
-// ── Local storage helpers for watchlist persistence ────────
-
-function saveWatchlistLocal(list) {
-  try {
-    localStorage.setItem("scanner_watchlist", JSON.stringify(list));
-  } catch (e) {
-    console.warn("Failed to save watchlist to localStorage:", e);
-  }
-}
-
-function loadWatchlistLocal() {
-  try {
-    const raw = localStorage.getItem("scanner_watchlist");
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-    }
-  } catch (e) {
-    console.warn("Failed to load watchlist from localStorage:", e);
-  }
-  return null;
-}
-
-// ── Load watchlist on startup ──────────────────────────────
-
-async function loadWatchlist() {
-  // 1. Check localStorage first (persists across server restarts)
-  const localList = loadWatchlistLocal();
-
-  if (localList) {
-    // Use the locally saved watchlist and sync it to the server
-    watchlist = localList;
-    updateModeDesc();
-    try {
-      await fetch("/api/watchlist", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ watchlist: localList }),
-      });
-    } catch (e) {
-      console.warn("Failed to sync watchlist to server:", e);
-    }
-  } else {
-    // No local data — load from server (first visit)
-    try {
-      const res = await fetch("/api/watchlist");
-      const data = await res.json();
-      if (data.ok) {
-        watchlist = data.watchlist;
-        saveWatchlistLocal(watchlist);
-        updateModeDesc();
-      }
-    } catch (e) {
-      console.error("Failed to load watchlist:", e);
-    }
-  }
-}
-
 function updateModeDesc() {
   const desc = document.getElementById("modeDesc");
-  const editBtn = document.getElementById("editWatchlistBtn");
-  if (scanMode === "watchlist") {
-    desc.textContent = `Scans ${watchlist.length} tickers — takes ~${Math.max(10, watchlist.length * 1.5).toFixed(0)}s`;
-    editBtn.classList.remove("hidden");
-  } else if (scanMode === "full") {
-    desc.textContent = "Scans entire US market — takes 3-8 minutes";
-    editBtn.classList.add("hidden");
+  if (scanMode === "full") {
+    desc.textContent = "Scans entire US market — takes 2-3 minutes";
   } else if (scanMode === "options") {
-    desc.textContent = "Scans for high-probability options setups — takes 3-8 minutes";
-    editBtn.classList.add("hidden");
+    desc.textContent = "Scans for high-probability options setups — takes 2-3 minutes";
   }
 }
 
@@ -113,18 +48,7 @@ async function setMode(mode, btn) {
   btn.classList.add("mode-tab--active");
 
   const scanBtn = document.getElementById("scanBtn");
-  if (mode === "watchlist") {
-    scanBtn.querySelector(".scan-btn__text").textContent = "🔍  Scan Watchlist";
-    // Clear results so they don't see full market results on the watchlist tab
-    document.getElementById("results").innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state__icon">🔍</div>
-        <div class="empty-state__title">Ready to scan</div>
-        <div class="empty-state__text">Click the button above to scan your watchlist</div>
-      </div>
-    `;
-    hideAuxUI();
-  } else if (mode === "full") {
+  if (mode === "full") {
     scanBtn.querySelector(".scan-btn__text").textContent = "🌐  Scan Full Market";
     // Auto-load the persistent full market scan results
     try {
@@ -185,134 +109,6 @@ function hideAuxUI() {
   document.getElementById("timestamp").classList.add("hidden");
   document.getElementById("filters").classList.add("hidden");
   document.getElementById("scanBadge").classList.add("hidden");
-}
-
-// ── Watchlist Editor ───────────────────────────────────────
-
-function openWatchlistEditor() {
-  document.getElementById("watchlistModal").classList.remove("hidden");
-  document.body.style.overflow = "hidden";
-  renderWatchlistEditor();
-  // Focus input
-  setTimeout(() => document.getElementById("addTickerInput").focus(), 200);
-}
-
-function closeWatchlistEditor(e) {
-  if (e && e.target !== e.currentTarget) return;
-  document.getElementById("watchlistModal").classList.add("hidden");
-  document.body.style.overflow = "";
-  updateModeDesc();
-}
-
-function renderWatchlistEditor() {
-  const listEl = document.getElementById("watchlistList");
-  const countEl = document.getElementById("watchlistCount");
-
-  countEl.textContent = `${watchlist.length} ticker${watchlist.length !== 1 ? "s" : ""}`;
-
-  if (watchlist.length === 0) {
-    listEl.innerHTML = `<div class="modal__empty">No tickers yet. Add some above!</div>`;
-    return;
-  }
-
-  listEl.innerHTML = watchlist.map(ticker => `
-    <div class="ticker-chip" id="chip-${ticker}">
-      <span class="ticker-chip__symbol">${ticker}</span>
-      <button class="ticker-chip__remove" onclick="removeTicker('${ticker}')" title="Remove ${ticker}">&times;</button>
-    </div>
-  `).join("");
-}
-
-function showWatchlistMsg(msg, isError = false) {
-  const el = document.getElementById("watchlistMsg");
-  el.textContent = msg;
-  el.className = `modal__msg ${isError ? "modal__msg--error" : "modal__msg--success"}`;
-  el.classList.remove("hidden");
-  setTimeout(() => el.classList.add("hidden"), 2500);
-}
-
-async function addTicker() {
-  const input = document.getElementById("addTickerInput");
-  const rawInput = input.value.trim().toUpperCase();
-
-  if (!rawInput) return;
-  
-  // Split by commas, spaces, semicolons, or newlines
-  const newTickers = rawInput.split(/[\s,;\n]+/)
-    .map(t => t.replace(/[^A-Z]/g, '').trim())
-    .filter(t => t.length >= 1 && t.length <= 5);
-
-  if (newTickers.length === 0) {
-    showWatchlistMsg("Invalid ticker format", true);
-    return;
-  }
-
-  // Merge with existing watchlist, ignoring duplicates
-  const updatedList = [...watchlist];
-  let addedCount = 0;
-  for (const t of newTickers) {
-    if (!updatedList.includes(t)) {
-      updatedList.push(t);
-      addedCount++;
-    }
-  }
-
-  if (addedCount === 0) {
-    showWatchlistMsg("All tickers already in watchlist", true);
-    input.value = "";
-    return;
-  }
-
-  try {
-    const res = await fetch("/api/watchlist", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ watchlist: updatedList }),
-    });
-    const data = await res.json();
-
-    if (data.ok) {
-      watchlist = data.watchlist;
-      saveWatchlistLocal(watchlist);
-      input.value = "";
-      renderWatchlistEditor();
-      showWatchlistMsg(`Added ${addedCount} ticker(s) ✓`);
-    } else {
-      showWatchlistMsg(data.error || "Failed to add", true);
-    }
-  } catch (e) {
-    showWatchlistMsg("Network error", true);
-  }
-}
-
-async function removeTicker(ticker) {
-  // Animate out
-  const chip = document.getElementById(`chip-${ticker}`);
-  if (chip) {
-    chip.style.transform = "scale(0.8)";
-    chip.style.opacity = "0";
-  }
-
-  try {
-    const res = await fetch("/api/watchlist/remove", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ticker }),
-    });
-    const data = await res.json();
-
-    if (data.ok) {
-      watchlist = data.watchlist;
-      saveWatchlistLocal(watchlist);
-      setTimeout(() => renderWatchlistEditor(), 200);
-    }
-  } catch (e) {
-    showWatchlistMsg("Network error", true);
-    if (chip) {
-      chip.style.transform = "";
-      chip.style.opacity = "";
-    }
-  }
 }
 
 // ── Skeleton loader ────────────────────────────────────────
@@ -742,19 +538,6 @@ async function runScan() {
   if (isOptions) {
     endpoint = "/api/scan/options/full";
     resultsEndpoint = "/api/scan/options/full/results";
-  } else if (scanMode === "watchlist") {
-    // Force sync the local watchlist to the server before scanning
-    try {
-      await fetch("/api/watchlist", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ watchlist: watchlist })
-      });
-    } catch (e) {
-      console.warn("Watchlist pre-scan sync failed:", e);
-    }
-    endpoint = "/api/scan";
-    resultsEndpoint = "/api/scan/results";
   } else {
     endpoint = "/api/scan/full";
     resultsEndpoint = "/api/scan/full/results";
@@ -852,4 +635,4 @@ async function resetServerScanState(btnEl) {
 
 // ── Init ───────────────────────────────────────────────────
 
-loadWatchlist();
+updateModeDesc();
