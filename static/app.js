@@ -743,6 +743,16 @@ async function runScan() {
     endpoint = "/api/scan/options/full";
     resultsEndpoint = "/api/scan/options/full/results";
   } else if (scanMode === "watchlist") {
+    // Force sync the local watchlist to the server before scanning
+    try {
+      await fetch("/api/watchlist", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ watchlist: watchlist })
+      });
+    } catch (e) {
+      console.warn("Watchlist pre-scan sync failed:", e);
+    }
     endpoint = "/api/scan";
     resultsEndpoint = "/api/scan/results";
   } else {
