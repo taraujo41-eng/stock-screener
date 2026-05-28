@@ -44,14 +44,41 @@ def get_unofficial_client():
     password = os.getenv("WEBULL_PASSWORD")
     trade_pin = os.getenv("WEBULL_TRADE_PIN")
     
-    if email and email != "your_email_here" and password and password != "your_password_here":
+    if (email and email != "your_email_here" and password and password != "your_password_here") or os.getenv("WEBULL_ACCESS_TOKEN"):
         try:
             from webull import webull
             wb = webull()
             token_path = os.path.dirname(__file__)
             credentials_file = os.path.join(token_path, "webull_credentials.json")
             
-            # 1. Try to load cached token
+            # 1. Try to load cached token from environment variables (great for cloud environments like Render!)
+            env_access_token = os.getenv("WEBULL_ACCESS_TOKEN")
+            env_did = os.getenv("WEBULL_DID")
+            if env_access_token and env_did:
+                try:
+                    wb._access_token = env_access_token
+                    wb._did = env_did
+                    wb._refresh_token = os.getenv("WEBULL_REFRESH_TOKEN", "dummy_refresh_token_bypassed")
+                    
+                    # Ensure we set did.bin cache if running locally
+                    try:
+                        did_bin_file = os.path.join(token_path, "did.bin")
+                        if not os.path.exists(did_bin_file):
+                            with open(did_bin_file, "wb") as f:
+                                pickle.dump(env_did, f)
+                    except Exception:
+                        pass
+                        
+                    if wb.is_logged_in():
+                        wb._account_id = wb.get_account_id()
+                        print("[Webull Unofficial] Successfully authenticated using Environment Variables.")
+                        _unofficial_client = wb
+                        _unofficial_initialized = True
+                        return _unofficial_client
+                except Exception as e:
+                    print(f"[Webull Unofficial] Environment token load failed: {e}")
+            
+            # 2. Try to load cached token from local file
             if os.path.exists(credentials_file):
                 try:
                     with open(credentials_file, "rb") as f:
