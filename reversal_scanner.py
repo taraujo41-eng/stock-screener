@@ -1465,7 +1465,15 @@ def _analyze_options_setup(sym, df, iv_history):
         best_contract = None
 
         for exp_ts in valid_exps:
-            chain = fetch_options_for_expiration(sym, exp_ts)
+            # Try to get the chain from our efficient allChains cache first
+            # (bypassing the slow network API call entirely)
+            all_chains = chain_meta.get("allChains", {})
+            if exp_ts in all_chains:
+                chain = all_chains[exp_ts]
+            else:
+                # Fallback only if needed (e.g. Yahoo fallback)
+                chain = fetch_options_for_expiration(sym, exp_ts)
+                
             if not chain:
                 continue
 

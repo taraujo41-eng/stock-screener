@@ -606,69 +606,69 @@ def fetch_options_chain(ticker):
     wb_un = get_unofficial_client()
     if wb_un:
         try:
+            import requests
             print(f"[Webull Unofficial] Fetching options chain for {ticker}...")
-            exp_dates = wb_un.get_options_expiration_dates(stock=ticker)
-            if exp_dates:
-                # Convert dates list to unix timestamps (seconds)
+            
+            headers = wb_un.build_req_headers()
+            data = {'count': -1, 'direction': 'all', 'tickerId': wb_un.get_ticker(ticker)}
+            res = requests.post(wb_un._urls.options_exp_dat_new(), json=data, headers=headers, timeout=wb_un.timeout)
+            
+            if res.status_code == 200:
+                res_json = res.json()
                 expirations = []
-                for d_entry in exp_dates:
+                all_chains = {}
+                first_chain_data = None
+                
+                for entry in res_json.get('expireDateList', []):
+                    date_str = str(entry['from']['date'])
                     try:
-                        d_str = d_entry.get("date") if isinstance(d_entry, dict) else d_entry
-                        ts = int(datetime.strptime(d_str, "%Y-%m-%d").timestamp())
+                        ts = int(datetime.strptime(date_str, "%Y-%m-%d").timestamp())
                         expirations.append(ts)
                     except Exception:
+                        continue
+                        
+                    t_data = entry.get('data', [])
+                    calls = []
+                    puts = []
+                    for item in t_data:
+                        strike = float(item.get("strikePrice", 0))
+                        direction = item.get("direction")
+                        
+                        contract_data = {
+                            "contractSymbol": item.get("symbol"),
+                            "strike": strike,
+                            "bid": float(item.get("bid", 0)) if item.get("bid") else None,
+                            "ask": float(item.get("ask", 0)) if item.get("ask") else None,
+                            "volume": int(float(item.get("volume", 0))) if item.get("volume") else None,
+                            "openInterest": int(float(item.get("openInterest", 0))) if item.get("openInterest") else None,
+                            "impliedVolatility": float(item.get("impliedVolatility", 0)) if item.get("impliedVolatility") else None
+                        }
+                        if direction == "call":
+                            calls.append(contract_data)
+                        elif direction == "put":
+                            puts.append(contract_data)
+                            
+                    chain = {"calls": calls, "puts": puts}
+                    all_chains[ts] = chain
+                    if not first_chain_data:
+                        first_chain_data = chain
+                        
+                if expirations:
+                    underlyingPrice = None
+                    try:
+                        quote = wb_un.get_quote(stock=ticker)
+                        underlyingPrice = float(quote.get("close")) if quote.get("close") else None
+                    except Exception:
                         pass
-                
-                # Fetch first chain (usually front month)
-                first_date_entry = exp_dates[0]
-                first_date_str = first_date_entry.get("date") if isinstance(first_date_entry, dict) else first_date_entry
-                webull_chain = wb_un.get_options(stock=ticker, expireDate=first_date_str)
-                
-                calls = []
-                puts = []
-                for entry in webull_chain:
-                    strike = float(entry.get("strikePrice", 0))
-                    
-                    if "call" in entry:
-                        c_data = entry["call"]
-                        calls.append({
-                            "contractSymbol": c_data.get("symbol"),
-                            "strike": strike,
-                            "bid": float(c_data.get("bid", 0)) if c_data.get("bid") else None,
-                            "ask": float(c_data.get("ask", 0)) if c_data.get("ask") else None,
-                            "volume": int(float(c_data.get("volume", 0))) if c_data.get("volume") else None,
-                            "openInterest": int(float(c_data.get("openInterest", 0))) if c_data.get("openInterest") else None,
-                            "impliedVolatility": float(c_data.get("impliedVolatility", 0)) if c_data.get("impliedVolatility") else None
-                        })
-                    if "put" in entry:
-                        p_data = entry["put"]
-                        puts.append({
-                            "contractSymbol": p_data.get("symbol"),
-                            "strike": strike,
-                            "bid": float(p_data.get("bid", 0)) if p_data.get("bid") else None,
-                            "ask": float(p_data.get("ask", 0)) if p_data.get("ask") else None,
-                            "volume": int(float(p_data.get("volume", 0))) if p_data.get("volume") else None,
-                            "openInterest": int(float(p_data.get("openInterest", 0))) if p_data.get("openInterest") else None,
-                            "impliedVolatility": float(p_data.get("impliedVolatility", 0)) if p_data.get("impliedVolatility") else None
-                        })
-                
-                underlyingPrice = None
-                try:
-                    quote = wb_un.get_quote(stock=ticker)
-                    underlyingPrice = float(quote.get("close")) if quote.get("close") else None
-                except Exception:
-                    pass
-                
-                print(f"[Webull Unofficial] Option chain parsed successfully for {ticker} ({first_date_str})")
-                return {
-                    "ticker": ticker,
-                    "expirations": expirations,
-                    "underlyingPrice": underlyingPrice,
-                    "firstChain": {
-                        "calls": calls,
-                        "puts": puts
+                        
+                    print(f"[Webull Unofficial] Option chain parsed successfully for {ticker} (got {len(expirations)} expirations)")
+                    return {
+                        "ticker": ticker,
+                        "expirations": expirations,
+                        "underlyingPrice": underlyingPrice,
+                        "firstChain": first_chain_data,
+                        "allChains": all_chains
                     }
-                }
         except Exception as e:
             print(f"[Webull Unofficial] Error fetching option chain for {ticker}: {e}")
             
