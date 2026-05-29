@@ -740,6 +740,10 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
             opt = find_best_option(sym, "bullish" if is_bullish else "bearish", last_price)
         opt_str = f"{opt['exp']} ${opt['strike']} {opt['type']} (@${opt['mid']}, IV: {opt['iv']}%)" if opt else "—"
 
+        # Filter out B-grades
+        if grade not in ["A", "A+"]:
+            return None
+
         return {
             "Ticker": sym,
             "Last Price": round(last_price, 2),
@@ -1122,6 +1126,9 @@ def _analyze_momentum(sym, df):
 
         reasons = f"[{' | '.join(tags)}]"
 
+        # Filter out B-grades
+        if grade not in ["A", "A+"]:
+            return None
 
         return {
             "Ticker": sym,
