@@ -1888,16 +1888,29 @@ def momentum_15m_watchlist_scan(tickers, min_volume=500_000, min_price=5.0, exte
         if c_close < min_price: return None
         return _analyze_15m_breakout(sym, df)
         
+    def _on_dl_progress(done, tot, sym):
+        _update_progress("downloading",
+                         f"Scanning... ({done}/{tot})",
+                         done, tot,
+                         ticker=sym, found=len(results))
+        elapsed = time.time() - start_time
+        if done > 0:
+            rate = elapsed / done
+            remaining = (tot - done) * rate
+            scan_progress["eta_seconds"] = int(remaining)
+            
     df_results = fetch_batch_concurrent(
         tickers, 
         days=5, 
         interval="15m", 
         includePrePost=str(extended_hours).lower(),
-        process_fn=process_func
+        process_fn=process_func,
+        on_progress=_on_dl_progress
     )
     
-    for res in df_results:
-        results.append(res)
+    for _, res in df_results.items():
+        if res is not None:
+            results.append(res)
         
     scan_progress["status"] = "done"
     scan_progress["phase_label"] = f"Done — {len(results)} 15m breakouts found"
@@ -1930,17 +1943,30 @@ def momentum_15m_full_market_scan(min_volume=1_000_000, min_price=5.0, extended_
         if c_close < min_price: return None
         return _analyze_15m_breakout(sym, df)
         
+    def _on_dl_progress(done, tot, sym):
+        _update_progress("downloading",
+                         f"Scanning... ({done}/{tot})",
+                         done, tot,
+                         ticker=sym, found=len(results))
+        elapsed = time.time() - start_time
+        if done > 0:
+            rate = elapsed / done
+            remaining = (tot - done) * rate
+            scan_progress["eta_seconds"] = int(remaining)
+            
     df_results = fetch_batch_concurrent(
         tickers, 
         days=5, 
         interval="15m", 
         includePrePost=str(extended_hours).lower(),
         process_fn=process_func,
+        on_progress=_on_dl_progress,
         max_workers=8
     )
     
-    for res in df_results:
-        results.append(res)
+    for _, res in df_results.items():
+        if res is not None:
+            results.append(res)
         
     scan_progress["status"] = "done"
     scan_progress["phase_label"] = f"Done — {len(results)} 15m breakouts found"
