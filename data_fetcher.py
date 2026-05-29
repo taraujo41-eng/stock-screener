@@ -29,6 +29,18 @@ load_dotenv()
 
 warnings.filterwarnings("ignore")
 
+# ── Webull Circuit Breaker (skip after N consecutive failures) ───────────
+
+_webull_unofficial_failures = 0
+_webull_openapi_failures = 0
+_WEBULL_MAX_FAILURES = 2  # After this many consecutive failures, skip for the rest of the scan
+
+def reset_webull_circuit_breaker():
+    """Reset the circuit breaker — call at the start of each new scan."""
+    global _webull_unofficial_failures, _webull_openapi_failures
+    _webull_unofficial_failures = 0
+    _webull_openapi_failures = 0
+
 # ── Webull Unofficial Client Loader (Option B — inherits personal subscriptions) ──
 
 _unofficial_client = None
@@ -482,27 +494,43 @@ def _fetch_yahoo_one(ticker, days=180, interval="1d", includePrePost="false"):
 
 # ── Unified Single Ticker Fetcher (Resilient Ordering) ────────────────
 
-def fetch_one(ticker, days=180, interval="1d", includePrePost="false"):
+def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webull=False):
     """
     Fetch OHLCV data for one ticker.
     Resilient multi-layered ordering:
     1. Try Unofficial Webull account credentials (Option B — inherits user's real-time subscriptions).
     2. Try Official Webull OpenAPI developer credentials (Option A).
     3. Seamless, automatic fallback to Yahoo Finance chart scraping.
+    
+    Circuit breaker: after 2 consecutive Webull failures, auto-skip Webull.
     """
+    global _webull_unofficial_failures, _webull_openapi_failures
+
     # 1. Try Option B (Unofficial Session — Inherits all real-time quotes subscriptions)
-    wb_un = get_unofficial_client()
-    if wb_un:
-        df = _fetch_webull_unofficial_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
-        if df is not None:
-            return df
+    if not skip_webull and _webull_unofficial_failures < _WEBULL_MAX_FAILURES:
+        wb_un = get_unofficial_client()
+        if wb_un:
+            df = _fetch_webull_unofficial_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
+            if df is not None:
+                _webull_unofficial_failures = 0  # Reset on success
+                return df
+            else:
+                _webull_unofficial_failures += 1
+                if _webull_unofficial_failures >= _WEBULL_MAX_FAILURES:
+                    print(f"[Circuit Breaker] Webull Unofficial failed {_WEBULL_MAX_FAILURES}x consecutively — skipping for rest of scan")
             
     # 2. Try Option A (Official OpenAPI — Requires separate developer subscription toggles)
-    wb_openapi = get_webull_client()
-    if wb_openapi:
-        df = _fetch_webull_openapi_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
-        if df is not None:
-            return df
+    if not skip_webull and _webull_openapi_failures < _WEBULL_MAX_FAILURES:
+        wb_openapi = get_webull_client()
+        if wb_openapi:
+            df = _fetch_webull_openapi_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
+            if df is not None:
+                _webull_openapi_failures = 0  # Reset on success
+                return df
+            else:
+                _webull_openapi_failures += 1
+                if _webull_openapi_failures >= _WEBULL_MAX_FAILURES:
+                    print(f"[Circuit Breaker] Webull OpenAPI failed {_WEBULL_MAX_FAILURES}x consecutively — skipping for rest of scan")
 
     # 3. Fallback to Yahoo Finance
     return _fetch_yahoo_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
@@ -690,7 +718,7 @@ def fetch_options_for_expiration(ticker, expiration_ts):
 
 # ── Batch download (sequential — for watchlists) ────────────────────
 
-def fetch_batch(tickers, days=180, delay=0.05, on_progress=None, interval="1d", includePrePost="false"):
+def fetch_batch(tickers, days=180, delay=0.05, on_progress=None, interval="1d", includePrePost="false", skip_webull=False):
     """
     Download data for a list of tickers sequentially.
     Returns dict of {ticker: DataFrame}.
@@ -702,7 +730,7 @@ def fetch_batch(tickers, days=180, delay=0.05, on_progress=None, interval="1d", 
         if on_progress:
             on_progress(i, total, ticker)
 
-        df = fetch_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
+        df = fetch_one(ticker, days=days, interval=interval, includePrePost=includePrePost, skip_webull=skip_webull)
         if df is not None and len(df) >= 50:
             data[ticker] = df
 
@@ -716,19 +744,22 @@ def fetch_batch(tickers, days=180, delay=0.05, on_progress=None, interval="1d", 
 
 def fetch_batch_concurrent(tickers, days=180, max_workers=8,
                            on_progress=None, delay=0.05, interval="1d", includePrePost="false",
-                           process_fn=None):
+                           process_fn=None, skip_webull=False):
     """
     Download data for many tickers using a thread pool.
     If process_fn is provided, it processes each DataFrame on-the-fly and returns the result,
     completely discarding the DataFrame to keep memory footprint close to zero!
     """
+    # Reset circuit breaker at the start of each batch scan
+    reset_webull_circuit_breaker()
+
     data = {}
     completed = 0
     total = len(tickers)
 
     def _fetch(i, ticker):
         time.sleep(delay * (i % max_workers))
-        df = fetch_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
+        df = fetch_one(ticker, days=days, interval=interval, includePrePost=includePrePost, skip_webull=skip_webull)
         if df is not None:
             if process_fn:
                 try:

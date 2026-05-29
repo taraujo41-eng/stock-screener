@@ -488,10 +488,11 @@ def detect_unusual_options(sym):
 # Analyze a single stock DataFrame
 # =====================================================================
 
-def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolerance=0.03):
+def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolerance=0.03, skip_options=False):
     """
     Multi-confirmation scoring system for reversal analysis.
     Each indicator contributes points — minimum 4 required to fire.
+    skip_options=True skips expensive options API calls (for use in batch scans).
     """
     try:
         if len(df) < 20: return None
@@ -674,7 +675,8 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
         # --- UNUSUAL OPTIONS ACTIVITY (check if either side has potential) ---
         # Only fetch options data if the stock already shows some technical signals
         # to keep scan times reasonable (1 API call per check)
-        if bull_score >= 4 or bear_score >= 4:
+        # skip_options=True bypasses this entirely (used in full market scans)
+        if not skip_options and (bull_score >= 4 or bear_score >= 4):
             bull_unusual, bear_unusual, opts_detail = detect_unusual_options(sym)
             if bull_unusual:
                 bull_score += 2
@@ -911,7 +913,7 @@ def full_market_scan(min_volume=500_000, min_price=5.0,
             recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
             price = float(df['Close'].iloc[-1])
             if recent_vol >= min_volume and price >= min_price:
-                result = _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh, swing_tolerance)
+                result = _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh, swing_tolerance, skip_options=True)
                 if result:
                     found_signals.append(sym)
                     return result
@@ -930,9 +932,9 @@ def full_market_scan(min_volume=500_000, min_price=5.0,
             remaining = (tot - done) * rate
             scan_progress["eta_seconds"] = int(remaining)
 
-    # Use max_workers=4 to be gentle on RAM and CPU in shared hosting
+    # Use max_workers=8 for faster concurrent downloads (I/O-bound)
     stock_results = fetch_batch_concurrent(
-        all_tickers, days=fetch_days, max_workers=4,
+        all_tickers, days=fetch_days, max_workers=8,
         on_progress=_on_dl_progress, delay=0.05, interval=interval, includePrePost=includePrePost,
         process_fn=process_ticker
     )
@@ -1411,10 +1413,11 @@ def _analyze_options_setup(sym, df, iv_history):
         if trend == "downtrend":
             bear_catalyst += 1; bear_reasons.append("Downtrend")
 
-        # Need at least score 2 on one side to proceed
+        # Need at least score 3 on one side to proceed (raised from 2 to reduce
+        # the number of tickers triggering expensive options chain lookups)
         max_catalyst = max(bull_catalyst, bear_catalyst)
         print(f"  {sym}: Bull={bull_catalyst} Bear={bear_catalyst} RSI={rsi_val:.1f} Chg={day_chg_pct:.1f}%")
-        if max_catalyst < 2:
+        if max_catalyst < 3:
             return None
 
         # Determine dominant direction
@@ -1538,8 +1541,64 @@ def _analyze_options_setup(sym, df, iv_history):
         if not best_contract:
             return None
 
-        # Step 5: Unusual options flow check
-        bull_unusual, bear_unusual, flow_detail = detect_unusual_options(sym)
+        # Step 5: Unusual options flow check — reuse chain_meta already fetched above
+        #         instead of calling detect_unusual_options() which would fetch it again
+        bull_unusual = False
+        bear_unusual = False
+        flow_detail = ""
+        first_chain = chain_meta.get("firstChain", {})
+        if first_chain:
+            _calls = first_chain.get("calls", [])
+            _puts = first_chain.get("puts", [])
+            total_call_vol = 0
+            total_put_vol = 0
+            unusual_call_contracts = 0
+            unusual_put_contracts = 0
+            max_call_vol_oi = 0.0
+            max_put_vol_oi = 0.0
+
+            for c in _calls:
+                _vol = (c.get("volume", 0) or 0)
+                _oi = (c.get("openInterest", 0) or 0)
+                total_call_vol += _vol
+                if _oi > 50 and _vol > 100:
+                    _ratio = _vol / _oi
+                    if _ratio > 2.0:
+                        unusual_call_contracts += 1
+                        max_call_vol_oi = max(max_call_vol_oi, _ratio)
+
+            for p in _puts:
+                _vol = (p.get("volume", 0) or 0)
+                _oi = (p.get("openInterest", 0) or 0)
+                total_put_vol += _vol
+                if _oi > 50 and _vol > 100:
+                    _ratio = _vol / _oi
+                    if _ratio > 2.0:
+                        unusual_put_contracts += 1
+                        max_put_vol_oi = max(max_put_vol_oi, _ratio)
+
+            _total_vol = total_call_vol + total_put_vol
+            if _total_vol >= 500:
+                _call_pct = total_call_vol / _total_vol if _total_vol > 0 else 0.5
+                bull_unusual = (
+                    (unusual_call_contracts >= 2 and _call_pct > 0.60) or
+                    (unusual_call_contracts >= 3) or
+                    (max_call_vol_oi >= 5.0 and _call_pct > 0.55)
+                )
+                bear_unusual = (
+                    (unusual_put_contracts >= 2 and _call_pct < 0.40) or
+                    (unusual_put_contracts >= 3) or
+                    (max_put_vol_oi >= 5.0 and _call_pct < 0.45)
+                )
+                _details = []
+                if bull_unusual:
+                    _details.append(f"Calls {_call_pct*100:.0f}%")
+                    if max_call_vol_oi >= 3.0: _details.append(f"V/OI {max_call_vol_oi:.1f}x")
+                if bear_unusual:
+                    _details.append(f"Puts {(1-_call_pct)*100:.0f}%")
+                    if max_put_vol_oi >= 3.0: _details.append(f"V/OI {max_put_vol_oi:.1f}x")
+                flow_detail = ", ".join(_details)
+
         has_unusual_flow = (bull_unusual if direction == "bullish" else bear_unusual)
         flow_str = flow_detail if has_unusual_flow else ""
 
@@ -1671,7 +1730,7 @@ def options_full_market_scan(min_volume=500_000, min_price=5.0, extended_hours=F
             scan_progress["eta_seconds"] = int((tot - done) * rate)
 
     stock_results = fetch_batch_concurrent(
-        all_tickers, days=280, max_workers=4,
+        all_tickers, days=280, max_workers=8,
         on_progress=_on_dl_progress, delay=0.05, interval="1d",
         process_fn=process_options
     )
