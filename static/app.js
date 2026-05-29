@@ -36,6 +36,8 @@ function updateModeDesc() {
     desc.textContent = "Scans entire US market — takes 2-3 minutes";
   } else if (scanMode === "options") {
     desc.textContent = "Scans for high-probability options setups — takes 2-3 minutes";
+  } else if (scanMode === "momentum15") {
+    desc.textContent = "Scans for 15-minute breakouts of the Prior Day High/Low — takes 2-3 minutes";
   }
 }
 
@@ -97,6 +99,31 @@ async function setMode(mode, btn) {
         <div class="empty-state__icon">🎯</div>
         <div class="empty-state__title">Ready to scan</div>
         <div class="empty-state__text">Click above to find high-probability options setups<br>DTE 20-60 · Delta 0.40-0.70 · IV Rank &lt;30%</div>
+      </div>
+    `;
+    hideAuxUI();
+  } else if (mode === "momentum15") {
+    scanBtn.querySelector(".scan-btn__text").textContent = "⚡  Scan 15m Breakouts";
+    try {
+      showSkeleton();
+      const res = await fetch("/api/scan/momentum15m/results");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && data.results) {
+          displayResults(data);
+          updateModeDesc();
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("No saved 15m scan available yet");
+    }
+
+    document.getElementById("results").innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state__icon">⚡</div>
+        <div class="empty-state__title">Ready to scan</div>
+        <div class="empty-state__text">Click above to find 15-minute breakouts of the Prior Day High/Low</div>
       </div>
     `;
     hideAuxUI();
@@ -532,12 +559,13 @@ async function runScan() {
   const extHours = document.getElementById("extHoursToggle")?.checked || false;
 
   // All modes use the same async pattern
-  const isOptions = scanMode === "options";
-  
   let endpoint, resultsEndpoint;
-  if (isOptions) {
+  if (scanMode === "options") {
     endpoint = "/api/scan/options/full";
     resultsEndpoint = "/api/scan/options/full/results";
+  } else if (scanMode === "momentum15") {
+    endpoint = "/api/scan/momentum15m/full";
+    resultsEndpoint = "/api/scan/momentum15m/results";
   } else {
     endpoint = "/api/scan/full";
     resultsEndpoint = "/api/scan/full/results";
