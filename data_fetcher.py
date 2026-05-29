@@ -634,14 +634,22 @@ def fetch_options_chain(ticker):
                         strike = float(item.get("strikePrice", 0))
                         direction = item.get("direction")
                         
+                        bid_val = None
+                        if item.get("bidList") and isinstance(item["bidList"], list) and len(item["bidList"]) > 0:
+                            bid_val = float(item["bidList"][0].get("price", 0))
+                            
+                        ask_val = None
+                        if item.get("askList") and isinstance(item["askList"], list) and len(item["askList"]) > 0:
+                            ask_val = float(item["askList"][0].get("price", 0))
+                            
                         contract_data = {
                             "contractSymbol": item.get("symbol"),
                             "strike": strike,
-                            "bid": float(item.get("bid", 0)) if item.get("bid") else None,
-                            "ask": float(item.get("ask", 0)) if item.get("ask") else None,
+                            "bid": bid_val,
+                            "ask": ask_val,
                             "volume": int(float(item.get("volume", 0))) if item.get("volume") else None,
                             "openInterest": int(float(item.get("openInterest", 0))) if item.get("openInterest") else None,
-                            "impliedVolatility": float(item.get("impliedVolatility", 0)) if item.get("impliedVolatility") else None
+                            "impliedVolatility": float(item.get("impVol", 0)) if item.get("impVol") else None
                         }
                         if direction == "call":
                             calls.append(contract_data)

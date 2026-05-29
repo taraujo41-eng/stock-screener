@@ -1468,11 +1468,36 @@ def _analyze_options_setup(sym, df, iv_history):
             # Try to get the chain from our efficient allChains cache first
             # (bypassing the slow network API call entirely)
             all_chains = chain_meta.get("allChains", {})
-            if exp_ts in all_chains:
-                chain = all_chains[exp_ts]
-            else:
-                # Fallback only if needed (e.g. Yahoo fallback)
-                chain = fetch_options_for_expiration(sym, exp_ts)
+            chain = all_chains.get(exp_ts)
+            
+            # Webull often returns empty pricing for far-out options in allChains after hours.
+            # Check if the chain is valid (has at least one bid/ask)
+            has_data = False
+            if chain:
+                for c in chain.get("calls", [])[:10]:
+                    if c.get("bid") is not None or c.get("ask") is not None:
+                        has_data = True
+                        break
+                        
+            if not chain or not has_data:
+                # Webull data is empty/missing pricing — fall back directly to Yahoo
+                from data_fetcher import _fetch_yahoo_options_chain, _fetch_yahoo_options_for_expiration
+                if "yahoo_meta" not in chain_meta:
+                    chain_meta["yahoo_meta"] = _fetch_yahoo_options_chain(sym)
+                    
+                yahoo_meta = chain_meta.get("yahoo_meta")
+                if yahoo_meta:
+                    # Fuzzy match the expiration timestamp (find closest Yahoo timestamp)
+                    closest_yahoo_exp = None
+                    min_diff = 999999
+                    for y_exp in yahoo_meta.get("expirations", []):
+                        diff = abs(y_exp - exp_ts)
+                        if diff < min_diff:
+                            min_diff = diff
+                            closest_yahoo_exp = y_exp
+                            
+                    if closest_yahoo_exp and min_diff < 86400 * 4: # within 4 days
+                        chain = _fetch_yahoo_options_for_expiration(sym, closest_yahoo_exp)
                 
             if not chain:
                 continue
