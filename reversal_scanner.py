@@ -1853,8 +1853,8 @@ def _analyze_15m_breakout(sym, df):
         # Calculate RSI for the table
         df_close = df['Close']
         if len(df_close) > 15:
-            rsi_series = calculate_rsi(df_close, 14)
-            rsi_val = rsi_series.iloc[-1]
+            rsi_series = compute_rsi(df_close, 14)
+            rsi_val = float(rsi_series.iloc[-1])
         else:
             rsi_val = 50.0
             
@@ -1890,10 +1890,10 @@ def momentum_15m_watchlist_scan(tickers, min_volume=500_000, min_price=5.0, exte
         
     df_results = fetch_batch_concurrent(
         tickers, 
-        process_func, 
         days=5, 
         interval="15m", 
-        includePrePost=str(extended_hours).lower()
+        includePrePost=str(extended_hours).lower(),
+        process_fn=process_func
     )
     
     for res in df_results:
@@ -1930,10 +1930,10 @@ def momentum_15m_full_market_scan(min_volume=1_000_000, min_price=5.0, extended_
         
     df_results = fetch_batch_concurrent(
         tickers, 
-        process_func, 
         days=5, 
         interval="15m", 
         includePrePost=str(extended_hours).lower(),
+        process_fn=process_func,
         max_workers=8
     )
     
