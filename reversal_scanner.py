@@ -1914,7 +1914,9 @@ def momentum_15m_full_market_scan(min_volume=1_000_000, min_price=5.0, extended_
     
     scan_progress["phase"] = "fetching_universe"
     scan_progress["phase_label"] = "Fetching tradable universe..."
-    tickers = get_tradable_universe(min_price=min_price, min_volume=min_volume)
+    tickers = get_us_tickers()
+    if not tickers:
+        return pd.DataFrame()
     
     scan_progress["total"] = len(tickers)
     scan_progress["phase"] = "downloading"
