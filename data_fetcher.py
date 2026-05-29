@@ -375,19 +375,47 @@ def _fetch_webull_unofficial_one(ticker, days=180, interval="1d", includePrePost
         count = days if interval == "1d" else 600
         extend = 1 if includePrePost == "true" else 0
         
-        print(f"[Webull Unofficial] Fetching {ticker} bars ({interval} -> {mapped_interval}, count={count}, extend={extend})...")
-        df = wb_un.get_bars(stock=ticker, interval=mapped_interval, count=count, extendTrading=extend)
+        import requests
+        import pytz
+        from datetime import datetime
         
-        if df is not None and not df.empty:
-            # Map index and columns to capitalization
-            df = df.rename(columns={
-                "open": "Open",
-                "high": "High",
-                "low": "Low",
-                "close": "Close",
-                "volume": "Volume"
+        tId = wb_un.get_ticker(ticker)
+        timeStamp = int(time.time())
+        params = {'extendTrading': extend}
+        headers = wb_un.build_req_headers()
+        
+        print(f"[Webull Unofficial] Fetching {ticker} bars ({interval} -> {mapped_interval}, count={count}, extend={extend})...")
+        resp = requests.get(
+            wb_un._urls.bars(tId, mapped_interval, count, timeStamp),
+            params=params,
+            headers=headers,
+            timeout=wb_un.timeout
+        )
+        if resp.status_code != 200:
+            return None
+            
+        result = resp.json()
+        if not result or not result[0].get('data'):
+            return None
+            
+        time_zone = pytz.timezone(result[0]['timeZone'])
+        records = []
+        for row in result[0]['data']:
+            parts = row.split(',')
+            parts = ['0' if v == 'null' else v for v in parts]
+            dt = datetime.fromtimestamp(int(parts[0])).astimezone(time_zone)
+            records.append({
+                "Date": dt,
+                "Open": float(parts[1]),
+                "High": float(parts[3]),
+                "Low": float(parts[4]),
+                "Close": float(parts[2]),
+                "Volume": int(float(parts[6]))
             })
-            df.index.name = "Date"
+            
+        if records:
+            df = pd.DataFrame(records)
+            df = df.set_index("Date")
             df.index = df.index.tz_convert("America/New_York")
             df = df.sort_index()
             
