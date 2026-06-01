@@ -225,9 +225,9 @@ body {
 
 .mode-tab {
   flex: 1;
-  padding: 10px 6px;
+  padding: 10px 4px;
   font-family: 'Inter', sans-serif;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 600;
   color: var(--text-muted);
   background: transparent;

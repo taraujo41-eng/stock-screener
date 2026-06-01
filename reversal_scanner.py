@@ -231,6 +231,141 @@ def detect_rsi_divergence(price_series, rsi_series, lookback=20):
     return bull_div, bear_div
 
 # =====================================================================
+# Breakout / Squeeze Indicators
+# =====================================================================
+
+def compute_atr(df, length=14):
+    """Average True Range."""
+    high = df['High']
+    low = df['Low']
+    prev_close = df['Close'].shift(1)
+    tr = pd.concat([
+        high - low,
+        (high - prev_close).abs(),
+        (low - prev_close).abs()
+    ], axis=1).max(axis=1)
+    return tr.rolling(window=length).mean()
+
+def compute_bollinger_bands(series, length=20, num_std=2):
+    """Returns (upper, middle, lower) Bollinger Bands."""
+    middle = series.rolling(window=length).mean()
+    std = series.rolling(window=length).std()
+    upper = middle + num_std * std
+    lower = middle - num_std * std
+    return upper, middle, lower
+
+def compute_keltner_channels(df, length=20, atr_mult=1.5):
+    """Returns (upper, middle, lower) Keltner Channels."""
+    middle = df['Close'].ewm(span=length, adjust=False).mean()
+    atr = compute_atr(df, length)
+    upper = middle + atr_mult * atr
+    lower = middle - atr_mult * atr
+    return upper, middle, lower
+
+def detect_squeeze(df, bb_length=20, kc_length=20, kc_mult=1.5):
+    """
+    TTM Squeeze: returns True when Bollinger Bands are inside Keltner Channels.
+    Also returns the momentum histogram direction.
+    Returns (is_squeeze, momentum_positive)
+    """
+    bb_upper, bb_mid, bb_lower = compute_bollinger_bands(df['Close'], bb_length)
+    kc_upper, kc_mid, kc_lower = compute_keltner_channels(df, kc_length, kc_mult)
+
+    # Squeeze is ON when BB is inside KC
+    squeeze_on = (bb_lower.iloc[-1] > kc_lower.iloc[-1]) and (bb_upper.iloc[-1] < kc_upper.iloc[-1])
+
+    # Momentum: linear regression of (close - avg(highest high, lowest low, close ema)) — simplified
+    # We use a simpler proxy: close relative to midline of KC
+    momentum = df['Close'].iloc[-1] - kc_mid.iloc[-1]
+    prev_momentum = df['Close'].iloc[-2] - kc_mid.iloc[-2] if len(df) > 1 else 0
+
+    return squeeze_on, (momentum > 0), (momentum > prev_momentum)
+
+def compute_adr_pct(df, length=14):
+    """Average Daily Range as a percentage of price."""
+    if len(df) < length:
+        return 0.0
+    daily_range = df['High'] - df['Low']
+    avg_range = float(daily_range.iloc[-length:].mean())
+    last_price = float(df['Close'].iloc[-1])
+    if last_price == 0:
+        return 0.0
+    return (avg_range / last_price) * 100
+
+def compute_ema(series, length):
+    """Exponential Moving Average."""
+    return series.ewm(span=length, adjust=False).mean()
+
+def detect_triangle(df, lookback=20):
+    """
+    Detect ascending/descending triangle patterns.
+    Ascending: flat resistance (highs), rising lows
+    Descending: flat support (lows), falling highs
+    Returns (ascending, descending)
+    """
+    if len(df) < lookback + 2:
+        return False, False
+
+    window = df.iloc[-lookback:]
+    highs = window['High'].values
+    lows = window['Low'].values
+
+    # Linear regression slopes
+    x = np.arange(lookback)
+
+    # Highs slope
+    high_slope = np.polyfit(x, highs, 1)[0]
+    # Lows slope
+    low_slope = np.polyfit(x, lows, 1)[0]
+
+    last_price = float(df['Close'].iloc[-1])
+    high_range = (highs.max() - highs.min()) / last_price if last_price > 0 else 1
+    low_range = (lows.max() - lows.min()) / last_price if last_price > 0 else 1
+
+    # Ascending triangle: flat highs (small slope, tight range) + rising lows
+    ascending = (
+        abs(high_slope / last_price) < 0.001 and  # Flat resistance
+        high_range < 0.03 and                       # Highs within 3%
+        low_slope / last_price > 0.0005             # Rising lows
+    )
+
+    # Descending triangle: flat lows + falling highs
+    descending = (
+        abs(low_slope / last_price) < 0.001 and   # Flat support
+        low_range < 0.03 and                        # Lows within 3%
+        high_slope / last_price < -0.0005           # Falling highs
+    )
+
+    return ascending, descending
+
+def count_distribution_accumulation(df, lookback=10):
+    """
+    Count high-volume up days (accumulation) and high-volume down days (distribution)
+    in the last `lookback` trading days.
+    Returns (accumulation_days, distribution_days)
+    """
+    if len(df) < lookback + 1:
+        return 0, 0
+
+    window = df.iloc[-lookback:]
+    vol_avg = float(df['Volume'].iloc[-(lookback + 20):-lookback].mean()) if len(df) > lookback + 20 else float(df['Volume'].mean())
+
+    accum = 0
+    distrib = 0
+    for i in range(len(window)):
+        row = window.iloc[i]
+        is_up = row['Close'] > row['Open']
+        is_high_vol = row['Volume'] > vol_avg * 1.2
+
+        if is_up and is_high_vol:
+            accum += 1
+        elif not is_up and is_high_vol:
+            distrib += 1
+
+    return accum, distrib
+
+
+# =====================================================================
 # Candlestick Patterns & Trend Context
 # =====================================================================
 
@@ -1790,6 +1925,454 @@ def options_full_market_scan(min_volume=500_000, min_price=5.0, extended_hours=F
     if not results:
         return pd.DataFrame()
     return pd.DataFrame(results).sort_values(by="Catalyst Score", ascending=False)
+
+
+# =====================================================================
+# Breakout / Breakdown & Gap Scanner — Analysis
+# =====================================================================
+
+def _analyze_breakout_setup(sym, df):
+    """
+    Breakout/Breakdown & Gap scoring system.
+    Detects stocks ready to break out of consolidation, gap up/down,
+    or break down through support using multi-factor confirmation.
+    """
+    try:
+        if len(df) < 50:
+            return None
+
+        curr = df.iloc[-1]
+        prev = df.iloc[-2]
+        last_price = float(curr['Close'])
+        open_price = float(curr['Open'])
+        prev_close = float(prev['Close'])
+
+        # Metadata
+        fiftyTwoWeekHigh = df.attrs.get("fiftyTwoWeekHigh")
+        fiftyTwoWeekLow = df.attrs.get("fiftyTwoWeekLow")
+
+        # Prior session high/low (robust multi-day detection)
+        dates = df.index.date
+        unique_dates = sorted(list(set(dates)))
+        if len(unique_dates) >= 2:
+            prior_date = unique_dates[-2]
+            prior_day_df = df[df.index.date == prior_date]
+            prior_high = float(prior_day_df['High'].max())
+            prior_low = float(prior_day_df['Low'].min())
+        else:
+            prior_high = float(prev['High'])
+            prior_low = float(prev['Low'])
+
+        # Indicators
+        rsi_series = compute_rsi(df['Close'], 14)
+        rsi_val = float(rsi_series.iloc[-1])
+
+        rvol = compute_rvol(df)
+
+        macd_line, signal_line, macd_hist = compute_macd(df['Close'])
+        macd_val = float(macd_line.iloc[-1])
+        sig_val = float(signal_line.iloc[-1])
+        hist_val = float(macd_hist.iloc[-1])
+
+        ema10 = float(compute_ema(df['Close'], 10).iloc[-1])
+        ema21 = float(compute_ema(df['Close'], 21).iloc[-1])
+        ema50 = float(compute_ema(df['Close'], 50).iloc[-1])
+
+        adr_pct = compute_adr_pct(df, 14)
+
+        # Gap
+        gap_pct = ((open_price - prev_close) / prev_close) * 100
+
+        # Candle shape
+        total_range = curr['High'] - curr['Low'] if curr['High'] != curr['Low'] else 0.01
+        upper_wick = curr['High'] - max(curr['Close'], curr['Open'])
+        lower_wick = min(curr['Close'], curr['Open']) - curr['Low']
+        is_green = last_price > open_price
+        range_position = (last_price - curr['Low']) / total_range  # 0=bottom, 1=top
+
+        # Squeeze
+        try:
+            squeeze_on, squeeze_mom_positive, squeeze_mom_increasing = detect_squeeze(df)
+        except Exception:
+            squeeze_on, squeeze_mom_positive, squeeze_mom_increasing = False, False, False
+
+        # Triangle patterns
+        try:
+            ascending_tri, descending_tri = detect_triangle(df, lookback=20)
+        except Exception:
+            ascending_tri, descending_tri = False, False
+
+        # Accumulation / Distribution
+        try:
+            accum_days, distrib_days = count_distribution_accumulation(df, lookback=10)
+        except Exception:
+            accum_days, distrib_days = 0, 0
+
+        # ATR contraction (consolidation proxy)
+        try:
+            atr_series = compute_atr(df, 14)
+            atr_now = float(atr_series.iloc[-1])
+            atr_20ago = float(atr_series.iloc[-20]) if len(atr_series) >= 20 else atr_now
+            atr_contracting = atr_now < atr_20ago * 0.75  # ATR dropped 25%+
+        except Exception:
+            atr_contracting = False
+
+        # Consolidation: price range in last 10 bars
+        try:
+            recent_10 = df.iloc[-10:]
+            range_10d_pct = ((recent_10['High'].max() - recent_10['Low'].min()) / last_price) * 100
+            is_tight_range = range_10d_pct < 8  # Price contained within 8%
+        except Exception:
+            is_tight_range = False
+            range_10d_pct = 99
+
+        MIN_BREAKOUT_SCORE = 5
+
+        # ═══════════════════════════════════════════════════════
+        # BULLISH BREAKOUT SCORE
+        # ═══════════════════════════════════════════════════════
+        bull_score = 0
+        bull_tags = []
+
+        # 1. Consolidation near resistance (+3)
+        if is_tight_range and atr_contracting:
+            bull_score += 3
+            bull_tags.append(f"Consolidation ({range_10d_pct:.1f}% range) +3")
+        elif is_tight_range:
+            bull_score += 1
+            bull_tags.append(f"Tight Range ({range_10d_pct:.1f}%) +1")
+
+        # 2. TTM Squeeze (+3)
+        if squeeze_on and squeeze_mom_positive:
+            bull_score += 3
+            bull_tags.append("Squeeze Fire 🔥 +3")
+        elif squeeze_on:
+            bull_score += 1
+            bull_tags.append("Squeeze Building +1")
+
+        # 3. Volume surge on up day (+2)
+        if rvol > 2.0 and is_green:
+            bull_score += 2
+            bull_tags.append(f"RVOL {rvol:.1f}x +2")
+            if rvol > 3.0:
+                bull_score += 1
+                bull_tags.append("Extreme Vol +1")
+        elif rvol > 1.5 and is_green:
+            bull_score += 1
+            bull_tags.append(f"RVOL {rvol:.1f}x +1")
+
+        # 4. Ascending triangle (+2)
+        if ascending_tri:
+            bull_score += 2
+            bull_tags.append("Asc Triangle +2")
+
+        # 5. EMA alignment: stacked bullishly (+2)
+        if last_price > ema10 > ema21 > ema50:
+            bull_score += 2
+            bull_tags.append("EMA Stacked ↑ +2")
+        elif last_price > ema10 and last_price > ema21:
+            bull_score += 1
+            bull_tags.append("Above EMAs +1")
+
+        # 6. RSI in strength zone 55-70 (+1)
+        if 55 <= rsi_val <= 70:
+            bull_score += 1
+            bull_tags.append(f"RSI {rsi_val:.0f} (Strength) +1")
+
+        # 7. MACD bullish (+1)
+        if hist_val > 0 and macd_val > sig_val:
+            bull_score += 1
+            bull_tags.append("MACD Bullish +1")
+
+        # 8. Gap up > 2% (+2)
+        if gap_pct > 2.0:
+            bull_score += 2
+            bull_tags.append(f"Gap Up {gap_pct:.1f}% +2")
+
+        # 9. Near 52w high (+2)
+        if fiftyTwoWeekHigh and last_price >= fiftyTwoWeekHigh * 0.95:
+            bull_score += 2
+            bull_tags.append("Near 52w High +2")
+
+        # 10. ADR% > 3% (+1)
+        if adr_pct > 3.0:
+            bull_score += 1
+            bull_tags.append(f"ADR {adr_pct:.1f}% +1")
+
+        # 11. Strong candle close — upper 25% of range, small upper wick (+1)
+        if is_green and range_position >= 0.75 and upper_wick < 0.2 * total_range:
+            bull_score += 1
+            bull_tags.append("Strong Close +1")
+
+        # 12. Accumulation days (+1)
+        if accum_days >= 3:
+            bull_score += 1
+            bull_tags.append(f"Accum {accum_days}d +1")
+
+        # 13. Broke prior day high (+2)
+        if last_price > prior_high:
+            bull_score += 2
+            bull_tags.append("Broke PDH +2")
+        elif last_price > prior_high * 0.995:
+            bull_score += 1
+            bull_tags.append("Near PDH +1")
+
+        # ═══════════════════════════════════════════════════════
+        # BEARISH BREAKDOWN SCORE
+        # ═══════════════════════════════════════════════════════
+        bear_score = 0
+        bear_tags = []
+
+        # 1. Consolidation near support (+3)
+        if is_tight_range and atr_contracting:
+            bear_score += 3
+            bear_tags.append(f"Consolidation ({range_10d_pct:.1f}% range) +3")
+        elif is_tight_range:
+            bear_score += 1
+            bear_tags.append(f"Tight Range ({range_10d_pct:.1f}%) +1")
+
+        # 2. TTM Squeeze — bearish (+3)
+        if squeeze_on and not squeeze_mom_positive:
+            bear_score += 3
+            bear_tags.append("Squeeze Fire 🔥 +3")
+        elif squeeze_on:
+            bear_score += 1
+            bear_tags.append("Squeeze Building +1")
+
+        # 3. Volume surge on down day (+2)
+        if rvol > 2.0 and not is_green:
+            bear_score += 2
+            bear_tags.append(f"RVOL {rvol:.1f}x +2")
+            if rvol > 3.0:
+                bear_score += 1
+                bear_tags.append("Extreme Vol +1")
+        elif rvol > 1.5 and not is_green:
+            bear_score += 1
+            bear_tags.append(f"RVOL {rvol:.1f}x +1")
+
+        # 4. Descending triangle (+2)
+        if descending_tri:
+            bear_score += 2
+            bear_tags.append("Desc Triangle +2")
+
+        # 5. EMA alignment: stacked bearishly (+2)
+        if last_price < ema10 < ema21 < ema50:
+            bear_score += 2
+            bear_tags.append("EMA Stacked ↓ +2")
+        elif last_price < ema10 and last_price < ema21:
+            bear_score += 1
+            bear_tags.append("Below EMAs +1")
+
+        # 6. RSI in weakness zone 30-45 (+1)
+        if 30 <= rsi_val <= 45:
+            bear_score += 1
+            bear_tags.append(f"RSI {rsi_val:.0f} (Weakness) +1")
+
+        # 7. MACD bearish (+1)
+        if hist_val < 0 and macd_val < sig_val:
+            bear_score += 1
+            bear_tags.append("MACD Bearish +1")
+
+        # 8. Gap down > 2% (+2)
+        if gap_pct < -2.0:
+            bear_score += 2
+            bear_tags.append(f"Gap Down {abs(gap_pct):.1f}% +2")
+
+        # 9. Near 52w low (+2)
+        if fiftyTwoWeekLow and last_price <= fiftyTwoWeekLow * 1.05:
+            bear_score += 2
+            bear_tags.append("Near 52w Low +2")
+
+        # 10. ADR% > 3% (+1)
+        if adr_pct > 3.0:
+            bear_score += 1
+            bear_tags.append(f"ADR {adr_pct:.1f}% +1")
+
+        # 11. Weak candle close — lower 25% of range, small lower wick (+1)
+        if not is_green and range_position <= 0.25 and lower_wick < 0.2 * total_range:
+            bear_score += 1
+            bear_tags.append("Weak Close +1")
+
+        # 12. Distribution days (+1)
+        if distrib_days >= 4:
+            bear_score += 1
+            bear_tags.append(f"Distrib {distrib_days}d +1")
+
+        # 13. Broke prior day low (+2)
+        if last_price < prior_low:
+            bear_score += 2
+            bear_tags.append("Broke PDL +2")
+        elif last_price < prior_low * 1.005:
+            bear_score += 1
+            bear_tags.append("Near PDL +1")
+
+        # ═══════════════════════════════════════════════════════
+        # SIGNAL DECISION
+        # ═══════════════════════════════════════════════════════
+        is_bullish = bull_score >= MIN_BREAKOUT_SCORE
+        is_bearish = bear_score >= MIN_BREAKOUT_SCORE
+
+        if not is_bullish and not is_bearish:
+            return None
+
+        # Use stronger direction
+        if is_bullish and is_bearish:
+            if bull_score >= bear_score:
+                is_bearish = False
+            else:
+                is_bullish = False
+
+        score = bull_score if is_bullish else bear_score
+        tags = bull_tags if is_bullish else bear_tags
+
+        # Grading
+        if score >= 8:
+            grade = "A+"
+        elif score >= 6:
+            grade = "A"
+        else:
+            grade = "B"
+
+        # Filter out B-grades
+        if grade not in ["A", "A+"]:
+            return None
+
+        reasons = f"[{' | '.join(tags)}]"
+
+        return {
+            "Ticker": sym,
+            "Last Price": round(last_price, 2),
+            "Volume": int(curr['Volume']),
+            "RSI": round(rsi_val, 1),
+            "Score": score,
+            "Grade": grade,
+            "Bullish Signals": reasons if is_bullish else "—",
+            "Bearish Signals": reasons if is_bearish else "—",
+            "Suggested Option": "—"
+        }
+    except Exception as e:
+        print(f"  Error analyzing breakout for {sym}: {e}")
+    return None
+
+
+# =====================================================================
+# Breakout Scanners (Watchlist + Full Market)
+# =====================================================================
+
+def breakout_watchlist_scan(tickers, min_volume=500_000, min_price=5.0, extended_hours=False):
+    """Scan watchlist for breakout/breakdown & gap setups."""
+    _reset_progress()
+    scan_progress["status"] = "running"
+    start_time = time.time()
+
+    results = []
+    total = len(tickers)
+    _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
+
+    def _on_dl_progress(i, tot, sym):
+        _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=len(results))
+
+    interval = "15m" if extended_hours else "1d"
+    includePrePost = "true" if extended_hours else "false"
+    fetch_days = 14 if extended_hours else 280
+
+    stock_data = fetch_batch_concurrent(
+        tickers, days=fetch_days, max_workers=4,
+        on_progress=_on_dl_progress, delay=0.05, interval=interval, includePrePost=includePrePost
+    )
+
+    for i, (sym, df) in enumerate(stock_data.items()):
+        _update_progress("analyzing", f"Analyzing {sym}...", i, len(stock_data), ticker=sym, found=len(results))
+        try:
+            today_date = df.index.date[-1]
+            recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
+            last_price = float(df['Close'].iloc[-1])
+            if recent_vol < min_volume or last_price < min_price:
+                continue
+            result = _analyze_breakout_setup(sym, df)
+            if result:
+                results.append(result)
+        except:
+            continue
+
+    total_time = time.time() - start_time
+    scan_progress.update({
+        "status": "done", "phase": "complete",
+        "phase_label": f"Done — {len(results)} breakout signals found",
+        "current": total, "total": total,
+        "found": len(results), "pct": 100, "eta_seconds": 0,
+    })
+
+    print(f"[Done] Breakout watchlist scan: {len(results)} signals in {total_time:.1f}s")
+    if not results:
+        return pd.DataFrame()
+    return pd.DataFrame(results).sort_values(by="Score", ascending=False)
+
+
+def breakout_full_market_scan(min_volume=500_000, min_price=5.0, extended_hours=False):
+    """Scan the full US market for breakout/breakdown & gap setups."""
+    _reset_progress()
+    scan_progress["status"] = "running"
+    start_time = time.time()
+
+    all_tickers = get_us_tickers()
+    if not all_tickers:
+        scan_progress["status"] = "error"
+        scan_progress["phase_label"] = "Failed to fetch ticker list"
+        return pd.DataFrame()
+
+    total_tickers = len(all_tickers)
+    found_signals = []
+
+    def process_breakout(sym, df):
+        try:
+            if len(df) < 50:
+                return None
+            today_date = df.index.date[-1]
+            recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
+            price = float(df['Close'].iloc[-1])
+            if recent_vol >= min_volume and price >= min_price:
+                result = _analyze_breakout_setup(sym, df)
+                if result:
+                    found_signals.append(sym)
+                    return result
+        except Exception:
+            pass
+        return None
+
+    def _on_dl_progress(done, tot, sym):
+        _update_progress("downloading",
+                         f"Downloading & Analyzing... ({done}/{tot})",
+                         done, tot, ticker=sym, found=len(found_signals))
+        elapsed = time.time() - start_time
+        if done > 0:
+            rate = elapsed / done
+            scan_progress["eta_seconds"] = int((tot - done) * rate)
+
+    interval = "15m" if extended_hours else "1d"
+    includePrePost = "true" if extended_hours else "false"
+    fetch_days = 14 if extended_hours else 280
+
+    stock_results = fetch_batch_concurrent(
+        all_tickers, days=fetch_days, max_workers=8,
+        on_progress=_on_dl_progress, delay=0.05, interval=interval, includePrePost=includePrePost,
+        process_fn=process_breakout
+    )
+
+    results = [r for r in stock_results.values() if r is not None]
+
+    total_time = time.time() - start_time
+    scan_progress.update({
+        "status": "done", "phase": "complete",
+        "phase_label": f"Done — {len(results)} breakout signals found",
+        "current": total_tickers, "total": total_tickers,
+        "found": len(results), "pct": 100, "eta_seconds": 0,
+    })
+
+    print(f"[Done] Breakout full market scan: {len(results)} signals in {total_time:.0f}s")
+    if not results:
+        return pd.DataFrame()
+    return pd.DataFrame(results).sort_values(by="Score", ascending=False)
 
 
 # =====================================================================

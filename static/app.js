@@ -38,6 +38,8 @@ function updateModeDesc() {
     desc.textContent = "Scans for high-probability options setups — takes 2-3 minutes";
   } else if (scanMode === "momentum15") {
     desc.textContent = "Scans for 15-minute breakouts of the Prior Day High/Low — takes 2-3 minutes";
+  } else if (scanMode === "breakout") {
+    desc.textContent = "Scans for breakout/breakdown & gap setups — squeeze, consolidation, volume surge";
   }
 }
 
@@ -124,6 +126,31 @@ async function setMode(mode, btn) {
         <div class="empty-state__icon">⚡</div>
         <div class="empty-state__title">Ready to scan</div>
         <div class="empty-state__text">Click above to find 15-minute breakouts of the Prior Day High/Low</div>
+      </div>
+    `;
+    hideAuxUI();
+  } else if (mode === "breakout") {
+    scanBtn.querySelector(".scan-btn__text").textContent = "🔺  Scan Breakouts";
+    try {
+      showSkeleton();
+      const res = await fetch("/api/scan/breakout/results");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && data.results) {
+          displayResults(data);
+          updateModeDesc();
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("No saved breakout scan available yet");
+    }
+
+    document.getElementById("results").innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state__icon">🔺</div>
+        <div class="empty-state__title">Ready to scan</div>
+        <div class="empty-state__text">Click above to find breakout/breakdown &amp; gap setups<br>Squeeze · Consolidation · Volume Surge · MA Alignment</div>
       </div>
     `;
     hideAuxUI();
@@ -566,6 +593,9 @@ async function runScan() {
   } else if (scanMode === "momentum15") {
     endpoint = "/api/scan/momentum15m/full";
     resultsEndpoint = "/api/scan/momentum15m/results";
+  } else if (scanMode === "breakout") {
+    endpoint = "/api/scan/breakout/full";
+    resultsEndpoint = "/api/scan/breakout/results";
   } else {
     endpoint = "/api/scan/full";
     resultsEndpoint = "/api/scan/full/results";

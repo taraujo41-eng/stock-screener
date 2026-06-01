@@ -364,6 +364,92 @@ def scan_momentum15m_full():
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"ok": True, "message": "15-minute full market scan started"})
 
+# ── API: Breakout/Breakdown Scans (async) ──────────────────────────
+
+BREAKOUT_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_breakout_scan.json")
+
+@app.route("/api/scan/breakout", methods=["POST"])
+def scan_breakout():
+    """Start a breakout/breakdown watchlist scan."""
+    global _scan_running
+    if _scan_running:
+        return jsonify({"ok": False, "error": "A scan is already running"}), 409
+
+    req_data = request.get_json(silent=True) or {}
+    extended_hours = req_data.get("extended_hours", False)
+
+    def _run():
+        global _scan_running
+        _scan_running = True
+        try:
+            from reversal_scanner import breakout_watchlist_scan
+            et_tz = pytz.timezone("America/New_York")
+            df = breakout_watchlist_scan(user_watchlist, extended_hours=extended_hours)
+            app.config["LAST_BREAKOUT_RESULTS"] = {
+                "ok": True,
+                "mode": "breakout_watchlist",
+                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
+                "count": len(df) if not df.empty else 0,
+                "tickers_scanned": len(user_watchlist),
+                "results": df.to_dict(orient="records") if not df.empty else [],
+            }
+        except Exception as e:
+            app.config["LAST_BREAKOUT_RESULTS"] = {"ok": False, "error": str(e)}
+            scan_progress["status"] = "error"
+            scan_progress["phase_label"] = str(e)
+        finally:
+            _scan_running = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "Breakout watchlist scan started"})
+
+@app.route("/api/scan/breakout/results", methods=["GET"])
+def scan_breakout_results():
+    results = app.config.get("LAST_BREAKOUT_RESULTS")
+    if results is None:
+        results = load_last_scan(BREAKOUT_RESULTS_FILE)
+        if results:
+            app.config["LAST_BREAKOUT_RESULTS"] = results
+    if results is None:
+        return jsonify({"ok": False, "error": "No scan results available"}), 404
+    return jsonify(results)
+
+@app.route("/api/scan/breakout/full", methods=["POST"])
+def scan_breakout_full():
+    """Start a full market breakout/breakdown scan."""
+    global _scan_running
+    if _scan_running:
+        return jsonify({"ok": False, "error": "A scan is already running"}), 409
+
+    req_data = request.get_json(silent=True) or {}
+    extended_hours = req_data.get("extended_hours", False)
+
+    def _run():
+        global _scan_running
+        _scan_running = True
+        try:
+            from reversal_scanner import breakout_full_market_scan
+            et_tz = pytz.timezone("America/New_York")
+            df = breakout_full_market_scan(extended_hours=extended_hours)
+            results_data = {
+                "ok": True,
+                "mode": "breakout_full",
+                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
+                "count": len(df) if not df.empty else 0,
+                "results": df.to_dict(orient="records") if not df.empty else [],
+            }
+            app.config["LAST_BREAKOUT_RESULTS"] = results_data
+            save_last_scan(results_data, BREAKOUT_RESULTS_FILE)
+        except Exception as e:
+            app.config["LAST_BREAKOUT_RESULTS"] = {"ok": False, "error": str(e)}
+            scan_progress["status"] = "error"
+            scan_progress["phase_label"] = str(e)
+        finally:
+            _scan_running = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "Full breakout scan started"})
+
 # ── API: Watchlist CRUD ─────────────────────────────────────────────
 
 @app.route("/api/watchlist", methods=["GET"])
