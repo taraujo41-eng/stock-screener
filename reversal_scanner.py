@@ -2026,7 +2026,7 @@ def _analyze_breakout_setup(sym, df):
             is_tight_range = False
             range_10d_pct = 99
 
-        MIN_BREAKOUT_SCORE = 5
+        MIN_BREAKOUT_SCORE = 7
 
         # ═══════════════════════════════════════════════════════
         # BULLISH BREAKOUT SCORE
@@ -2209,8 +2209,11 @@ def _analyze_breakout_setup(sym, df):
         # ═══════════════════════════════════════════════════════
         # SIGNAL DECISION
         # ═══════════════════════════════════════════════════════
-        is_bullish = bull_score >= MIN_BREAKOUT_SCORE
-        is_bearish = bear_score >= MIN_BREAKOUT_SCORE
+        has_bull_anchor = (is_tight_range and atr_contracting) or squeeze_on or ascending_tri or gap_pct > 2.0
+        has_bear_anchor = (is_tight_range and atr_contracting) or squeeze_on or descending_tri or gap_pct < -2.0
+
+        is_bullish = bull_score >= MIN_BREAKOUT_SCORE and has_bull_anchor
+        is_bearish = bear_score >= MIN_BREAKOUT_SCORE and has_bear_anchor
 
         if not is_bullish and not is_bearish:
             return None
@@ -2226,9 +2229,9 @@ def _analyze_breakout_setup(sym, df):
         tags = bull_tags if is_bullish else bear_tags
 
         # Grading
-        if score >= 8:
+        if score >= 10:
             grade = "A+"
-        elif score >= 6:
+        elif score >= 8:
             grade = "A"
         else:
             grade = "B"
