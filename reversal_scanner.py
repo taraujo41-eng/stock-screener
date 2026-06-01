@@ -2021,12 +2021,12 @@ def _analyze_breakout_setup(sym, df):
         try:
             recent_10 = df.iloc[-10:]
             range_10d_pct = ((recent_10['High'].max() - recent_10['Low'].min()) / last_price) * 100
-            is_tight_range = range_10d_pct < 8  # Price contained within 8%
+            is_tight_range = range_10d_pct < 5  # Price contained within 5%
         except Exception:
             is_tight_range = False
             range_10d_pct = 99
 
-        MIN_BREAKOUT_SCORE = 7
+        MIN_BREAKOUT_SCORE = 8
 
         # ═══════════════════════════════════════════════════════
         # BULLISH BREAKOUT SCORE
@@ -2209,8 +2209,8 @@ def _analyze_breakout_setup(sym, df):
         # ═══════════════════════════════════════════════════════
         # SIGNAL DECISION
         # ═══════════════════════════════════════════════════════
-        has_bull_anchor = (is_tight_range and atr_contracting) or squeeze_on or ascending_tri or gap_pct > 2.0
-        has_bear_anchor = (is_tight_range and atr_contracting) or squeeze_on or descending_tri or gap_pct < -2.0
+        has_bull_anchor = (is_tight_range and atr_contracting) or (squeeze_on and squeeze_mom_positive) or ascending_tri or gap_pct > 3.0
+        has_bear_anchor = (is_tight_range and atr_contracting) or (squeeze_on and not squeeze_mom_positive) or descending_tri or gap_pct < -3.0
 
         is_bullish = bull_score >= MIN_BREAKOUT_SCORE and has_bull_anchor
         is_bearish = bear_score >= MIN_BREAKOUT_SCORE and has_bear_anchor
