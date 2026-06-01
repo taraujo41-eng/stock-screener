@@ -2026,7 +2026,7 @@ def _analyze_breakout_setup(sym, df):
             is_tight_range = False
             range_10d_pct = 99
 
-        MIN_BREAKOUT_SCORE = 9
+        MIN_BREAKOUT_SCORE = 10
 
         # ═══════════════════════════════════════════════════════
         # BULLISH BREAKOUT SCORE
@@ -2212,8 +2212,11 @@ def _analyze_breakout_setup(sym, df):
         has_bull_anchor = (is_tight_range and atr_contracting) or (squeeze_on and squeeze_mom_positive)
         has_bear_anchor = (is_tight_range and atr_contracting) or (squeeze_on and not squeeze_mom_positive)
 
-        is_bullish = bull_score >= MIN_BREAKOUT_SCORE and has_bull_anchor
-        is_bearish = bear_score >= MIN_BREAKOUT_SCORE and has_bear_anchor
+        near_52w_high = fiftyTwoWeekHigh and last_price >= fiftyTwoWeekHigh * 0.90
+        near_52w_low = fiftyTwoWeekLow and last_price <= fiftyTwoWeekLow * 1.10
+
+        is_bullish = bull_score >= MIN_BREAKOUT_SCORE and has_bull_anchor and near_52w_high
+        is_bearish = bear_score >= MIN_BREAKOUT_SCORE and has_bear_anchor and near_52w_low
 
         if not is_bullish and not is_bearish:
             return None
@@ -2262,7 +2265,7 @@ def _analyze_breakout_setup(sym, df):
 # Breakout Scanners (Watchlist + Full Market)
 # =====================================================================
 
-def breakout_watchlist_scan(tickers, min_volume=1_000_000, min_price=10.0, extended_hours=False):
+def breakout_watchlist_scan(tickers, min_volume=2_000_000, min_price=10.0, extended_hours=False):
     """Scan watchlist for breakout/breakdown & gap setups."""
     _reset_progress()
     scan_progress["status"] = "running"
@@ -2312,7 +2315,7 @@ def breakout_watchlist_scan(tickers, min_volume=1_000_000, min_price=10.0, exten
     return pd.DataFrame(results).sort_values(by="Score", ascending=False)
 
 
-def breakout_full_market_scan(min_volume=1_000_000, min_price=10.0, extended_hours=False):
+def breakout_full_market_scan(min_volume=2_000_000, min_price=10.0, extended_hours=False):
     """Scan the full US market for breakout/breakdown & gap setups."""
     _reset_progress()
     scan_progress["status"] = "running"
