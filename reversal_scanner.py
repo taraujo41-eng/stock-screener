@@ -2026,7 +2026,7 @@ def _analyze_breakout_setup(sym, df):
             is_tight_range = False
             range_10d_pct = 99
 
-        MIN_BREAKOUT_SCORE = 10
+        MIN_BREAKOUT_SCORE = 12
 
         # ═══════════════════════════════════════════════════════
         # BULLISH BREAKOUT SCORE
@@ -2293,6 +2293,12 @@ def breakout_watchlist_scan(tickers, min_volume=2_000_000, min_price=10.0, exten
             today_date = df.index.date[-1]
             recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
             last_price = float(df['Close'].iloc[-1])
+            dollar_volume = recent_vol * last_price
+
+            # Big Cap / High Liquidity filter (requires ~$150M+ traded today)
+            if dollar_volume < 150_000_000:
+                continue
+
             if recent_vol < min_volume or last_price < min_price:
                 continue
             result = _analyze_breakout_setup(sym, df)
@@ -2337,6 +2343,12 @@ def breakout_full_market_scan(min_volume=2_000_000, min_price=10.0, extended_hou
             today_date = df.index.date[-1]
             recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
             price = float(df['Close'].iloc[-1])
+            dollar_volume = recent_vol * price
+
+            # Big Cap / High Liquidity filter (requires ~$150M+ traded today)
+            if dollar_volume < 150_000_000:
+                return None
+
             if recent_vol >= min_volume and price >= min_price:
                 result = _analyze_breakout_setup(sym, df)
                 if result:
