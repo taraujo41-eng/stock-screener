@@ -2021,12 +2021,12 @@ def _analyze_breakout_setup(sym, df):
         try:
             recent_10 = df.iloc[-10:]
             range_10d_pct = ((recent_10['High'].max() - recent_10['Low'].min()) / last_price) * 100
-            is_tight_range = range_10d_pct < 5  # Price contained within 5%
+            is_tight_range = range_10d_pct < 4  # Price contained within 4%
         except Exception:
             is_tight_range = False
             range_10d_pct = 99
 
-        MIN_BREAKOUT_SCORE = 8
+        MIN_BREAKOUT_SCORE = 9
 
         # ═══════════════════════════════════════════════════════
         # BULLISH BREAKOUT SCORE
@@ -2209,8 +2209,8 @@ def _analyze_breakout_setup(sym, df):
         # ═══════════════════════════════════════════════════════
         # SIGNAL DECISION
         # ═══════════════════════════════════════════════════════
-        has_bull_anchor = (is_tight_range and atr_contracting) or (squeeze_on and squeeze_mom_positive) or ascending_tri or gap_pct > 3.0
-        has_bear_anchor = (is_tight_range and atr_contracting) or (squeeze_on and not squeeze_mom_positive) or descending_tri or gap_pct < -3.0
+        has_bull_anchor = (is_tight_range and atr_contracting) or (squeeze_on and squeeze_mom_positive)
+        has_bear_anchor = (is_tight_range and atr_contracting) or (squeeze_on and not squeeze_mom_positive)
 
         is_bullish = bull_score >= MIN_BREAKOUT_SCORE and has_bull_anchor
         is_bearish = bear_score >= MIN_BREAKOUT_SCORE and has_bear_anchor
@@ -2262,7 +2262,7 @@ def _analyze_breakout_setup(sym, df):
 # Breakout Scanners (Watchlist + Full Market)
 # =====================================================================
 
-def breakout_watchlist_scan(tickers, min_volume=500_000, min_price=5.0, extended_hours=False):
+def breakout_watchlist_scan(tickers, min_volume=1_000_000, min_price=10.0, extended_hours=False):
     """Scan watchlist for breakout/breakdown & gap setups."""
     _reset_progress()
     scan_progress["status"] = "running"
@@ -2312,7 +2312,7 @@ def breakout_watchlist_scan(tickers, min_volume=500_000, min_price=5.0, extended
     return pd.DataFrame(results).sort_values(by="Score", ascending=False)
 
 
-def breakout_full_market_scan(min_volume=500_000, min_price=5.0, extended_hours=False):
+def breakout_full_market_scan(min_volume=1_000_000, min_price=10.0, extended_hours=False):
     """Scan the full US market for breakout/breakdown & gap setups."""
     _reset_progress()
     scan_progress["status"] = "running"
