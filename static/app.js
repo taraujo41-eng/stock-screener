@@ -36,8 +36,8 @@ function updateModeDesc() {
     desc.textContent = "Scans entire US market — takes 2-3 minutes";
   } else if (scanMode === "options") {
     desc.textContent = "Scans for high-probability options setups — takes 2-3 minutes";
-  } else if (scanMode === "momentum15") {
-    desc.textContent = "Scans for 15-minute breakouts of the Prior Day High/Low — takes 2-3 minutes";
+  } else if (scanMode === "watchlist") {
+    desc.textContent = "Scans your custom watchlist for reversals — very fast";
   } else if (scanMode === "breakout") {
     desc.textContent = "Scans for breakout/breakdown & gap setups — squeeze, consolidation, volume surge";
   }
@@ -53,6 +53,7 @@ async function setMode(mode, btn) {
 
   const scanBtn = document.getElementById("scanBtn");
   if (mode === "full") {
+    toggleEditButton(false);
     scanBtn.querySelector(".scan-btn__text").textContent = "🌐  Scan Full Market";
     // Auto-load the persistent full market scan results
     try {
@@ -80,6 +81,7 @@ async function setMode(mode, btn) {
     `;
     hideAuxUI();
   } else if (mode === "options") {
+    toggleEditButton(false);
     scanBtn.querySelector(".scan-btn__text").textContent = "🎯  Scan Options";
     try {
       showSkeleton();
@@ -104,11 +106,12 @@ async function setMode(mode, btn) {
       </div>
     `;
     hideAuxUI();
-  } else if (mode === "momentum15") {
-    scanBtn.querySelector(".scan-btn__text").textContent = "⚡  Scan 15m Breakouts";
+  } else if (mode === "watchlist") {
+    toggleEditButton(true);
+    scanBtn.querySelector(".scan-btn__text").textContent = "📋  Scan Watchlist";
     try {
       showSkeleton();
-      const res = await fetch("/api/scan/momentum15m/results");
+      const res = await fetch("/api/scan/results");
       if (res.ok) {
         const data = await res.json();
         if (data.ok && data.results) {
@@ -118,18 +121,19 @@ async function setMode(mode, btn) {
         }
       }
     } catch (e) {
-      console.error("No saved 15m scan available yet");
+      console.error("No saved watchlist scan available yet");
     }
 
     document.getElementById("results").innerHTML = `
       <div class="empty-state">
-        <div class="empty-state__icon">⚡</div>
+        <div class="empty-state__icon">📋</div>
         <div class="empty-state__title">Ready to scan</div>
-        <div class="empty-state__text">Click above to find 15-minute breakouts of the Prior Day High/Low</div>
+        <div class="empty-state__text">Click above to scan your custom watchlist for reversal setups</div>
       </div>
     `;
     hideAuxUI();
   } else if (mode === "breakout") {
+    toggleEditButton(false);
     scanBtn.querySelector(".scan-btn__text").textContent = "🔺  Scan Breakouts";
     try {
       showSkeleton();
@@ -590,9 +594,9 @@ async function runScan() {
   if (scanMode === "options") {
     endpoint = "/api/scan/options/full";
     resultsEndpoint = "/api/scan/options/full/results";
-  } else if (scanMode === "momentum15") {
-    endpoint = "/api/scan/momentum15m/full";
-    resultsEndpoint = "/api/scan/momentum15m/results";
+  } else if (scanMode === "watchlist") {
+    endpoint = "/api/scan";
+    resultsEndpoint = "/api/scan/results";
   } else if (scanMode === "breakout") {
     endpoint = "/api/scan/breakout/full";
     resultsEndpoint = "/api/scan/breakout/results";
@@ -694,3 +698,194 @@ async function resetServerScanState(btnEl) {
 // ── Init ───────────────────────────────────────────────────
 
 updateModeDesc();
+
+// ── Watchlist Management & Modal Logic ──────────────────────
+
+let localWatchlist = [];
+
+function toggleEditButton(show) {
+  const btn = document.getElementById("editWatchlistBtn");
+  if (btn) {
+    if (show) btn.classList.remove("hidden");
+    else btn.classList.add("hidden");
+  }
+}
+
+async function openWatchlistModal() {
+  const modal = document.getElementById("watchlistModal");
+  if (!modal) return;
+  
+  modal.classList.remove("hidden");
+  clearModalMsg();
+  
+  try {
+    const res = await fetch("/api/watchlist");
+    const data = await res.json();
+    if (data.ok && data.watchlist) {
+      localWatchlist = data.watchlist;
+      renderWatchlistChips(localWatchlist);
+    } else {
+      showModalMsg("Failed to load watchlist", "error");
+    }
+  } catch (err) {
+    showModalMsg("Network error loading watchlist: " + err.message, "error");
+  }
+}
+
+function closeWatchlistModal() {
+  const modal = document.getElementById("watchlistModal");
+  if (modal) {
+    modal.classList.add("hidden");
+  }
+  // Clear any inputs or messages
+  document.getElementById("newTickerInput").value = "";
+  clearModalMsg();
+}
+
+function renderWatchlistChips(tickers) {
+  const container = document.getElementById("watchlistContainer");
+  const countEl = document.getElementById("watchlistCount");
+  
+  if (!container || !countEl) return;
+  
+  countEl.textContent = `${tickers.length} TICKER${tickers.length === 1 ? '' : 'S'}`;
+  
+  if (tickers.length === 0) {
+    container.innerHTML = `<div class="modal__empty">No tickers in your watchlist. Add some above or import from Webull!</div>`;
+    return;
+  }
+  
+  container.innerHTML = tickers.map(ticker => `
+    <div class="ticker-chip">
+      <span class="ticker-chip__symbol">${ticker}</span>
+      <button class="ticker-chip__remove" onclick="removeTicker('${ticker}')">&times;</button>
+    </div>
+  `).join("");
+}
+
+function handleNewTickerKey(event) {
+  if (event.key === "Enter") {
+    addTickerFromInput();
+  }
+}
+
+async function addTickerFromInput() {
+  const input = document.getElementById("newTickerInput");
+  if (!input) return;
+  
+  const symbol = input.value.trim().toUpperCase().replace(/\s+/g, "");
+  if (!symbol) {
+    showModalMsg("Please enter a ticker symbol", "error");
+    return;
+  }
+  
+  if (localWatchlist.includes(symbol)) {
+    showModalMsg(`${symbol} is already in the watchlist`, "error");
+    return;
+  }
+  
+  clearModalMsg();
+  
+  try {
+    const res = await fetch("/api/watchlist/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker: symbol })
+    });
+    const data = await res.json();
+    if (data.ok && data.watchlist) {
+      localWatchlist = data.watchlist;
+      renderWatchlistChips(localWatchlist);
+      input.value = "";
+      showModalMsg(`Successfully added ${symbol}!`, "success");
+    } else {
+      showModalMsg(data.error || "Failed to add ticker", "error");
+    }
+  } catch (err) {
+    showModalMsg("Network error adding ticker: " + err.message, "error");
+  }
+}
+
+async function removeTicker(symbol) {
+  clearModalMsg();
+  try {
+    const res = await fetch("/api/watchlist/remove", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker: symbol })
+    });
+    const data = await res.json();
+    if (data.ok && data.watchlist) {
+      localWatchlist = data.watchlist;
+      renderWatchlistChips(localWatchlist);
+      showModalMsg(`Successfully removed ${symbol}!`, "success");
+    } else {
+      showModalMsg(data.error || "Failed to remove ticker", "error");
+    }
+  } catch (err) {
+    showModalMsg("Network error removing ticker: " + err.message, "error");
+  }
+}
+
+async function importFromWebull() {
+  const btn = document.getElementById("importWebullBtn");
+  if (!btn) return;
+  
+  btn.disabled = true;
+  btn.style.opacity = "0.7";
+  btn.textContent = "📥 Importing from Webull...";
+  
+  showModalMsg("Connecting to Webull & fetching watchlists...", "success");
+  
+  try {
+    const res = await fetch("/api/watchlist/import-webull", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    });
+    const data = await res.json();
+    
+    if (data.ok && data.watchlist) {
+      localWatchlist = data.watchlist;
+      renderWatchlistChips(localWatchlist);
+      
+      const added = data.added_count;
+      const total = data.total_imported;
+      
+      if (added === 0) {
+        showModalMsg(`Import complete! All ${total} Webull tickers are already in this watchlist.`, "success");
+      } else {
+        showModalMsg(`Successfully imported ${total} tickers from Webull (${added} new tickers added)!`, "success");
+      }
+    } else {
+      showModalMsg(data.error || "Failed to import from Webull.", "error");
+    }
+  } catch (err) {
+    showModalMsg("Network error during Webull import: " + err.message, "error");
+  } finally {
+    btn.disabled = false;
+    btn.style.opacity = "1";
+    btn.textContent = "📥 Import from Webull";
+  }
+}
+
+function showModalMsg(text, type) {
+  const msgEl = document.getElementById("modalMsg");
+  if (!msgEl) return;
+  
+  msgEl.textContent = text;
+  msgEl.className = "modal__msg";
+  if (type === "success") {
+    msgEl.classList.add("modal__msg--success");
+  } else {
+    msgEl.classList.add("modal__msg--error");
+  }
+  msgEl.classList.remove("hidden");
+}
+
+function clearModalMsg() {
+  const msgEl = document.getElementById("modalMsg");
+  if (msgEl) {
+    msgEl.classList.add("hidden");
+    msgEl.textContent = "";
+  }
+}

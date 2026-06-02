@@ -286,84 +286,6 @@ def scan_options_full_results():
         return jsonify({"ok": False, "error": "No scan results available"}), 404
     return jsonify(results)
 
-# ── API: 15-Minute Breakout Scans (async) ──────────────────────────
-
-@app.route("/api/scan/momentum15m", methods=["POST"])
-def scan_momentum15m():
-    """Start a 15-minute breakout watchlist scan."""
-    global _scan_running
-    if _scan_running:
-        return jsonify({"ok": False, "error": "A scan is already running"}), 409
-
-    req_data = request.get_json(silent=True) or {}
-    extended_hours = req_data.get("extended_hours", False)
-
-    def _run():
-        global _scan_running
-        _scan_running = True
-        try:
-            from reversal_scanner import momentum_15m_watchlist_scan
-            et_tz = pytz.timezone("America/New_York")
-            df = momentum_15m_watchlist_scan(user_watchlist, extended_hours=extended_hours)
-            app.config["LAST_MOMENTUM15_RESULTS"] = {
-                "ok": True,
-                "mode": "momentum15_watchlist",
-                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
-                "count": len(df) if not df.empty else 0,
-                "tickers_scanned": len(user_watchlist),
-                "results": df.to_dict(orient="records") if not df.empty else [],
-            }
-        except Exception as e:
-            app.config["LAST_MOMENTUM15_RESULTS"] = {"ok": False, "error": str(e)}
-            scan_progress["status"] = "error"
-            scan_progress["phase_label"] = str(e)
-        finally:
-            _scan_running = False
-
-    threading.Thread(target=_run, daemon=True).start()
-    return jsonify({"ok": True, "message": "15-minute breakout watchlist scan started"})
-
-@app.route("/api/scan/momentum15m/results", methods=["GET"])
-def scan_momentum15m_results():
-    results = app.config.get("LAST_MOMENTUM15_RESULTS")
-    if results is None:
-        return jsonify({"ok": False, "error": "No scan results available"}), 404
-    return jsonify(results)
-
-@app.route("/api/scan/momentum15m/full", methods=["POST"])
-def scan_momentum15m_full():
-    """Start a full market 15-minute breakout scan."""
-    global _scan_running
-    if _scan_running:
-        return jsonify({"ok": False, "error": "A scan is already running"}), 409
-
-    req_data = request.get_json(silent=True) or {}
-    extended_hours = req_data.get("extended_hours", False)
-
-    def _run():
-        global _scan_running
-        _scan_running = True
-        try:
-            from reversal_scanner import momentum_15m_full_market_scan
-            et_tz = pytz.timezone("America/New_York")
-            df = momentum_15m_full_market_scan(extended_hours=extended_hours)
-            app.config["LAST_MOMENTUM15_RESULTS"] = {
-                "ok": True,
-                "mode": "momentum15_full",
-                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
-                "count": len(df) if not df.empty else 0,
-                "results": df.to_dict(orient="records") if not df.empty else [],
-            }
-        except Exception as e:
-            app.config["LAST_MOMENTUM15_RESULTS"] = {"ok": False, "error": str(e)}
-            scan_progress["status"] = "error"
-            scan_progress["phase_label"] = str(e)
-        finally:
-            _scan_running = False
-
-    threading.Thread(target=_run, daemon=True).start()
-    return jsonify({"ok": True, "message": "15-minute full market scan started"})
-
 # ── API: Breakout/Breakdown Scans (async) ──────────────────────────
 
 BREAKOUT_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_breakout_scan.json")
@@ -498,6 +420,52 @@ def watchlist_remove():
         user_watchlist.remove(ticker)
         save_watchlist(user_watchlist)
     return jsonify({"ok": True, "watchlist": user_watchlist})
+
+@app.route("/api/watchlist/import-webull", methods=["POST"])
+def watchlist_import_webull():
+    """Import all watchlists from Webull account credentials."""
+    global user_watchlist
+    try:
+        from data_fetcher import get_unofficial_client
+        wb = get_unofficial_client()
+        if not wb:
+            return jsonify({"ok": False, "error": "Webull client authentication failed. Check credentials in .env"}), 400
+        
+        watchlists = wb.get_watchlists()
+        if not watchlists:
+            return jsonify({"ok": False, "error": "No watchlists found on Webull account"}), 400
+        
+        imported = set()
+        if isinstance(watchlists, list):
+            for wl in watchlists:
+                ticker_list = wl.get("tickerList", [])
+                for tick in ticker_list:
+                    sym = tick.get("symbol")
+                    if sym:
+                        sym_clean = sym.strip().upper().replace(" ", "")
+                        if sym_clean and sym_clean.isalpha() and 1 <= len(sym_clean) <= 5:
+                            imported.add(sym_clean)
+        
+        added_count = 0
+        for sym in sorted(imported):
+            if sym not in user_watchlist:
+                user_watchlist.append(sym)
+                added_count += 1
+        
+        if added_count > 0:
+            save_watchlist(user_watchlist)
+            
+        return jsonify({
+            "ok": True,
+            "watchlist": user_watchlist,
+            "added_count": added_count,
+            "total_imported": len(imported)
+        })
+    except Exception as e:
+        print(f"Error importing Webull watchlists: {e}")
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 
 # ── API: Reset Stuck Scan State ─────────────────────────────────────
 
