@@ -1555,11 +1555,10 @@ def _analyze_options_setup(sym, df, iv_history):
         if trend == "downtrend":
             bear_catalyst += 1; bear_reasons.append("Downtrend")
 
-        # Need at least score 3 on one side to proceed (raised from 2 to reduce
-        # the number of tickers triggering expensive options chain lookups)
+        # Need at least score 4 on one side to proceed (raised from 3 to filter out B-grades)
         max_catalyst = max(bull_catalyst, bear_catalyst)
         print(f"  {sym}: Bull={bull_catalyst} Bear={bear_catalyst} RSI={rsi_val:.1f} Chg={day_chg_pct:.1f}%")
-        if max_catalyst < 3:
+        if max_catalyst < 4:
             return None
 
         # Determine dominant direction
