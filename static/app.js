@@ -209,13 +209,16 @@ function buildCard(item, index) {
   const score = item.Score || 0;
   const gradeCls = grade === "A+" ? "grade--aplus" : grade === "A" ? "grade--a" : "grade--b";
 
-  const bullPills = bullish.map(s =>
-    `<span class="pill pill--bull">${s}</span>`
-  ).join("");
+  const makePill = (s, type) => {
+    if (s.startsWith("News:") && item["News Details"]) {
+      const encoded = encodeURIComponent(JSON.stringify(item["News Details"]));
+      return `<span class="pill pill--${type} pill--clickable" onclick="openNewsModal('${encoded}')" style="cursor: pointer; text-decoration: underline;">${s}</span>`;
+    }
+    return `<span class="pill pill--${type}">${s}</span>`;
+  };
 
-  const bearPills = bearish.map(s =>
-    `<span class="pill pill--bear">${s}</span>`
-  ).join("");
+  const bullPills = bullish.map(s => makePill(s, "bull")).join("");
+  const bearPills = bearish.map(s => makePill(s, "bear")).join("");
 
   const bullIcon = "🟢";
   const bearIcon = "🔴";
@@ -263,9 +266,16 @@ function buildOptionsCard(item, index) {
   const dirClass = isBullish ? "opts-dir--bull" : "opts-dir--bear";
   const typeClass = isBullish ? "opts-type--call" : "opts-type--put";
 
-  const catalystPills = (item["Catalyst Tags"] || "").split(" | ").filter(s => s).map(s =>
-    `<span class="pill ${isBullish ? 'pill--bull' : 'pill--bear'}">${s}</span>`
-  ).join("");
+  const makeOptPill = (s) => {
+    const type = isBullish ? 'bull' : 'bear';
+    if (s.startsWith("News:") && item["News Details"]) {
+      const encoded = encodeURIComponent(JSON.stringify(item["News Details"]));
+      return `<span class="pill pill--${type} pill--clickable" onclick="openNewsModal('${encoded}')" style="cursor: pointer; text-decoration: underline;">${s}</span>`;
+    }
+    return `<span class="pill pill--${type}">${s}</span>`;
+  };
+
+  const catalystPills = (item["Catalyst Tags"] || "").split(" | ").filter(s => s).map(makeOptPill).join("");
 
   const flowBadge = item["Unusual Flow"] ? `
     <div class="opts-flow-badge">
@@ -740,6 +750,31 @@ function closeWatchlistModal() {
   // Clear any inputs or messages
   document.getElementById("newTickerInput").value = "";
   clearModalMsg();
+}
+
+function openNewsModal(newsJsonEncoded) {
+  try {
+    const news = JSON.parse(decodeURIComponent(newsJsonEncoded));
+    document.getElementById("newsModalTitle").textContent = news.title || "No Title Available";
+    document.getElementById("newsModalPublisher").textContent = news.publisher || "Unknown";
+    document.getElementById("newsModalTime").textContent = news.publish_time || "Unknown";
+    
+    const linkEl = document.getElementById("newsModalLink");
+    if (news.url) {
+      linkEl.href = news.url;
+      linkEl.style.display = "block";
+    } else {
+      linkEl.style.display = "none";
+    }
+    
+    document.getElementById("newsModal").classList.remove("hidden");
+  } catch (e) {
+    console.error("Error opening news modal:", e);
+  }
+}
+
+function closeNewsModal() {
+  document.getElementById("newsModal").classList.add("hidden");
 }
 
 function renderWatchlistChips(tickers) {

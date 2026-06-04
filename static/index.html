@@ -123,6 +123,27 @@
 
   </div>
 
+  <!-- News Details Modal Overlay -->
+  <div class="modal-overlay hidden" id="newsModal">
+    <div class="modal">
+      <div class="modal__header">
+        <span class="modal__title">📰 News Catalyst</span>
+        <button class="modal__close" onclick="closeNewsModal()">&times;</button>
+      </div>
+      <div class="modal__content" style="padding: 20px 20px 0; color: #fff; text-align: left;">
+        <h3 id="newsModalTitle" style="margin-top: 0; margin-bottom: 16px; line-height: 1.45; font-size: 1.15rem; color: #f8fafc; font-weight: 600;"></h3>
+        <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 24px; font-size: 0.9rem; color: #94a3b8;">
+          <div>Publisher: <strong id="newsModalPublisher" style="color: #cbd5e1;"></strong></div>
+          <div>Published: <span id="newsModalTime" style="color: #cbd5e1;"></span></div>
+        </div>
+        <a id="newsModalLink" href="#" target="_blank" style="display: block; text-align: center; padding: 12px; background: linear-gradient(135deg, #6366f1, #818cf8); color: white; text-decoration: none; border-radius: 6px; font-weight: 600; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3); transition: all 0.2s;">
+          Read Full Article ↗
+        </a>
+      </div>
+      <button class="modal__done-btn" onclick="closeNewsModal()">Close</button>
+    </div>
+  </div>
+
   <!-- Watchlist Manager Modal Overlay -->
   <div class="modal-overlay hidden" id="watchlistModal">
     <div class="modal">

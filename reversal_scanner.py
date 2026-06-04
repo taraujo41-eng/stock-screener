@@ -67,12 +67,12 @@ def detect_news_catalyst(ticker, lookback_hours=48):
     """
     Fetch news for a ticker and check if any articles published within lookback_hours
     contain catalyst-related keywords.
-    Returns (has_catalyst, catalyst_tag)
+    Returns (has_catalyst, catalyst_tag, article_info)
     """
     try:
         articles = fetch_news(ticker, limit=5)
         if not articles:
-            return False, None
+            return False, None, None
             
         import pytz
         now = datetime.now(pytz.UTC)
@@ -104,12 +104,22 @@ def detect_news_catalyst(ticker, lookback_hours=48):
                 snippet = title[:45] + "..." if len(title) > 45 else title
                 # Clean up characters that might interfere with pill split delimiter (e.g. pipe)
                 snippet = snippet.replace("|", "/")
-                return True, f"News: {snippet}"
+                
+                # Format time as a string for JSON serialization
+                pub_time_str = pub_time.strftime("%b %d, %Y at %I:%M %p UTC") if hasattr(pub_time, "strftime") else str(pub_time)
+                
+                article_info = {
+                    "title": title,
+                    "publisher": art.get("publisher", "Unknown"),
+                    "publish_time": pub_time_str,
+                    "url": art.get("url", "")
+                }
+                return True, f"News: {snippet}", article_info
                 
     except Exception as e:
         print(f"  Error detecting news catalyst for {ticker}: {e}")
         
-    return False, None
+    return False, None, None
 
 
 # =====================================================================
@@ -876,10 +886,12 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
                     tag = f"Unusual Opts ({opts_detail}) +2"
                 bear_tags.append(tag)
 
+        news_details = None
         # --- NEWS CATALYST ---
         if bull_score >= 3 or bear_score >= 3:
-            has_news, news_tag = detect_news_catalyst(sym)
+            has_news, news_tag, news_item = detect_news_catalyst(sym)
             if has_news and news_tag:
+                news_details = news_item
                 if bull_score >= 3:
                     bull_score += 2
                     bull_tags.append(f"{news_tag} (+2)")
@@ -949,7 +961,8 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
             "Grade": grade,
             "Bullish Signals": reasons if is_bullish else "—",
             "Bearish Signals": reasons if is_bearish else "—",
-            "Suggested Option": opt_str
+            "Suggested Option": opt_str,
+            "News Details": news_details
         }
     except Exception as e:
         print(f"  Error analyzing {sym}: {e}")
@@ -1301,10 +1314,12 @@ def _analyze_momentum(sym, df):
         if not is_green and lower_wick < 0.2 * total_range:
             bear_score += 1; bear_tags.append("Weak Close +1")
 
+        news_details = None
         # --- NEWS CATALYST ---
         if bull_score >= 3 or bear_score >= 3:
-            has_news, news_tag = detect_news_catalyst(sym)
+            has_news, news_tag, news_item = detect_news_catalyst(sym)
             if has_news and news_tag:
+                news_details = news_item
                 if bull_score >= 3:
                     bull_score += 2
                     bull_tags.append(f"{news_tag} (+2)")
@@ -1346,7 +1361,8 @@ def _analyze_momentum(sym, df):
             "Grade": grade,
             "Bullish Signals": reasons if is_bullish else "—",
             "Bearish Signals": reasons if is_bearish else "—",
-            "Suggested Option": "—" # Momentum trades usually need different strategy
+            "Suggested Option": "—", # Momentum trades usually need different strategy
+            "News Details": news_details
         }
     except Exception as e:
         print(f"  Error analyzing momentum for {sym}: {e}")
@@ -1627,10 +1643,12 @@ def _analyze_options_setup(sym, df, iv_history):
         if trend == "downtrend":
             bear_catalyst += 1; bear_reasons.append("Downtrend")
 
+        news_details = None
         # --- NEWS CATALYST ---
         if bull_catalyst >= 3 or bear_catalyst >= 3:
-            has_news, news_tag = detect_news_catalyst(sym)
+            has_news, news_tag, news_item = detect_news_catalyst(sym)
             if has_news and news_tag:
+                news_details = news_item
                 if bull_catalyst >= 3:
                     bull_catalyst += 2
                     bull_reasons.append(f"{news_tag} (+2)")
@@ -1887,6 +1905,7 @@ def _analyze_options_setup(sym, df, iv_history):
             "Unusual Flow": has_unusual_flow,
             "Flow Detail": flow_str,
             "RSI": round(rsi_val, 1),
+            "News Details": news_details
         }
     except Exception as e:
         print(f"  Error analyzing options for {sym}: {e}")
@@ -2288,10 +2307,12 @@ def _analyze_breakout_setup(sym, df):
             bear_score += 1
             bear_tags.append("Near PDL +1")
 
+        news_details = None
         # --- NEWS CATALYST ---
         if bull_score >= 9 or bear_score >= 9:
-            has_news, news_tag = detect_news_catalyst(sym)
+            has_news, news_tag, news_item = detect_news_catalyst(sym)
             if has_news and news_tag:
+                news_details = news_item
                 if bull_score >= 9:
                     bull_score += 3
                     bull_tags.append(f"{news_tag} (+3)")
@@ -2347,7 +2368,8 @@ def _analyze_breakout_setup(sym, df):
             "Grade": grade,
             "Bullish Signals": reasons if is_bullish else "—",
             "Bearish Signals": reasons if is_bearish else "—",
-            "Suggested Option": "—"
+            "Suggested Option": "—",
+            "News Details": news_details
         }
     except Exception as e:
         print(f"  Error analyzing breakout for {sym}: {e}")
