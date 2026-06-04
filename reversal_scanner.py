@@ -21,7 +21,7 @@ import os
 import warnings
 from data_fetcher import (
     fetch_batch, fetch_batch_concurrent, test_connection,
-    fetch_options_chain, fetch_options_for_expiration
+    fetch_options_chain, fetch_options_for_expiration, fetch_news
 )
 
 warnings.filterwarnings("ignore")
@@ -61,6 +61,56 @@ def _update_progress(phase, label, current, total, ticker="", found=None):
     scan_progress["pct"] = int((current / total) * 100) if total else 0
     if found is not None:
         scan_progress["found"] = found
+
+
+def detect_news_catalyst(ticker, lookback_hours=48):
+    """
+    Fetch news for a ticker and check if any articles published within lookback_hours
+    contain catalyst-related keywords.
+    Returns (has_catalyst, catalyst_tag)
+    """
+    try:
+        articles = fetch_news(ticker, limit=5)
+        if not articles:
+            return False, None
+            
+        import pytz
+        now = datetime.now(pytz.UTC)
+        cutoff = now - timedelta(hours=lookback_hours)
+        
+        # High impact catalyst terms to search for
+        CATALYST_KEYWORDS = [
+            "earnings", "revenue", "eps", "profit", "dividend", "financials", "guidance", # Earnings
+            "fda", "clinical", "trial", "phase", "drug", "treatment", "biotech", "approval", # Biotech
+            "merger", "acquisition", "acquire", "buyout", "takeover", "deal", "merge", # M&A
+            "partnership", "collaborate", "collaboration", "joint venture", "contract", # Deals
+            "upgrade", "downgrade", "rating", "initiate", "buy", "sell", "neutral", # Analyst ratings
+            "sec", "investigation", "lawsuit", "settlement", "regulatory", "sue", # Legal
+            "ceo", "cfo", "resign", "appoint", "hire", "executive", "board" # Management
+        ]
+        
+        for art in articles:
+            pub_time = art.get("publish_time")
+            if not pub_time or pub_time < cutoff:
+                continue
+                
+            title = art.get("title", "")
+            title_lower = title.lower()
+            
+            # Check for keyword matches
+            matched_keywords = [kw for kw in CATALYST_KEYWORDS if f" {kw}" in f" {title_lower} " or f"-{kw}" in title_lower]
+            if matched_keywords:
+                # Truncate headline to keep it tidy in frontend pills
+                snippet = title[:45] + "..." if len(title) > 45 else title
+                # Clean up characters that might interfere with pill split delimiter (e.g. pipe)
+                snippet = snippet.replace("|", "/")
+                return True, f"News: {snippet}"
+                
+    except Exception as e:
+        print(f"  Error detecting news catalyst for {ticker}: {e}")
+        
+    return False, None
+
 
 # =====================================================================
 # Fetch comprehensive US ticker list
@@ -826,6 +876,17 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
                     tag = f"Unusual Opts ({opts_detail}) +2"
                 bear_tags.append(tag)
 
+        # --- NEWS CATALYST ---
+        if bull_score >= 3 or bear_score >= 3:
+            has_news, news_tag = detect_news_catalyst(sym)
+            if has_news and news_tag:
+                if bull_score >= 3:
+                    bull_score += 2
+                    bull_tags.append(f"{news_tag} (+2)")
+                if bear_score >= 3:
+                    bear_score += 2
+                    bear_tags.append(f"{news_tag} (+2)")
+
         # ═══════════════════════════════════════════════════════
         # SIGNAL DECISION — requires minimum score
         # ═══════════════════════════════════════════════════════
@@ -1240,6 +1301,17 @@ def _analyze_momentum(sym, df):
         if not is_green and lower_wick < 0.2 * total_range:
             bear_score += 1; bear_tags.append("Weak Close +1")
 
+        # --- NEWS CATALYST ---
+        if bull_score >= 3 or bear_score >= 3:
+            has_news, news_tag = detect_news_catalyst(sym)
+            if has_news and news_tag:
+                if bull_score >= 3:
+                    bull_score += 2
+                    bull_tags.append(f"{news_tag} (+2)")
+                if bear_score >= 3:
+                    bear_score += 2
+                    bear_tags.append(f"{news_tag} (+2)")
+
         # --- DECISION ---
         is_bullish = bull_score >= MIN_MOMENTUM_SCORE
         is_bearish = bear_score >= MIN_MOMENTUM_SCORE
@@ -1554,6 +1626,17 @@ def _analyze_options_setup(sym, df, iv_history):
             bear_catalyst += 1; bear_reasons.append("Below SMA20")
         if trend == "downtrend":
             bear_catalyst += 1; bear_reasons.append("Downtrend")
+
+        # --- NEWS CATALYST ---
+        if bull_catalyst >= 3 or bear_catalyst >= 3:
+            has_news, news_tag = detect_news_catalyst(sym)
+            if has_news and news_tag:
+                if bull_catalyst >= 3:
+                    bull_catalyst += 2
+                    bull_reasons.append(f"{news_tag} (+2)")
+                if bear_catalyst >= 3:
+                    bear_catalyst += 2
+                    bear_reasons.append(f"{news_tag} (+2)")
 
         # Need at least score 4 on one side to proceed (raised from 3 to filter out B-grades)
         max_catalyst = max(bull_catalyst, bear_catalyst)
@@ -2204,6 +2287,17 @@ def _analyze_breakout_setup(sym, df):
         elif last_price < prior_low * 1.005:
             bear_score += 1
             bear_tags.append("Near PDL +1")
+
+        # --- NEWS CATALYST ---
+        if bull_score >= 9 or bear_score >= 9:
+            has_news, news_tag = detect_news_catalyst(sym)
+            if has_news and news_tag:
+                if bull_score >= 9:
+                    bull_score += 3
+                    bull_tags.append(f"{news_tag} (+3)")
+                if bear_score >= 9:
+                    bear_score += 3
+                    bear_tags.append(f"{news_tag} (+3)")
 
         # ═══════════════════════════════════════════════════════
         # SIGNAL DECISION

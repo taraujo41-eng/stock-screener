@@ -895,3 +895,86 @@ def test_connection(ticker="AAPL"):
 
     diag["ok"] = diag["webull_unofficial_ok"] or diag["webull_openapi_ok"] or diag["yahoo_ok"]
     return diag
+
+
+# ── News Fetcher ─────────────────────────────────────────────────────
+
+def fetch_news(ticker, limit=5):
+    """
+    Fetch news articles for a single ticker.
+    First tries Webull Unofficial, then Yahoo Finance.
+    Returns standard list of dicts:
+      [{"title": "...", "publisher": "...", "publish_time": datetime_object, "url": "..."}, ...]
+    """
+    import pytz
+    
+    # 1. Try Webull Unofficial
+    wb_un = get_unofficial_client()
+    if wb_un:
+        try:
+            print(f"[Webull Unofficial] Fetching news for {ticker}...")
+            news_list = wb_un.get_news(stock=ticker, items=limit)
+            if isinstance(news_list, list) and len(news_list) > 0:
+                normalized = []
+                for item in news_list:
+                    title = item.get("title", "")
+                    publisher = item.get("sourceName", "Webull")
+                    url = item.get("newsUrl", "")
+                    date_str = item.get("newsTime", "")
+                    publish_time = None
+                    if date_str:
+                        try:
+                            # Parse UTC offset
+                            # Remove trailing +0000 or similar
+                            # Format: 2026-06-04T00:10:00.000+0000
+                            base_dt = datetime.strptime(date_str[:19], "%Y-%m-%dT%H:%M:%S")
+                            publish_time = base_dt.replace(tzinfo=pytz.UTC)
+                        except Exception:
+                            publish_time = datetime.now(pytz.UTC)
+                    else:
+                        publish_time = datetime.now(pytz.UTC)
+                    
+                    normalized.append({
+                        "title": title,
+                        "publisher": publisher,
+                        "publish_time": publish_time,
+                        "url": url
+                    })
+                return normalized
+        except Exception as e:
+            print(f"[Webull Unofficial] News fetch error for {ticker}: {e}")
+
+    # 2. Fallback to Yahoo Finance search endpoint
+    try:
+        print(f"[Yahoo Fallback] Fetching news for {ticker}...")
+        session, crumb = _ensure_session()
+        url = "https://query2.finance.yahoo.com/v1/finance/search"
+        params = {"q": ticker, "newsCount": limit}
+        if crumb:
+            params["crumb"] = crumb
+        resp = session.get(url, params=params, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            yahoo_news = data.get("news", [])
+            normalized = []
+            for item in yahoo_news:
+                title = item.get("title", "")
+                publisher = item.get("publisher", "Yahoo Finance")
+                url = item.get("link", "")
+                pub_ts = item.get("providerPublishTime")
+                if pub_ts:
+                    publish_time = datetime.fromtimestamp(int(pub_ts), pytz.UTC)
+                else:
+                    publish_time = datetime.now(pytz.UTC)
+                normalized.append({
+                    "title": title,
+                    "publisher": publisher,
+                    "publish_time": publish_time,
+                    "url": url
+                })
+            return normalized
+    except Exception as e:
+        print(f"[Yahoo Fallback] News fetch error for {ticker}: {e}")
+
+    return []
+
