@@ -991,6 +991,11 @@ def fetch_news(ticker, limit=5):
                         
                     publisher = item.get("sourceName", "Webull")
                     url = item.get("newsUrl", "")
+                    
+                    # Filter out TipRanks articles (paid site)
+                    if publisher.lower() == "tipranks" or "tipranks.com" in url.lower():
+                        continue
+                        
                     date_str = item.get("newsTime", "")
                     publish_time = None
                     if date_str:
@@ -1054,6 +1059,11 @@ def fetch_news(ticker, limit=5):
                     
                 publisher = item.get("publisher", "Yahoo Finance")
                 url = item.get("link", "")
+                
+                # Filter out TipRanks articles (paid site)
+                if publisher.lower() == "tipranks" or "tipranks.com" in url.lower():
+                    continue
+                    
                 pub_ts = item.get("providerPublishTime")
                 if pub_ts:
                     publish_time = datetime.fromtimestamp(int(pub_ts), pytz.UTC)
