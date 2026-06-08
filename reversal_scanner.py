@@ -2127,7 +2127,7 @@ def _analyze_breakout_setup(sym, df):
             is_tight_range = False
             range_10d_pct = 99
 
-        MIN_BREAKOUT_SCORE = 12
+        MIN_BREAKOUT_SCORE = 14
 
         # ═══════════════════════════════════════════════════════
         # BULLISH BREAKOUT SCORE
@@ -2433,7 +2433,7 @@ def breakout_watchlist_scan(tickers, min_volume=2_000_000, min_price=10.0, exten
     print(f"[Done] Breakout watchlist scan: {len(results)} signals in {total_time:.1f}s")
     if not results:
         return pd.DataFrame()
-    return pd.DataFrame(results).sort_values(by="Score", ascending=False)
+    return pd.DataFrame(results).sort_values(by="Score", ascending=False).head(15)
 
 
 def breakout_full_market_scan(min_volume=2_000_000, min_price=10.0, extended_hours=False):
@@ -2505,7 +2505,7 @@ def breakout_full_market_scan(min_volume=2_000_000, min_price=10.0, extended_hou
     print(f"[Done] Breakout full market scan: {len(results)} signals in {total_time:.0f}s")
     if not results:
         return pd.DataFrame()
-    return pd.DataFrame(results).sort_values(by="Score", ascending=False)
+    return pd.DataFrame(results).sort_values(by="Score", ascending=False).head(15)
 
 
 # =====================================================================
