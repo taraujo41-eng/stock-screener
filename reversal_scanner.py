@@ -2127,7 +2127,7 @@ def _analyze_breakout_setup(sym, df):
             is_tight_range = False
             range_10d_pct = 99
 
-        MIN_BREAKOUT_SCORE = 14
+        MIN_BREAKOUT_SCORE = 12
 
         # ═══════════════════════════════════════════════════════
         # BULLISH BREAKOUT SCORE
