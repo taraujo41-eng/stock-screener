@@ -899,6 +899,61 @@ def test_connection(ticker="AAPL"):
 
 # ── News Fetcher ─────────────────────────────────────────────────────
 
+def clean_company_name(name):
+    """Clean company name to its core brand/identifier by removing suffixes."""
+    if not name:
+        return ""
+    import re
+    # Remove parentheses and contents
+    name = re.sub(r'\(.*?\)', '', name)
+    # Common corporate designators (case-insensitive)
+    suffixes = [
+        r'\binc\b\.?', r'\bcorp\b\.?', r'\bcorporation\b', r'\bco\b\.?', 
+        r'\bltd\b\.?', r'\blimited\b', r'\bplc\b\.?', r'\bincorporated\b',
+        r'\bclass [a-z]\b', r'\bholding\b\.?', r'\bholdings\b\.?'
+    ]
+    for suffix in suffixes:
+        name = re.sub(suffix, '', name, flags=re.IGNORECASE)
+    # Strip whitespace, commas, periods, dashes
+    return name.strip(" ,.-")
+
+
+def is_news_relevant(title, ticker, company_name=None):
+    """Determine if a news headline is relevant to the target stock."""
+    if not title:
+        return False
+    title_lower = title.lower()
+    ticker_lower = ticker.lower()
+    
+    import re
+    # Check 1: Ticker as a standalone word (e.g. AAPL, $AAPL, (AAPL))
+    if re.search(r'\b' + re.escape(ticker_lower) + r'\b', title_lower):
+        return True
+        
+    # Check 2: Company name or its distinct words
+    if company_name:
+        cleaned = clean_company_name(company_name).lower()
+        if cleaned:
+            # Match entire cleaned name (e.g. "apple")
+            if cleaned in title_lower:
+                return True
+            # Match non-generic words in cleaned name
+            generic_words = {
+                "inc", "corp", "corporation", "co", "ltd", "limited", "plc", "incorporated",
+                "group", "holdings", "holding", "industries", "technologies", "technology",
+                "solutions", "financial", "systems", "trust", "energy", "resources", "global",
+                "international", "national", "american", "united", "partners", "capital",
+                "china", "us", "usa", "first", "new", "health", "therapeutics", "pharmaceuticals",
+                "biosciences", "biotech", "devices", "mining"
+            }
+            words = [w for w in re.split(r'\W+', cleaned) if w]
+            for w in words:
+                if len(w) >= 3 and w not in generic_words:
+                    if re.search(r'\b' + re.escape(w) + r'\b', title_lower):
+                        return True
+    return False
+
+
 def fetch_news(ticker, limit=5):
     """
     Fetch news articles for a single ticker.
@@ -913,19 +968,33 @@ def fetch_news(ticker, limit=5):
     if wb_un:
         try:
             print(f"[Webull Unofficial] Fetching news for {ticker}...")
-            news_list = wb_un.get_news(stock=ticker, items=limit)
+            # Retrieve company name to filter articles accurately
+            company_name = None
+            try:
+                quote = wb_un.get_quote(stock=ticker)
+                if quote:
+                    company_name = quote.get("name")
+            except Exception:
+                pass
+
+            # Fetch more news items than limit so we can filter and still return enough
+            raw_limit = max(20, limit * 3)
+            news_list = wb_un.get_news(stock=ticker, items=raw_limit)
             if isinstance(news_list, list) and len(news_list) > 0:
                 normalized = []
                 for item in news_list:
                     title = item.get("title", "")
+                    
+                    # Filter: Only keep articles relevant to this specific ticker/company
+                    if not is_news_relevant(title, ticker, company_name):
+                        continue
+                        
                     publisher = item.get("sourceName", "Webull")
                     url = item.get("newsUrl", "")
                     date_str = item.get("newsTime", "")
                     publish_time = None
                     if date_str:
                         try:
-                            # Parse UTC offset
-                            # Remove trailing +0000 or similar
                             # Format: 2026-06-04T00:10:00.000+0000
                             base_dt = datetime.strptime(date_str[:19], "%Y-%m-%dT%H:%M:%S")
                             publish_time = base_dt.replace(tzinfo=pytz.UTC)
@@ -940,6 +1009,8 @@ def fetch_news(ticker, limit=5):
                         "publish_time": publish_time,
                         "url": url
                     })
+                    if len(normalized) >= limit:
+                        break
                 return normalized
         except Exception as e:
             print(f"[Webull Unofficial] News fetch error for {ticker}: {e}")
@@ -949,7 +1020,8 @@ def fetch_news(ticker, limit=5):
         print(f"[Yahoo Fallback] Fetching news for {ticker}...")
         session, crumb = _ensure_session()
         url = "https://query2.finance.yahoo.com/v1/finance/search"
-        params = {"q": ticker, "newsCount": limit}
+        raw_limit = max(20, limit * 3)
+        params = {"q": ticker, "newsCount": raw_limit}
         if crumb:
             params["crumb"] = crumb
         resp = session.get(url, params=params, timeout=10)
@@ -959,6 +1031,27 @@ def fetch_news(ticker, limit=5):
             normalized = []
             for item in yahoo_news:
                 title = item.get("title", "")
+                
+                # Check related tickers tag
+                related_tickers = item.get("relatedTickers", [])
+                
+                # Yahoo search results filtering:
+                # Must be tagged with ticker, AND must apply to <= 3 tickers (avoiding macro index roundups).
+                # If relatedTickers is completely missing, fallback to title/regex checking.
+                ticker_upper = ticker.upper()
+                is_target_stock_specific = False
+                
+                if related_tickers:
+                    if ticker_upper in related_tickers and len(related_tickers) <= 3:
+                        is_target_stock_specific = True
+                else:
+                    # Fallback if relatedTickers list is not present
+                    if is_news_relevant(title, ticker):
+                        is_target_stock_specific = True
+                        
+                if not is_target_stock_specific:
+                    continue
+                    
                 publisher = item.get("publisher", "Yahoo Finance")
                 url = item.get("link", "")
                 pub_ts = item.get("providerPublishTime")
@@ -972,6 +1065,8 @@ def fetch_news(ticker, limit=5):
                     "publish_time": publish_time,
                     "url": url
                 })
+                if len(normalized) >= limit:
+                    break
             return normalized
     except Exception as e:
         print(f"[Yahoo Fallback] News fetch error for {ticker}: {e}")
