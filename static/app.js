@@ -196,8 +196,14 @@ function buildCard(item, index) {
     return inner.split(" | ").map(s => s.trim()).filter(s => s);
   };
 
+  const parsePatterns = (str) => {
+    if (!str || str === "—") return [];
+    return str.split(" | ").map(s => s.trim()).filter(s => s);
+  };
+
   const bullish = parseSignals(item["Bullish Signals"]);
   const bearish = parseSignals(item["Bearish Signals"]);
+  const patternsList = parsePatterns(item.Patterns);
 
   const rsi = item.RSI;
   const rsiCls = rsiClass(rsi);
@@ -223,6 +229,58 @@ function buildCard(item, index) {
   const bullIcon = "🟢";
   const bearIcon = "🔴";
 
+  // Build Technical Grid
+  const rvolVal = item.RVOL !== undefined ? `${item.RVOL.toFixed(1)}x` : "—";
+  const rvolClass = item.RVOL >= 1.5 ? "tech-chip__value--green" : "";
+  const adrVal = item.ADR !== undefined ? `${item.ADR.toFixed(1)}%` : "—";
+  
+  const bbVal = item.BB_Pct !== undefined ? `${Math.round(item.BB_Pct)}%` : "—";
+  const bbClass = (item.BB_Pct <= 10 || item.BB_Pct >= 90) ? (item.BB_Pct <= 10 ? "tech-chip__value--green" : "tech-chip__value--red") : "";
+
+  const ema20DistVal = item.EMA20_Dist !== undefined ? `${item.EMA20_Dist > 0 ? '+' : ''}${item.EMA20_Dist.toFixed(1)}%` : "—";
+  const ema20Class = item.EMA20_Dist > 0 ? "tech-chip__value--green" : "tech-chip__value--red";
+
+  const sma200DistVal = item.SMA200_Dist !== undefined ? `${item.SMA200_Dist > 0 ? '+' : ''}${item.SMA200_Dist.toFixed(1)}%` : "—";
+  const sma200Class = item.SMA200_Dist > 0 ? "tech-chip__value--green" : "tech-chip__value--red";
+
+  const squeezeVal = item.Squeeze ? `<span class="tech-chip__value--squeeze-on">ON 🔥</span>` : "OFF";
+  const squeezeCls = item.Squeeze ? "tech-chip--squeeze-on" : "";
+
+  const techGridHtml = `
+    <div class="card__tech-grid">
+      <div class="tech-chip">
+        <span class="tech-chip__label">RVOL</span>
+        <span class="tech-chip__value ${rvolClass}">${rvolVal}</span>
+      </div>
+      <div class="tech-chip">
+        <span class="tech-chip__label">ADR</span>
+        <span class="tech-chip__value">${adrVal}</span>
+      </div>
+      <div class="tech-chip ${squeezeCls}">
+        <span class="tech-chip__label">Squeeze</span>
+        <span class="tech-chip__value">${squeezeVal}</span>
+      </div>
+      <div class="tech-chip">
+        <span class="tech-chip__label">BB %B</span>
+        <span class="tech-chip__value ${bbClass}">${bbVal}</span>
+      </div>
+      <div class="tech-chip">
+        <span class="tech-chip__label">20 EMA</span>
+        <span class="tech-chip__value ${ema20Class}">${ema20DistVal}</span>
+      </div>
+      <div class="tech-chip">
+        <span class="tech-chip__label">200 SMA</span>
+        <span class="tech-chip__value ${sma200Class}">${sma200DistVal}</span>
+      </div>
+    </div>
+  `;
+
+  const patternBadges = patternsList.length ? `
+    <div class="card__patterns">
+      ${patternsList.map(pat => `<span class="pattern-badge">📐 ${pat}</span>`).join("")}
+    </div>
+  ` : "";
+
   return `
     <div class="card" style="animation-delay: ${Math.min(index * 0.04, 1.2)}s">
       <div class="card__top">
@@ -244,6 +302,8 @@ function buildCard(item, index) {
           </div>
         </div>
       </div>
+      ${techGridHtml}
+      ${patternBadges}
       <div class="card__signals">
         ${bullish.length ? `<div class="signal-row"><span class="signal-row__icon">${bullIcon}</span>${bullPills}</div>` : ""}
         ${bearish.length ? `<div class="signal-row"><span class="signal-row__icon">${bearIcon}</span>${bearPills}</div>` : ""}
@@ -275,7 +335,13 @@ function buildOptionsCard(item, index) {
     return `<span class="pill pill--${type}">${s}</span>`;
   };
 
+  const parsePatterns = (str) => {
+    if (!str || str === "—") return [];
+    return str.split(" | ").map(s => s.trim()).filter(s => s);
+  };
+
   const catalystPills = (item["Catalyst Tags"] || "").split(" | ").filter(s => s).map(makeOptPill).join("");
+  const patternsList = parsePatterns(item.Patterns);
 
   const flowBadge = item["Unusual Flow"] ? `
     <div class="opts-flow-badge">
@@ -296,6 +362,58 @@ function buildOptionsCard(item, index) {
   if (catScore >= 6) catGrade = "A+";
   else if (catScore >= 4) catGrade = "A";
   const gradeCls = catGrade === "A+" ? "grade--aplus" : catGrade === "A" ? "grade--a" : "grade--b";
+
+  // Build Technical Grid
+  const rvolVal = item.RVOL !== undefined ? `${item.RVOL.toFixed(1)}x` : "—";
+  const rvolClass = item.RVOL >= 1.5 ? "tech-chip__value--green" : "";
+  const adrVal = item.ADR !== undefined ? `${item.ADR.toFixed(1)}%` : "—";
+  
+  const bbVal = item.BB_Pct !== undefined ? `${Math.round(item.BB_Pct)}%` : "—";
+  const bbClass = (item.BB_Pct <= 10 || item.BB_Pct >= 90) ? (item.BB_Pct <= 10 ? "tech-chip__value--green" : "tech-chip__value--red") : "";
+
+  const ema20DistVal = item.EMA20_Dist !== undefined ? `${item.EMA20_Dist > 0 ? '+' : ''}${item.EMA20_Dist.toFixed(1)}%` : "—";
+  const ema20Class = item.EMA20_Dist > 0 ? "tech-chip__value--green" : "tech-chip__value--red";
+
+  const sma200DistVal = item.SMA200_Dist !== undefined ? `${item.SMA200_Dist > 0 ? '+' : ''}${item.SMA200_Dist.toFixed(1)}%` : "—";
+  const sma200Class = item.SMA200_Dist > 0 ? "tech-chip__value--green" : "tech-chip__value--red";
+
+  const squeezeVal = item.Squeeze ? `<span class="tech-chip__value--squeeze-on">ON 🔥</span>` : "OFF";
+  const squeezeCls = item.Squeeze ? "tech-chip--squeeze-on" : "";
+
+  const techGridHtml = `
+    <div class="card__tech-grid" style="margin-top: 14px;">
+      <div class="tech-chip">
+        <span class="tech-chip__label">RVOL</span>
+        <span class="tech-chip__value ${rvolClass}">${rvolVal}</span>
+      </div>
+      <div class="tech-chip">
+        <span class="tech-chip__label">ADR</span>
+        <span class="tech-chip__value">${adrVal}</span>
+      </div>
+      <div class="tech-chip ${squeezeCls}">
+        <span class="tech-chip__label">Squeeze</span>
+        <span class="tech-chip__value">${squeezeVal}</span>
+      </div>
+      <div class="tech-chip">
+        <span class="tech-chip__label">BB %B</span>
+        <span class="tech-chip__value ${bbClass}">${bbVal}</span>
+      </div>
+      <div class="tech-chip">
+        <span class="tech-chip__label">20 EMA</span>
+        <span class="tech-chip__value ${ema20Class}">${ema20DistVal}</span>
+      </div>
+      <div class="tech-chip">
+        <span class="tech-chip__label">200 SMA</span>
+        <span class="tech-chip__value ${sma200Class}">${sma200DistVal}</span>
+      </div>
+    </div>
+  `;
+
+  const patternBadges = patternsList.length ? `
+    <div class="card__patterns" style="margin-top: 10px;">
+      ${patternsList.map(pat => `<span class="pattern-badge">📐 ${pat}</span>`).join("")}
+    </div>
+  ` : "";
 
   return `
     <div class="card opts-card" style="animation-delay: ${Math.min(index * 0.04, 1.2)}s">
@@ -357,6 +475,8 @@ function buildOptionsCard(item, index) {
       </div>
 
       ${flowBadge}
+      ${techGridHtml}
+      ${patternBadges}
 
       <div class="card__signals">
         <div class="signal-row">

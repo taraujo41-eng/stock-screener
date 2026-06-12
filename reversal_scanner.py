@@ -398,6 +398,144 @@ def detect_triangle(df, lookback=20):
 
     return ascending, descending
 
+def find_pivots(series, window=5):
+    """
+    Find local peaks and troughs in a series.
+    A peak is a value greater than its neighbors in a window on both sides.
+    A trough is a value smaller than its neighbors in a window on both sides.
+    Returns lists of (index, price, type)
+    """
+    pivots = []
+    n = len(series)
+    if n < window * 2 + 1:
+        return pivots
+
+    for i in range(window, n - window):
+        val = series.iloc[i]
+        left_vals = series.iloc[i-window:i]
+        right_vals = series.iloc[i+1:i+window+1]
+        
+        # Local peak check
+        if all(val > left_vals) and all(val > right_vals):
+            pivots.append((i, float(val), 'peak'))
+        # Local trough check
+        elif all(val < left_vals) and all(val < right_vals):
+            pivots.append((i, float(val), 'trough'))
+    return pivots
+
+def detect_double_top_bottom(df, pivots, tolerance=0.02, min_swing=0.03):
+    """
+    Detect Double Top & Double Bottom in the recent part of the pivots.
+    """
+    peaks = [p for p in pivots if p[2] == 'peak']
+    troughs = [p for p in pivots if p[2] == 'trough']
+    
+    last_price = float(df['Close'].iloc[-1])
+    double_bottom = False
+    double_top = False
+    
+    # Double Bottom: Two recent troughs at similar levels with a peak between them
+    if len(troughs) >= 2:
+        t1 = troughs[-2]
+        t2 = troughs[-1]
+        
+        price_diff = abs(t1[1] - t2[1]) / max(t1[1], t2[1])
+        if price_diff <= tolerance:
+            inter_peaks = [p for p in peaks if t1[0] < p[0] < t2[0]]
+            if inter_peaks:
+                neckline = max(p[1] for p in inter_peaks)
+                swing_size = (neckline - t2[1]) / t2[1]
+                if swing_size >= min_swing:
+                    if last_price >= t2[1] and last_price >= neckline * 0.95:
+                        double_bottom = True
+
+    # Double Top: Two recent peaks at similar levels with a trough between them
+    if len(peaks) >= 2:
+        p1 = peaks[-2]
+        p2 = peaks[-1]
+        
+        price_diff = abs(p1[1] - p2[1]) / max(p1[1], p2[1])
+        if price_diff <= tolerance:
+            inter_troughs = [t for t in troughs if p1[0] < t[0] < p2[0]]
+            if inter_troughs:
+                neckline = min(t[1] for t in inter_troughs)
+                swing_size = (p2[1] - neckline) / neckline
+                if swing_size >= min_swing:
+                    if last_price <= p2[1] and last_price <= neckline * 1.05:
+                        double_top = True
+                        
+    return double_bottom, double_top
+
+def detect_head_and_shoulders(df, pivots, tolerance=0.04):
+    """
+    Detect Head & Shoulders and Inverse Head & Shoulders.
+    """
+    peaks = [p for p in pivots if p[2] == 'peak']
+    troughs = [p for p in pivots if p[2] == 'trough']
+    
+    last_price = float(df['Close'].iloc[-1])
+    hs = False
+    ihs = False
+    
+    # H&S: 3 consecutive peaks: left shoulder, head (highest), right shoulder
+    if len(peaks) >= 3:
+        p1, p2, p3 = peaks[-3:]
+        if p2[1] > p1[1] and p2[1] > p3[1]:
+            shoulder_diff = abs(p1[1] - p3[1]) / max(p1[1], p3[1])
+            if shoulder_diff <= tolerance:
+                inter_troughs = [t for t in troughs if p1[0] < t[0] < p3[0]]
+                if len(inter_troughs) >= 2:
+                    neckline = max(t[1] for t in inter_troughs)
+                    if last_price <= neckline * 1.05:
+                        hs = True
+
+    # Inverse H&S: 3 consecutive troughs: left shoulder, head (lowest), right shoulder
+    if len(troughs) >= 3:
+        t1, t2, t3 = troughs[-3:]
+        if t2[1] < t1[1] and t2[1] < t3[1]:
+            shoulder_diff = abs(t1[1] - t3[1]) / max(t1[1], t3[1])
+            if shoulder_diff <= tolerance:
+                inter_peaks = [p for p in peaks if t1[0] < p[0] < t3[0]]
+                if len(inter_peaks) >= 2:
+                    neckline = min(p[1] for p in inter_peaks)
+                    if last_price >= neckline * 0.95:
+                        ihs = True
+                        
+    return hs, ihs
+
+def detect_cup_and_handle(df, pivots, tolerance=0.03):
+    """
+    Detect Cup & Handle.
+    """
+    peaks = [p for p in pivots if p[2] == 'peak']
+    troughs = [p for p in pivots if p[2] == 'trough']
+    
+    last_price = float(df['Close'].iloc[-1])
+    cup_handle = False
+    
+    if len(peaks) >= 2:
+        p1 = peaks[-2]
+        p2 = peaks[-1]
+        
+        rim_diff = abs(p1[1] - p2[1]) / max(p1[1], p2[1])
+        if rim_diff <= tolerance:
+            inter_troughs = [t for t in troughs if p1[0] < t[0] < p2[0]]
+            if inter_troughs:
+                bottom = min(t[1] for t in inter_troughs)
+                cup_depth = p2[1] - bottom
+                
+                if cup_depth / p2[1] > 0.05:
+                    post_p2_df = df.iloc[p2[0]:]
+                    if len(post_p2_df) > 2:
+                        handle_min = post_p2_df['Low'].min()
+                        handle_max = post_p2_df['High'].max()
+                        
+                        if handle_min > (bottom + 0.5 * cup_depth):
+                            if last_price >= handle_max * 0.97 or last_price >= p2[1] * 0.97:
+                                cup_handle = True
+                                
+    return cup_handle
+
 def count_distribution_accumulation(df, lookback=10):
     """
     Count high-volume up days (accumulation) and high-volume down days (distribution)
@@ -783,6 +921,50 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
         # 14. Current candle direction (for RVOL context)
         is_green_candle = curr['Close'] > curr['Open']
 
+        # 15. Additional technicals computation
+        adr_pct = compute_adr_pct(df, 14)
+        
+        ema20_series = compute_ema(df['Close'], 20)
+        ema20 = float(ema20_series.iloc[-1]) if len(ema20_series) > 0 else None
+        
+        sma50_series = compute_sma(df['Close'], 50)
+        sma50 = float(sma50_series.iloc[-1]) if len(sma50_series) > 0 and not np.isnan(sma50_series.iloc[-1]) else None
+        
+        ema20_dist = ((last_price - ema20) / ema20) * 100 if ema20 else 0.0
+        sma50_dist = ((last_price - sma50) / sma50) * 100 if sma50 else 0.0
+        sma200_dist = ((last_price - sma200) / sma200) * 100 if sma200 else 0.0
+        
+        bb_upper_series, bb_mid_series, bb_lower_series = compute_bollinger_bands(df['Close'], 20)
+        bb_upper = float(bb_upper_series.iloc[-1]) if len(bb_upper_series) > 0 else None
+        bb_lower = float(bb_lower_series.iloc[-1]) if len(bb_lower_series) > 0 else None
+        bb_pct_b = 50.0
+        if bb_upper is not None and bb_lower is not None and (bb_upper - bb_lower) != 0:
+            bb_pct_b = ((last_price - bb_lower) / (bb_upper - bb_lower)) * 100
+            
+        try:
+            squeeze_on, _, _ = detect_squeeze(df)
+        except Exception:
+            squeeze_on = False
+
+        # 16. Chart Pattern Detections
+        detected_patterns = []
+        double_bottom, double_top = False, False
+        hs, ihs = False, False
+        cup_handle = False
+        try:
+            pivots = find_pivots(df['Close'], window=5)
+            double_bottom, double_top = detect_double_top_bottom(df, pivots)
+            hs, ihs = detect_head_and_shoulders(df, pivots)
+            cup_handle = detect_cup_and_handle(df, pivots)
+            
+            if double_bottom: detected_patterns.append("Double Bottom")
+            if double_top: detected_patterns.append("Double Top")
+            if hs: detected_patterns.append("Head & Shoulders")
+            if ihs: detected_patterns.append("Inverse H&S")
+            if cup_handle: detected_patterns.append("Cup & Handle")
+        except Exception as pe:
+            print(f"  Error detecting patterns for {sym}: {pe}")
+
         # ═══════════════════════════════════════════════════════
         # WEIGHTED SCORING SYSTEM
         # ═══════════════════════════════════════════════════════
@@ -793,7 +975,23 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
         bull_score = 0
         bull_tags = []
 
-        has_bull_pattern = patterns['hammer'] or patterns['bull_engulf'] or patterns['bottoming_tail']
+        # Chart pattern additions to bullish scoring
+        if double_bottom:
+            bull_score += 3
+            bull_tags.append("Double Bottom +3")
+        if ihs:
+            bull_score += 3
+            bull_tags.append("Inverse H&S +3")
+        if cup_handle:
+            bull_score += 3
+            bull_tags.append("Cup & Handle +3")
+
+        # Chart pattern additions to bearish scoring
+        if double_top:
+            # Note: We will add to bear_score down below in the bearish section
+            pass
+
+        has_bull_pattern = patterns['hammer'] or patterns['bull_engulf'] or patterns['bottoming_tail'] or double_bottom or ihs or cup_handle
         if has_bull_pattern and trend == "downtrend":
             bull_score += 3
             if patterns['hammer']: bull_tags.append("Hammer +3")
@@ -832,7 +1030,14 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
         bear_score = 0
         bear_tags = []
 
-        has_bear_pattern = patterns['star'] or patterns['bear_engulf'] or patterns['topping_tail']
+        if double_top:
+            bear_score += 3
+            bear_tags.append("Double Top +3")
+        if hs:
+            bear_score += 3
+            bear_tags.append("Head & Shoulders +3")
+
+        has_bear_pattern = patterns['star'] or patterns['bear_engulf'] or patterns['topping_tail'] or double_top or hs
         if has_bear_pattern and trend == "uptrend":
             bear_score += 3
             if patterns['star']: bear_tags.append("Shooting Star +3")
@@ -962,7 +1167,15 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
             "Bullish Signals": reasons if is_bullish else "—",
             "Bearish Signals": reasons if is_bearish else "—",
             "Suggested Option": opt_str,
-            "News Details": news_details
+            "News Details": news_details,
+            "RVOL": round(rvol, 2) if rvol is not None else 0.0,
+            "ADR": round(adr_pct, 2) if adr_pct is not None else 0.0,
+            "EMA20_Dist": round(ema20_dist, 2),
+            "SMA50_Dist": round(sma50_dist, 2),
+            "SMA200_Dist": round(sma200_dist, 2),
+            "Squeeze": bool(squeeze_on),
+            "BB_Pct": round(bb_pct_b, 1),
+            "Patterns": " | ".join(detected_patterns) if detected_patterns else "—"
         }
     except Exception as e:
         print(f"  Error analyzing {sym}: {e}")
@@ -1881,6 +2094,50 @@ def _analyze_options_setup(sym, df, iv_history):
         iv_rank_str = f"{iv_rank:.0f}%" if iv_rank is not None else "Building..."
         catalyst_str = " | ".join(catalyst_tags)
 
+        # Additional technicals computation
+        adr_pct = compute_adr_pct(df, 14)
+        
+        ema20_series = compute_ema(df['Close'], 20)
+        ema20 = float(ema20_series.iloc[-1]) if len(ema20_series) > 0 else None
+        
+        sma50_series = compute_sma(df['Close'], 50)
+        sma50 = float(sma50_series.iloc[-1]) if len(sma50_series) > 0 and not np.isnan(sma50_series.iloc[-1]) else None
+        
+        sma200_series = compute_sma(df['Close'], 200)
+        sma200 = float(sma200_series.iloc[-1]) if len(sma200_series) > 0 and not np.isnan(sma200_series.iloc[-1]) else None
+        
+        ema20_dist = ((last_price - ema20) / ema20) * 100 if ema20 else 0.0
+        sma50_dist = ((last_price - sma50) / sma50) * 100 if sma50 else 0.0
+        sma200_dist = ((last_price - sma200) / sma200) * 100 if sma200 else 0.0
+        
+        bb_upper_series, bb_mid_series, bb_lower_series = compute_bollinger_bands(df['Close'], 20)
+        bb_upper = float(bb_upper_series.iloc[-1]) if len(bb_upper_series) > 0 else None
+        bb_lower = float(bb_lower_series.iloc[-1]) if len(bb_lower_series) > 0 else None
+        bb_pct_b = 50.0
+        if bb_upper is not None and bb_lower is not None and (bb_upper - bb_lower) != 0:
+            bb_pct_b = ((last_price - bb_lower) / (bb_upper - bb_lower)) * 100
+            
+        try:
+            squeeze_on, _, _ = detect_squeeze(df)
+        except Exception:
+            squeeze_on = False
+
+        # Chart Pattern Detections
+        detected_patterns = []
+        try:
+            pivots = find_pivots(df['Close'], window=5)
+            double_bottom, double_top = detect_double_top_bottom(df, pivots)
+            hs, ihs = detect_head_and_shoulders(df, pivots)
+            cup_handle = detect_cup_and_handle(df, pivots)
+            
+            if double_bottom: detected_patterns.append("Double Bottom")
+            if double_top: detected_patterns.append("Double Top")
+            if hs: detected_patterns.append("Head & Shoulders")
+            if ihs: detected_patterns.append("Inverse H&S")
+            if cup_handle: detected_patterns.append("Cup & Handle")
+        except Exception as pe:
+            print(f"  Error detecting patterns for {sym}: {pe}")
+
         return {
             "Ticker": sym,
             "Last Price": round(last_price, 2),
@@ -1905,7 +2162,15 @@ def _analyze_options_setup(sym, df, iv_history):
             "Unusual Flow": has_unusual_flow,
             "Flow Detail": flow_str,
             "RSI": round(rsi_val, 1),
-            "News Details": news_details
+            "News Details": news_details,
+            "RVOL": round(rvol, 2) if rvol is not None else 0.0,
+            "ADR": round(adr_pct, 2) if adr_pct is not None else 0.0,
+            "EMA20_Dist": round(ema20_dist, 2),
+            "SMA50_Dist": round(sma50_dist, 2),
+            "SMA200_Dist": round(sma200_dist, 2),
+            "Squeeze": bool(squeeze_on),
+            "BB_Pct": round(bb_pct_b, 1),
+            "Patterns": " | ".join(detected_patterns) if detected_patterns else "—"
         }
     except Exception as e:
         print(f"  Error analyzing options for {sym}: {e}")
@@ -2126,6 +2391,45 @@ def _analyze_breakout_setup(sym, df):
         except Exception:
             is_tight_range = False
             range_10d_pct = 99
+        # Additional indicators for breakouts
+        ema20_series = compute_ema(df['Close'], 20)
+        ema20 = float(ema20_series.iloc[-1]) if len(ema20_series) > 0 else None
+        
+        sma50_series = compute_sma(df['Close'], 50)
+        sma50 = float(sma50_series.iloc[-1]) if len(sma50_series) > 0 and not np.isnan(sma50_series.iloc[-1]) else None
+        
+        sma200_series = compute_sma(df['Close'], 200)
+        sma200 = float(sma200_series.iloc[-1]) if len(sma200_series) > 0 and not np.isnan(sma200_series.iloc[-1]) else None
+        
+        ema20_dist = ((last_price - ema20) / ema20) * 100 if ema20 else 0.0
+        sma50_dist = ((last_price - sma50) / sma50) * 100 if sma50 else 0.0
+        sma200_dist = ((last_price - sma200) / sma200) * 100 if sma200 else 0.0
+        
+        bb_upper_series, bb_mid_series, bb_lower_series = compute_bollinger_bands(df['Close'], 20)
+        bb_upper = float(bb_upper_series.iloc[-1]) if len(bb_upper_series) > 0 else None
+        bb_lower = float(bb_lower_series.iloc[-1]) if len(bb_lower_series) > 0 else None
+        bb_pct_b = 50.0
+        if bb_upper is not None and bb_lower is not None and (bb_upper - bb_lower) != 0:
+            bb_pct_b = ((last_price - bb_lower) / (bb_upper - bb_lower)) * 100
+
+        # Chart Pattern Detections
+        detected_patterns = []
+        double_bottom, double_top = False, False
+        hs, ihs = False, False
+        cup_handle = False
+        try:
+            pivots = find_pivots(df['Close'], window=5)
+            double_bottom, double_top = detect_double_top_bottom(df, pivots)
+            hs, ihs = detect_head_and_shoulders(df, pivots)
+            cup_handle = detect_cup_and_handle(df, pivots)
+            
+            if double_bottom: detected_patterns.append("Double Bottom")
+            if double_top: detected_patterns.append("Double Top")
+            if hs: detected_patterns.append("Head & Shoulders")
+            if ihs: detected_patterns.append("Inverse H&S")
+            if cup_handle: detected_patterns.append("Cup & Handle")
+        except Exception as pe:
+            print(f"  Error detecting patterns for {sym}: {pe}")
 
         MIN_BREAKOUT_SCORE = 12
 
@@ -2134,6 +2438,16 @@ def _analyze_breakout_setup(sym, df):
         # ═══════════════════════════════════════════════════════
         bull_score = 0
         bull_tags = []
+
+        if double_bottom:
+            bull_score += 3
+            bull_tags.append("Double Bottom +3")
+        if ihs:
+            bull_score += 3
+            bull_tags.append("Inverse H&S +3")
+        if cup_handle:
+            bull_score += 3
+            bull_tags.append("Cup & Handle +3")
 
         # 1. Consolidation near resistance (+3)
         if is_tight_range and atr_contracting:
@@ -2223,6 +2537,13 @@ def _analyze_breakout_setup(sym, df):
         # ═══════════════════════════════════════════════════════
         bear_score = 0
         bear_tags = []
+
+        if double_top:
+            bear_score += 3
+            bear_tags.append("Double Top +3")
+        if hs:
+            bear_score += 3
+            bear_tags.append("Head & Shoulders +3")
 
         # 1. Consolidation near support (+3)
         if is_tight_range and atr_contracting:
@@ -2369,7 +2690,15 @@ def _analyze_breakout_setup(sym, df):
             "Bullish Signals": reasons if is_bullish else "—",
             "Bearish Signals": reasons if is_bearish else "—",
             "Suggested Option": "—",
-            "News Details": news_details
+            "News Details": news_details,
+            "RVOL": round(rvol, 2) if rvol is not None else 0.0,
+            "ADR": round(adr_pct, 2) if adr_pct is not None else 0.0,
+            "EMA20_Dist": round(ema20_dist, 2),
+            "SMA50_Dist": round(sma50_dist, 2),
+            "SMA200_Dist": round(sma200_dist, 2),
+            "Squeeze": bool(squeeze_on),
+            "BB_Pct": round(bb_pct_b, 1),
+            "Patterns": " | ".join(detected_patterns) if detected_patterns else "—"
         }
     except Exception as e:
         print(f"  Error analyzing breakout for {sym}: {e}")

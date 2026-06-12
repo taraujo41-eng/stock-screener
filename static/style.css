@@ -1338,3 +1338,80 @@ body {
 .mode-tabs::-webkit-scrollbar {
   display: none;
 }
+
+/* ============================================================
+   Technical Indicators & Pattern Badges Styling
+   ============================================================ */
+
+.card__tech-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.tech-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.tech-chip__label {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.tech-chip__value {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700;
+}
+
+/* Green/Red highlights for trend offset value */
+.tech-chip__value--green {
+  color: var(--green);
+}
+
+.tech-chip__value--red {
+  color: var(--red);
+}
+
+/* Squeeze highlights */
+.tech-chip--squeeze-on {
+  border-color: rgba(245, 158, 11, 0.4);
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.tech-chip__value--squeeze-on {
+  color: var(--amber);
+  text-shadow: 0 0 4px rgba(245, 158, 11, 0.4);
+}
+
+/* Chart pattern badges row */
+.card__patterns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.pattern-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: rgba(99, 102, 241, 0.15);
+  color: #a78bfa;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  border-radius: 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
