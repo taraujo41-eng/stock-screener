@@ -951,19 +951,6 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
         double_bottom, double_top = False, False
         hs, ihs = False, False
         cup_handle = False
-        try:
-            pivots = find_pivots(df['Close'], window=5)
-            double_bottom, double_top = detect_double_top_bottom(df, pivots)
-            hs, ihs = detect_head_and_shoulders(df, pivots)
-            cup_handle = detect_cup_and_handle(df, pivots)
-            
-            if double_bottom: detected_patterns.append("Double Bottom")
-            if double_top: detected_patterns.append("Double Top")
-            if hs: detected_patterns.append("Head & Shoulders")
-            if ihs: detected_patterns.append("Inverse H&S")
-            if cup_handle: detected_patterns.append("Cup & Handle")
-        except Exception as pe:
-            print(f"  Error detecting patterns for {sym}: {pe}")
 
         # ═══════════════════════════════════════════════════════
         # WEIGHTED SCORING SYSTEM
@@ -2124,19 +2111,6 @@ def _analyze_options_setup(sym, df, iv_history):
 
         # Chart Pattern Detections
         detected_patterns = []
-        try:
-            pivots = find_pivots(df['Close'], window=5)
-            double_bottom, double_top = detect_double_top_bottom(df, pivots)
-            hs, ihs = detect_head_and_shoulders(df, pivots)
-            cup_handle = detect_cup_and_handle(df, pivots)
-            
-            if double_bottom: detected_patterns.append("Double Bottom")
-            if double_top: detected_patterns.append("Double Top")
-            if hs: detected_patterns.append("Head & Shoulders")
-            if ihs: detected_patterns.append("Inverse H&S")
-            if cup_handle: detected_patterns.append("Cup & Handle")
-        except Exception as pe:
-            print(f"  Error detecting patterns for {sym}: {pe}")
 
         return {
             "Ticker": sym,
@@ -2417,19 +2391,6 @@ def _analyze_breakout_setup(sym, df):
         double_bottom, double_top = False, False
         hs, ihs = False, False
         cup_handle = False
-        try:
-            pivots = find_pivots(df['Close'], window=5)
-            double_bottom, double_top = detect_double_top_bottom(df, pivots)
-            hs, ihs = detect_head_and_shoulders(df, pivots)
-            cup_handle = detect_cup_and_handle(df, pivots)
-            
-            if double_bottom: detected_patterns.append("Double Bottom")
-            if double_top: detected_patterns.append("Double Top")
-            if hs: detected_patterns.append("Head & Shoulders")
-            if ihs: detected_patterns.append("Inverse H&S")
-            if cup_handle: detected_patterns.append("Cup & Handle")
-        except Exception as pe:
-            print(f"  Error detecting patterns for {sym}: {pe}")
 
         MIN_BREAKOUT_SCORE = 12
 
