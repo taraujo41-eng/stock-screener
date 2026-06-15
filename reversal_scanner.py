@@ -425,8 +425,7 @@ def find_pivots(series, window=5):
 
 def detect_double_top_bottom(df, pivots, tolerance=0.02, min_swing=0.03):
     """
-    Detect Double Top & Double Bottom in real-time as they are actively forming.
-    Looks for price testing a previous trough/peak and beginning to reverse.
+    Detect Double Top & Double Bottom in the recent part of the pivots.
     """
     peaks = [p for p in pivots if p[2] == 'peak']
     troughs = [p for p in pivots if p[2] == 'trough']
@@ -435,54 +434,41 @@ def detect_double_top_bottom(df, pivots, tolerance=0.02, min_swing=0.03):
     double_bottom = False
     double_top = False
     
-    # Double Bottom: Current bar testing the last confirmed trough pivot
-    if troughs:
-        # Find the most recent trough that is not too close to the current bar
-        # to ensure there was a genuine neckline swing in between
-        valid_troughs = [t for t in troughs if t[0] < len(df) - 6]
-        if valid_troughs:
-            t1 = valid_troughs[-1]
-            recent_lows = df['Low'].iloc[-3:]
-            tested = any(abs(l - t1[1]) / t1[1] <= tolerance for l in recent_lows)
-            if tested:
-                recent_peaks = [p for p in peaks if p[0] > t1[0]]
-                if recent_peaks:
-                    neckline = max(p[1] for p in recent_peaks)
-                    swing_size = (neckline - t1[1]) / t1[1]
-                    if swing_size >= min_swing:
-                        curr_close = float(df['Close'].iloc[-1])
-                        curr_open = float(df['Open'].iloc[-1])
-                        prev_close = float(df['Close'].iloc[-2]) if len(df) > 1 else curr_close
-                        is_bouncing = (curr_close > curr_open) or (curr_close > prev_close)
-                        if is_bouncing and curr_close < neckline:
-                            double_bottom = True
+    # Double Bottom: Two recent troughs at similar levels with a peak between them
+    if len(troughs) >= 2:
+        t1 = troughs[-2]
+        t2 = troughs[-1]
+        
+        price_diff = abs(t1[1] - t2[1]) / max(t1[1], t2[1])
+        if price_diff <= tolerance:
+            inter_peaks = [p for p in peaks if t1[0] < p[0] < t2[0]]
+            if inter_peaks:
+                neckline = max(p[1] for p in inter_peaks)
+                swing_size = (neckline - t2[1]) / t2[1]
+                if swing_size >= min_swing:
+                    if last_price >= t2[1] and last_price >= neckline * 0.95:
+                        double_bottom = True
 
-    # Double Top: Current bar testing the last confirmed peak pivot
-    if peaks:
-        valid_peaks = [p for p in peaks if p[0] < len(df) - 6]
-        if valid_peaks:
-            p1 = valid_peaks[-1]
-            recent_highs = df['High'].iloc[-3:]
-            tested = any(abs(h - p1[1]) / p1[1] <= tolerance for h in recent_highs)
-            if tested:
-                recent_troughs = [t for t in troughs if t[0] > p1[0]]
-                if recent_troughs:
-                    neckline = min(t[1] for t in recent_troughs)
-                    swing_size = (p1[1] - neckline) / neckline
-                    if swing_size >= min_swing:
-                        curr_close = float(df['Close'].iloc[-1])
-                        curr_open = float(df['Open'].iloc[-1])
-                        prev_close = float(df['Close'].iloc[-2]) if len(df) > 1 else curr_close
-                        is_rolling_over = (curr_close < curr_open) or (curr_close < prev_close)
-                        if is_rolling_over and curr_close > neckline:
-                            double_top = True
+    # Double Top: Two recent peaks at similar levels with a trough between them
+    if len(peaks) >= 2:
+        p1 = peaks[-2]
+        p2 = peaks[-1]
+        
+        price_diff = abs(p1[1] - p2[1]) / max(p1[1], p2[1])
+        if price_diff <= tolerance:
+            inter_troughs = [t for t in troughs if p1[0] < t[0] < p2[0]]
+            if inter_troughs:
+                neckline = min(t[1] for t in inter_troughs)
+                swing_size = (p2[1] - neckline) / neckline
+                if swing_size >= min_swing:
+                    if last_price <= p2[1] and last_price <= neckline * 1.05:
+                        double_top = True
                         
     return double_bottom, double_top
 
 def detect_head_and_shoulders(df, pivots, tolerance=0.04):
     """
-    Detect Head & Shoulders and Inverse Head & Shoulders as they are actively forming
-    on the right shoulder test before a neckline break.
+    Detect Head & Shoulders and Inverse Head & Shoulders.
     """
     peaks = [p for p in pivots if p[2] == 'peak']
     troughs = [p for p in pivots if p[2] == 'trough']
@@ -491,49 +477,35 @@ def detect_head_and_shoulders(df, pivots, tolerance=0.04):
     hs = False
     ihs = False
     
-    # H&S: 2 historical peaks: Left Shoulder (p1), Head (p2) higher than p1.
-    # Current bar tests p1 price level to form the forming Right Shoulder.
-    if len(peaks) >= 2:
-        p1 = peaks[-2] # Left shoulder candidate
-        p2 = peaks[-1] # Head candidate
-        if p2[1] > p1[1] and p2[0] < len(df) - 6:
-            inter_troughs = [t for t in troughs if p1[0] < t[0] < p2[0]]
-            if inter_troughs:
-                neckline = min(t[1] for t in inter_troughs)
-                recent_highs = df['High'].iloc[-3:]
-                tested = any(abs(h - p1[1]) / p1[1] <= tolerance for h in recent_highs)
-                if tested:
-                    curr_close = float(df['Close'].iloc[-1])
-                    curr_open = float(df['Open'].iloc[-1])
-                    prev_close = float(df['Close'].iloc[-2]) if len(df) > 1 else curr_close
-                    is_rolling_over = (curr_close < curr_open) or (curr_close < prev_close)
-                    if is_rolling_over and curr_close > neckline:
+    # H&S: 3 consecutive peaks: left shoulder, head (highest), right shoulder
+    if len(peaks) >= 3:
+        p1, p2, p3 = peaks[-3:]
+        if p2[1] > p1[1] and p2[1] > p3[1]:
+            shoulder_diff = abs(p1[1] - p3[1]) / max(p1[1], p3[1])
+            if shoulder_diff <= tolerance:
+                inter_troughs = [t for t in troughs if p1[0] < t[0] < p3[0]]
+                if len(inter_troughs) >= 2:
+                    neckline = max(t[1] for t in inter_troughs)
+                    if last_price <= neckline * 1.05:
                         hs = True
 
-    # Inverse H&S: 2 historical troughs: Left Shoulder (t1), Head (t2) lower than t1.
-    # Current bar tests t1 price level to form the forming Right Shoulder.
-    if len(troughs) >= 2:
-        t1 = troughs[-2] # Left shoulder candidate
-        t2 = troughs[-1] # Head candidate
-        if t2[1] < t1[1] and t2[0] < len(df) - 6:
-            inter_peaks = [p for p in peaks if t1[0] < p[0] < t2[0]]
-            if inter_peaks:
-                neckline = max(p[1] for p in inter_peaks)
-                recent_lows = df['Low'].iloc[-3:]
-                tested = any(abs(l - t1[1]) / t1[1] <= tolerance for l in recent_lows)
-                if tested:
-                    curr_close = float(df['Close'].iloc[-1])
-                    curr_open = float(df['Open'].iloc[-1])
-                    prev_close = float(df['Close'].iloc[-2]) if len(df) > 1 else curr_close
-                    is_bouncing = (curr_close > curr_open) or (curr_close > prev_close)
-                    if is_bouncing and curr_close < neckline:
+    # Inverse H&S: 3 consecutive troughs: left shoulder, head (lowest), right shoulder
+    if len(troughs) >= 3:
+        t1, t2, t3 = troughs[-3:]
+        if t2[1] < t1[1] and t2[1] < t3[1]:
+            shoulder_diff = abs(t1[1] - t3[1]) / max(t1[1], t3[1])
+            if shoulder_diff <= tolerance:
+                inter_peaks = [p for p in peaks if t1[0] < p[0] < t3[0]]
+                if len(inter_peaks) >= 2:
+                    neckline = min(p[1] for p in inter_peaks)
+                    if last_price >= neckline * 0.95:
                         ihs = True
                         
     return hs, ihs
 
 def detect_cup_and_handle(df, pivots, tolerance=0.03):
     """
-    Detect Cup & Handle on the active breakout bar from the handle.
+    Detect Cup & Handle.
     """
     peaks = [p for p in pivots if p[2] == 'peak']
     troughs = [p for p in pivots if p[2] == 'trough']
@@ -542,25 +514,24 @@ def detect_cup_and_handle(df, pivots, tolerance=0.03):
     cup_handle = False
     
     if len(peaks) >= 2:
-        p1 = peaks[-2] # Left rim
-        p2 = peaks[-1] # Right rim
+        p1 = peaks[-2]
+        p2 = peaks[-1]
         
-        if p2[0] < len(df) - 2: # Ensure handle has started forming
-            rim_diff = abs(p1[1] - p2[1]) / max(p1[1], p2[1])
-            if rim_diff <= tolerance:
-                inter_troughs = [t for t in troughs if p1[0] < t[0] < p2[0]]
-                if inter_troughs:
-                    bottom = min(t[1] for t in inter_troughs)
-                    cup_depth = p2[1] - bottom
-                    
-                    if cup_depth / p2[1] > 0.05:
-                        handle_df = df.iloc[p2[0]:]
-                        handle_min = handle_df['Low'].min()
-                        handle_max = handle_df['High'].iloc[:-1].max() if len(handle_df) > 1 else p2[1]
+        rim_diff = abs(p1[1] - p2[1]) / max(p1[1], p2[1])
+        if rim_diff <= tolerance:
+            inter_troughs = [t for t in troughs if p1[0] < t[0] < p2[0]]
+            if inter_troughs:
+                bottom = min(t[1] for t in inter_troughs)
+                cup_depth = p2[1] - bottom
+                
+                if cup_depth / p2[1] > 0.05:
+                    post_p2_df = df.iloc[p2[0]:]
+                    if len(post_p2_df) > 2:
+                        handle_min = post_p2_df['Low'].min()
+                        handle_max = post_p2_df['High'].max()
                         
                         if handle_min > (bottom + 0.5 * cup_depth):
-                            curr_close = float(df['Close'].iloc[-1])
-                            if curr_close > handle_max or curr_close > p2[1] * 0.99:
+                            if last_price >= handle_max * 0.97 or last_price >= p2[1] * 0.97:
                                 cup_handle = True
                                 
     return cup_handle
