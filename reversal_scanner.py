@@ -863,6 +863,8 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
         near_200sma = abs((last_price - sma200) / sma200) < 0.05 if sma200 else False
         near_52w_low = abs((last_price - fiftyTwoWeekLow) / fiftyTwoWeekLow) < 0.05 if fiftyTwoWeekLow else False
         near_52w_high = abs((last_price - fiftyTwoWeekHigh) / fiftyTwoWeekHigh) < 0.05 if fiftyTwoWeekHigh else False
+        hit_52w_low = last_price <= fiftyTwoWeekLow if fiftyTwoWeekLow else False
+        hit_52w_high = last_price >= fiftyTwoWeekHigh if fiftyTwoWeekHigh else False
 
         # 8. MACD (tightened: require 3+ same-sign histogram bars before cross, and significance)
         macd_line, signal_line, macd_hist = compute_macd(df['Close'])
@@ -1003,8 +1005,10 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
             bull_score += 1; bull_tags.append("Extension >8% +1")
         if rvol > 1.5 and not is_green_candle:
             bull_score += 1; bull_tags.append(f"RVOL {rvol:.1f}x +1")
+        if hit_52w_low:
+            bull_score += 3; bull_tags.append("Hits 52w Low +3")
         if has_bull_pattern:
-            if near_52w_low:
+            if not hit_52w_low and near_52w_low:
                 bull_score += 1; bull_tags.append("Near 52w Low +1")
             elif near_200sma:
                 bull_score += 1; bull_tags.append("Near 200 SMA +1")
@@ -1049,8 +1053,10 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
             bear_score += 1; bear_tags.append("Extension >8% +1")
         if rvol > 1.5 and is_green_candle:
             bear_score += 1; bear_tags.append(f"RVOL {rvol:.1f}x +1")
+        if hit_52w_high:
+            bear_score += 3; bear_tags.append("Hits 52w High +3")
         if has_bear_pattern:
-            if near_52w_high:
+            if not hit_52w_high and near_52w_high:
                 bear_score += 1; bear_tags.append("Near 52w High +1")
             elif near_200sma:
                 bear_score += 1; bear_tags.append("Near 200 SMA +1")
@@ -1456,7 +1462,9 @@ def _analyze_momentum(sym, df):
         elif last_price > prior_high * 0.995:
              bull_score += 1; bull_tags.append("Near Prior Day High +1")
 
-        if fiftyTwoWeekHigh and last_price >= fiftyTwoWeekHigh * 0.98:
+        if fiftyTwoWeekHigh and last_price >= fiftyTwoWeekHigh:
+            bull_score += 4; bull_tags.append("Hits 52w High +4")
+        elif fiftyTwoWeekHigh and last_price >= fiftyTwoWeekHigh * 0.98:
             bull_score += 3; bull_tags.append("At 52w High +3")
         
         if rvol > 2.0:
@@ -1491,7 +1499,9 @@ def _analyze_momentum(sym, df):
         elif last_price < prior_low * 1.005:
             bear_score += 1; bear_tags.append("Near Prior Day Low +1")
 
-        if fiftyTwoWeekLow and last_price <= fiftyTwoWeekLow * 1.02:
+        if fiftyTwoWeekLow and last_price <= fiftyTwoWeekLow:
+            bear_score += 4; bear_tags.append("Hits 52w Low +4")
+        elif fiftyTwoWeekLow and last_price <= fiftyTwoWeekLow * 1.02:
             bear_score += 3; bear_tags.append("At 52w Low +3")
             
         if rvol > 2.0:
@@ -2465,8 +2475,11 @@ def _analyze_breakout_setup(sym, df):
             bull_score += 2
             bull_tags.append(f"Gap Up {gap_pct:.1f}% +2")
 
-        # 9. Near 52w high (+2)
-        if fiftyTwoWeekHigh and last_price >= fiftyTwoWeekHigh * 0.95:
+        # 9. Near 52w high (+2) / Hits 52w high (+4)
+        if fiftyTwoWeekHigh and last_price >= fiftyTwoWeekHigh:
+            bull_score += 4
+            bull_tags.append("Hits 52w High +4")
+        elif fiftyTwoWeekHigh and last_price >= fiftyTwoWeekHigh * 0.95:
             bull_score += 2
             bull_tags.append("Near 52w High +2")
 
@@ -2561,8 +2574,11 @@ def _analyze_breakout_setup(sym, df):
             bear_score += 2
             bear_tags.append(f"Gap Down {abs(gap_pct):.1f}% +2")
 
-        # 9. Near 52w low (+2)
-        if fiftyTwoWeekLow and last_price <= fiftyTwoWeekLow * 1.05:
+        # 9. Near 52w low (+2) / Hits 52w low (+4)
+        if fiftyTwoWeekLow and last_price <= fiftyTwoWeekLow:
+            bear_score += 4
+            bear_tags.append("Hits 52w Low +4")
+        elif fiftyTwoWeekLow and last_price <= fiftyTwoWeekLow * 1.05:
             bear_score += 2
             bear_tags.append("Near 52w Low +2")
 
