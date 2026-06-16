@@ -1415,3 +1415,48 @@ body {
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
+
+/* ── Trade Levels (Entry, SL, Target) ────────────────────── */
+.card__trade-levels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 0.82rem;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.trade-level {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.trade-level__label {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  font-family: 'Inter', sans-serif;
+}
+
+.trade-level__value {
+  font-weight: 700;
+}
+
+.trade-level__value--entry {
+  color: var(--text-primary);
+}
+
+.trade-level__value--sl {
+  color: var(--red);
+}
+
+.trade-level__value--target {
+  color: var(--green);
+}

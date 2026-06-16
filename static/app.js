@@ -308,6 +308,22 @@ function buildCard(item, index) {
         ${bullish.length ? `<div class="signal-row"><span class="signal-row__icon">${bullIcon}</span>${bullPills}</div>` : ""}
         ${bearish.length ? `<div class="signal-row"><span class="signal-row__icon">${bearIcon}</span>${bearPills}</div>` : ""}
       </div>
+      ${item["Stop Loss"] ? `
+        <div class="card__trade-levels">
+          <div class="trade-level">
+            <span class="trade-level__label">Entry</span>
+            <span class="trade-level__value trade-level__value--entry">$${item["Entry"]?.toFixed(2)}</span>
+          </div>
+          <div class="trade-level">
+            <span class="trade-level__label">Stop Loss</span>
+            <span class="trade-level__value trade-level__value--sl">$${item["Stop Loss"]?.toFixed(2)}</span>
+          </div>
+          <div class="trade-level">
+            <span class="trade-level__label">Target</span>
+            <span class="trade-level__value trade-level__value--target">$${item["Profit Target"]?.toFixed(2)}</span>
+          </div>
+        </div>
+      ` : ""}
       ${item["Suggested Option"] && item["Suggested Option"] !== "—" ? `
         <div class="card__option">
           <div class="option-tag">TRADE IDEA</div>
@@ -484,6 +500,22 @@ function buildOptionsCard(item, index) {
           ${catalystPills}
         </div>
       </div>
+      ${item["Stop Loss"] ? `
+        <div class="card__trade-levels">
+          <div class="trade-level">
+            <span class="trade-level__label">Entry</span>
+            <span class="trade-level__value trade-level__value--entry">$${item["Entry"]?.toFixed(2)}</span>
+          </div>
+          <div class="trade-level">
+            <span class="trade-level__label">Stop Loss</span>
+            <span class="trade-level__value trade-level__value--sl">$${item["Stop Loss"]?.toFixed(2)}</span>
+          </div>
+          <div class="trade-level">
+            <span class="trade-level__label">Target</span>
+            <span class="trade-level__value trade-level__value--target">$${item["Profit Target"]?.toFixed(2)}</span>
+          </div>
+        </div>
+      ` : ""}
     </div>
   `;
 }

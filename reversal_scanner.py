@@ -184,6 +184,85 @@ def get_us_tickers():
     return sorted(tickers)
 
 
+def check_spy_regime():
+    """Returns True if SPY is bullish (above its 50 SMA), False if bearish."""
+    try:
+        from data_fetcher import fetch_one
+        spy_df = fetch_one("SPY", days=100, interval="1d")
+        if spy_df is not None and len(spy_df) >= 50:
+            spy_close = float(spy_df['Close'].iloc[-1])
+            spy_sma50 = float(compute_sma(spy_df['Close'], 50).iloc[-1])
+            is_bullish = spy_close >= spy_sma50
+            print(f"  [Regime check] SPY Close: {spy_close:.2f}, SMA50: {spy_sma50:.2f} | Bullish: {is_bullish}")
+            return is_bullish
+    except Exception as e:
+        print(f"  [Regime check] Error fetching SPY regime: {e}")
+    return True  # Fallback to bullish if fetch fails
+
+def fetch_upcoming_earnings(tickers):
+    """
+    Fetch upcoming earnings timestamps for a list of tickers.
+    Returns a dict of {ticker: (start_timestamp, end_timestamp)}.
+    """
+    try:
+        from data_fetcher import _ensure_session
+        session, crumb = _ensure_session()
+        symbols_str = ",".join(tickers)
+        url = "https://query2.finance.yahoo.com/v7/finance/quote"
+        params = {"symbols": symbols_str}
+        if crumb:
+            params["crumb"] = crumb
+        resp = session.get(url, params=params, timeout=10)
+        if resp.status_code == 200:
+            data = resp.json()
+            results = data.get("quoteResponse", {}).get("result", [])
+            earnings = {}
+            for r in results:
+                sym = r.get("symbol")
+                start = r.get("earningsTimestampStart") or r.get("earningsTimestamp")
+                end = r.get("earningsTimestampEnd") or r.get("earningsTimestamp")
+                if sym and (start or end):
+                    earnings[sym] = (start, end)
+            return earnings
+    except Exception as e:
+        print(f"  Error fetching earnings dates: {e}")
+    return {}
+
+def get_upcoming_earnings_map(tickers):
+    """
+    Batch fetches upcoming earnings timestamps for all tickers.
+    Returns a dict of {ticker: (start_time, end_time)}.
+    """
+    earnings_map = {}
+    chunk_size = 100
+    for i in range(0, len(tickers), chunk_size):
+        chunk = tickers[i:i+chunk_size]
+        try:
+            chunk_earnings = fetch_upcoming_earnings(chunk)
+            earnings_map.update(chunk_earnings)
+        except Exception:
+            pass
+    return earnings_map
+
+def is_earnings_imminent(ticker, earnings_map, days_buffer=4):
+    """
+    Checks if earnings date is within the days_buffer.
+    """
+    if not earnings_map or ticker not in earnings_map:
+        return False
+    start, end = earnings_map[ticker]
+    now = time.time()
+    buffer_seconds = days_buffer * 86400
+    if start:
+        time_to_earnings = start - now
+        if -86400 <= time_to_earnings <= buffer_seconds:
+            return True
+    if end:
+        time_to_earnings = end - now
+        if -86400 <= time_to_earnings <= buffer_seconds:
+            return True
+    return False
+
 # =====================================================================
 # Technical Indicators  (no external TA library needed)
 # =====================================================================
@@ -821,7 +900,7 @@ def detect_unusual_options(sym):
 # Analyze a single stock DataFrame
 # =====================================================================
 
-def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolerance=0.03, skip_options=False):
+def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolerance=0.03, skip_options=False, is_market_bullish=True):
     """
     Multi-confirmation scoring system for reversal analysis.
     Each indicator contributes points — minimum 4 required to fire.
@@ -845,6 +924,9 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
         # 3. RSI
         rsi_series = compute_rsi(df['Close'], 14)
         rsi_val = float(rsi_series.iloc[-1])
+        prev_rsi = float(rsi_series.iloc[-2]) if len(rsi_series) > 1 else rsi_val
+        rsi_bull_hook = prev_rsi < 30 <= rsi_val
+        rsi_bear_hook = prev_rsi > 70 >= rsi_val
         
         # 4. SMA 200
         sma200_series = compute_sma(df['Close'], 200)
@@ -963,6 +1045,9 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
         # --- BULLISH SCORE ---
         bull_score = 0
         bull_tags = []
+        if is_market_bullish:
+            bull_score += 1
+            bull_tags.append("Market Trend +1")
 
         # Chart pattern additions to bullish scoring
         if double_bottom:
@@ -1005,6 +1090,8 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
             bull_score += 1; bull_tags.append("Extension >8% +1")
         if rvol > 1.5 and not is_green_candle:
             bull_score += 1; bull_tags.append(f"RVOL {rvol:.1f}x +1")
+        if rsi_bull_hook:
+            bull_score += 3; bull_tags.append("RSI Hook ↑ +3")
         if hit_52w_low:
             bull_score += 3; bull_tags.append("Hits 52w Low +3")
         if has_bull_pattern:
@@ -1020,6 +1107,9 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
         # --- BEARISH SCORE ---
         bear_score = 0
         bear_tags = []
+        if not is_market_bullish:
+            bear_score += 1
+            bear_tags.append("Market Trend +1")
 
         if double_top:
             bear_score += 3
@@ -1053,6 +1143,8 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
             bear_score += 1; bear_tags.append("Extension >8% +1")
         if rvol > 1.5 and is_green_candle:
             bear_score += 1; bear_tags.append(f"RVOL {rvol:.1f}x +1")
+        if rsi_bear_hook:
+            bear_score += 3; bear_tags.append("RSI Hook ↓ +3")
         if hit_52w_high:
             bear_score += 3; bear_tags.append("Hits 52w High +3")
         if has_bear_pattern:
@@ -1150,6 +1242,16 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
         if grade not in ["A", "A+"]:
             return None
 
+        atr_series = compute_atr(df, 14)
+        atr_val = float(atr_series.iloc[-1]) if len(atr_series) > 0 else 0.05 * last_price
+        entry = last_price
+        if is_bullish:
+            sl = last_price - 2.0 * atr_val
+            pt = last_price + 4.0 * atr_val
+        else:
+            sl = last_price + 2.0 * atr_val
+            pt = last_price - 4.0 * atr_val
+
         return {
             "Ticker": sym,
             "Last Price": round(last_price, 2),
@@ -1168,7 +1270,10 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
             "SMA200_Dist": round(sma200_dist, 2),
             "Squeeze": bool(squeeze_on),
             "BB_Pct": round(bb_pct_b, 1),
-            "Patterns": " | ".join(detected_patterns) if detected_patterns else "—"
+            "Patterns": " | ".join(detected_patterns) if detected_patterns else "—",
+            "Entry": round(entry, 2),
+            "Stop Loss": round(sl, 2),
+            "Profit Target": round(pt, 2)
         }
     except Exception as e:
         print(f"  Error analyzing {sym}: {e}")
@@ -1187,6 +1292,9 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
     scan_progress["status"] = "running"
     start_time = time.time()
     log = scan_progress["debug_log"]
+
+    is_market_bullish = check_spy_regime()
+    earnings_map = get_upcoming_earnings_map(tickers)
 
     results = []
     total = len(tickers)
@@ -1242,7 +1350,12 @@ def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
                 skipped_filter += 1
                 continue
 
-            result = _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh, swing_tolerance)
+            if is_earnings_imminent(sym, earnings_map):
+                print(f"  [{i+1}/{len(stock_data)}] {sym}... skip (imminent earnings)")
+                skipped_filter += 1
+                continue
+
+            result = _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh, swing_tolerance, is_market_bullish=is_market_bullish)
             if result:
                 results.append(result)
                 print(f"  [{i+1}/{len(stock_data)}] {sym}... ✓ signal")
@@ -1295,6 +1408,9 @@ def full_market_scan(min_volume=500_000, min_price=5.0,
     print("\n[Phase 1] Fetching US ticker list...")
     all_tickers = get_us_tickers()
 
+    is_market_bullish = check_spy_regime()
+    earnings_map = get_upcoming_earnings_map(all_tickers)
+
     if not all_tickers:
         scan_progress["status"] = "error"
         scan_progress["phase_label"] = "Failed to fetch ticker list"
@@ -1328,11 +1444,13 @@ def full_market_scan(min_volume=500_000, min_price=5.0,
             # Must have enough bars for SMA 200 (if Daily) or RSI/VWAP (if Intraday)
             if len(df) < 50:
                 return None
+            if is_earnings_imminent(sym, earnings_map):
+                return None
             today_date = df.index.date[-1]
             recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
             price = float(df['Close'].iloc[-1])
             if recent_vol >= min_volume and price >= min_price:
-                result = _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh, swing_tolerance, skip_options=True)
+                result = _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh, swing_tolerance, skip_options=True, is_market_bullish=is_market_bullish)
                 if result:
                     found_signals.append(sym)
                     return result
@@ -1382,7 +1500,7 @@ def full_market_scan(min_volume=500_000, min_price=5.0,
 # Momentum Analysis Scoring
 # =====================================================================
 
-def _analyze_momentum(sym, df):
+def _analyze_momentum(sym, df, is_market_bullish=True):
     """
     Momentum/Breakout scoring system.
     Identifies stocks with strong directional thrust (like the INTC rally).
@@ -1453,6 +1571,9 @@ def _analyze_momentum(sym, df):
         # --- BULLISH MOMENTUM (BREAKOUT) ---
         bull_score = 0
         bull_tags = []
+        if is_market_bullish:
+            bull_score += 1
+            bull_tags.append("Market Trend +1")
 
         if gap_pct > 3.0:
             bull_score += 2; bull_tags.append(f"Gap Up {gap_pct:.1f}% +2")
@@ -1490,6 +1611,9 @@ def _analyze_momentum(sym, df):
         # --- BEARISH MOMENTUM (BREAKDOWN) ---
         bear_score = 0
         bear_tags = []
+        if not is_market_bullish:
+            bear_score += 1
+            bear_tags.append("Market Trend +1")
 
         if gap_pct < -3.0:
             bear_score += 2; bear_tags.append(f"Gap Down {abs(gap_pct):.1f}% +2")
@@ -1562,6 +1686,16 @@ def _analyze_momentum(sym, df):
         if grade not in ["A", "A+"]:
             return None
 
+        atr_series = compute_atr(df, 14)
+        atr_val = float(atr_series.iloc[-1]) if len(atr_series) > 0 else 0.05 * last_price
+        entry = last_price
+        if is_bullish:
+            sl = last_price - 2.0 * atr_val
+            pt = last_price + 4.0 * atr_val
+        else:
+            sl = last_price + 2.0 * atr_val
+            pt = last_price - 4.0 * atr_val
+
         return {
             "Ticker": sym,
             "Last Price": round(last_price, 2),
@@ -1572,7 +1706,10 @@ def _analyze_momentum(sym, df):
             "Bullish Signals": reasons if is_bullish else "—",
             "Bearish Signals": reasons if is_bearish else "—",
             "Suggested Option": "—", # Momentum trades usually need different strategy
-            "News Details": news_details
+            "News Details": news_details,
+            "Entry": round(entry, 2),
+            "Stop Loss": round(sl, 2),
+            "Profit Target": round(pt, 2)
         }
     except Exception as e:
         print(f"  Error analyzing momentum for {sym}: {e}")
@@ -2172,6 +2309,8 @@ def options_watchlist_scan(tickers, min_volume=500_000, min_price=5.0, extended_
     start_time = time.time()
     iv_history = _load_iv_history()
 
+    earnings_map = get_upcoming_earnings_map(tickers)
+
     results = []
     total = len(tickers)
     _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
@@ -2191,6 +2330,8 @@ def options_watchlist_scan(tickers, min_volume=500_000, min_price=5.0, extended_
             recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
             last_price = float(df['Close'].iloc[-1])
             if recent_vol < min_volume or last_price < min_price:
+                continue
+            if is_earnings_imminent(sym, earnings_map):
                 continue
             result = _analyze_options_setup(sym, df, iv_history)
             if result:
@@ -2222,6 +2363,7 @@ def options_full_market_scan(min_volume=500_000, min_price=5.0, extended_hours=F
     iv_history = _load_iv_history()
 
     all_tickers = get_us_tickers()
+    earnings_map = get_upcoming_earnings_map(all_tickers)
     if not all_tickers:
         scan_progress["status"] = "error"
         scan_progress["phase_label"] = "Failed to fetch ticker list"
@@ -2234,6 +2376,8 @@ def options_full_market_scan(min_volume=500_000, min_price=5.0, extended_hours=F
     def process_options(sym, df):
         try:
             if len(df) < 50:
+                return None
+            if is_earnings_imminent(sym, earnings_map):
                 return None
             today_date = df.index.date[-1]
             recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
@@ -2281,7 +2425,7 @@ def options_full_market_scan(min_volume=500_000, min_price=5.0, extended_hours=F
 # Breakout / Breakdown & Gap Scanner — Analysis
 # =====================================================================
 
-def _analyze_breakout_setup(sym, df):
+def _analyze_breakout_setup(sym, df, is_market_bullish=True):
     """
     Breakout/Breakdown & Gap scoring system.
     Detects stocks ready to break out of consolidation, gap up/down,
@@ -2409,6 +2553,9 @@ def _analyze_breakout_setup(sym, df):
         # ═══════════════════════════════════════════════════════
         bull_score = 0
         bull_tags = []
+        if is_market_bullish:
+            bull_score += 1
+            bull_tags.append("Market Trend +1")
 
         if double_bottom:
             bull_score += 3
@@ -2511,6 +2658,9 @@ def _analyze_breakout_setup(sym, df):
         # ═══════════════════════════════════════════════════════
         bear_score = 0
         bear_tags = []
+        if not is_market_bullish:
+            bear_score += 1
+            bear_tags.append("Market Trend +1")
 
         if double_top:
             bear_score += 3
@@ -2627,8 +2777,9 @@ def _analyze_breakout_setup(sym, df):
         near_52w_high = fiftyTwoWeekHigh and last_price >= fiftyTwoWeekHigh * 0.90
         near_52w_low = fiftyTwoWeekLow and last_price <= fiftyTwoWeekLow * 1.10
 
-        is_bullish = bull_score >= MIN_BREAKOUT_SCORE and has_bull_anchor and near_52w_high
-        is_bearish = bear_score >= MIN_BREAKOUT_SCORE and has_bear_anchor and near_52w_low
+        # Enforce 200 SMA trend alignment for breakouts/breakdowns
+        is_bullish = bull_score >= MIN_BREAKOUT_SCORE and has_bull_anchor and near_52w_high and (sma200 is None or last_price >= sma200)
+        is_bearish = bear_score >= MIN_BREAKOUT_SCORE and has_bear_anchor and near_52w_low and (sma200 is None or last_price <= sma200)
 
         if not is_bullish and not is_bearish:
             return None
@@ -2657,6 +2808,16 @@ def _analyze_breakout_setup(sym, df):
 
         reasons = f"[{' | '.join(tags)}]"
 
+        atr_series = compute_atr(df, 14)
+        atr_val = float(atr_series.iloc[-1]) if len(atr_series) > 0 else 0.05 * last_price
+        entry = last_price
+        if is_bullish:
+            sl = last_price - 2.0 * atr_val
+            pt = last_price + 4.0 * atr_val
+        else:
+            sl = last_price + 2.0 * atr_val
+            pt = last_price - 4.0 * atr_val
+
         return {
             "Ticker": sym,
             "Last Price": round(last_price, 2),
@@ -2675,7 +2836,10 @@ def _analyze_breakout_setup(sym, df):
             "SMA200_Dist": round(sma200_dist, 2),
             "Squeeze": bool(squeeze_on),
             "BB_Pct": round(bb_pct_b, 1),
-            "Patterns": " | ".join(detected_patterns) if detected_patterns else "—"
+            "Patterns": " | ".join(detected_patterns) if detected_patterns else "—",
+            "Entry": round(entry, 2),
+            "Stop Loss": round(sl, 2),
+            "Profit Target": round(pt, 2)
         }
     except Exception as e:
         print(f"  Error analyzing breakout for {sym}: {e}")
@@ -2691,6 +2855,9 @@ def breakout_watchlist_scan(tickers, min_volume=2_000_000, min_price=10.0, exten
     _reset_progress()
     scan_progress["status"] = "running"
     start_time = time.time()
+
+    is_market_bullish = check_spy_regime()
+    earnings_map = get_upcoming_earnings_map(tickers)
 
     results = []
     total = len(tickers)
@@ -2711,6 +2878,8 @@ def breakout_watchlist_scan(tickers, min_volume=2_000_000, min_price=10.0, exten
     for i, (sym, df) in enumerate(stock_data.items()):
         _update_progress("analyzing", f"Analyzing {sym}...", i, len(stock_data), ticker=sym, found=len(results))
         try:
+            if is_earnings_imminent(sym, earnings_map):
+                continue
             today_date = df.index.date[-1]
             recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
             last_price = float(df['Close'].iloc[-1])
@@ -2722,7 +2891,7 @@ def breakout_watchlist_scan(tickers, min_volume=2_000_000, min_price=10.0, exten
 
             if recent_vol < min_volume or last_price < min_price:
                 continue
-            result = _analyze_breakout_setup(sym, df)
+            result = _analyze_breakout_setup(sym, df, is_market_bullish=is_market_bullish)
             if result:
                 results.append(result)
         except:
@@ -2749,6 +2918,8 @@ def breakout_full_market_scan(min_volume=2_000_000, min_price=10.0, extended_hou
     start_time = time.time()
 
     all_tickers = get_us_tickers()
+    is_market_bullish = check_spy_regime()
+    earnings_map = get_upcoming_earnings_map(all_tickers)
     if not all_tickers:
         scan_progress["status"] = "error"
         scan_progress["phase_label"] = "Failed to fetch ticker list"
@@ -2761,6 +2932,8 @@ def breakout_full_market_scan(min_volume=2_000_000, min_price=10.0, extended_hou
         try:
             if len(df) < 50:
                 return None
+            if is_earnings_imminent(sym, earnings_map):
+                return None
             today_date = df.index.date[-1]
             recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
             price = float(df['Close'].iloc[-1])
@@ -2771,7 +2944,7 @@ def breakout_full_market_scan(min_volume=2_000_000, min_price=10.0, extended_hou
                 return None
 
             if recent_vol >= min_volume and price >= min_price:
-                result = _analyze_breakout_setup(sym, df)
+                result = _analyze_breakout_setup(sym, df, is_market_bullish=is_market_bullish)
                 if result:
                     found_signals.append(sym)
                     return result
