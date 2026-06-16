@@ -306,7 +306,7 @@ def compute_atr(df, length=14):
     ], axis=1).max(axis=1)
     return tr.rolling(window=length).mean()
 
-def compute_bollinger_bands(series, length=20, num_std=2):
+def compute_bollinger_bands(series, length=20, num_std=3):
     """Returns (upper, middle, lower) Bollinger Bands."""
     middle = series.rolling(window=length).mean()
     std = series.rolling(window=length).std()
