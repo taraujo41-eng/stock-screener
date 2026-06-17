@@ -286,13 +286,13 @@ def scan_options_full_results():
         return jsonify({"ok": False, "error": "No scan results available"}), 404
     return jsonify(results)
 
-# ── API: Breakout/Breakdown Scans (async) ──────────────────────────
+# ── API: Bollinger Band Scans (async) ──────────────────────────
 
-BREAKOUT_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_breakout_scan.json")
+BOLLINGER_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_bollinger_scan.json")
 
-@app.route("/api/scan/breakout", methods=["POST"])
-def scan_breakout():
-    """Start a breakout/breakdown watchlist scan."""
+@app.route("/api/scan/bollinger", methods=["POST"])
+def scan_bollinger():
+    """Start a bollinger watchlist scan."""
     global _scan_running
     if _scan_running:
         return jsonify({"ok": False, "error": "A scan is already running"}), 409
@@ -304,41 +304,41 @@ def scan_breakout():
         global _scan_running
         _scan_running = True
         try:
-            from reversal_scanner import breakout_watchlist_scan
+            from reversal_scanner import bollinger_watchlist_scan
             et_tz = pytz.timezone("America/New_York")
-            df = breakout_watchlist_scan(user_watchlist, extended_hours=extended_hours)
-            app.config["LAST_BREAKOUT_RESULTS"] = {
+            df = bollinger_watchlist_scan(user_watchlist, extended_hours=extended_hours)
+            app.config["LAST_BOLLINGER_RESULTS"] = {
                 "ok": True,
-                "mode": "breakout_watchlist",
+                "mode": "bollinger_watchlist",
                 "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
                 "count": len(df) if not df.empty else 0,
                 "tickers_scanned": len(user_watchlist),
                 "results": df.to_dict(orient="records") if not df.empty else [],
             }
         except Exception as e:
-            app.config["LAST_BREAKOUT_RESULTS"] = {"ok": False, "error": str(e)}
+            app.config["LAST_BOLLINGER_RESULTS"] = {"ok": False, "error": str(e)}
             scan_progress["status"] = "error"
             scan_progress["phase_label"] = str(e)
         finally:
             _scan_running = False
 
     threading.Thread(target=_run, daemon=True).start()
-    return jsonify({"ok": True, "message": "Breakout watchlist scan started"})
+    return jsonify({"ok": True, "message": "Bollinger watchlist scan started"})
 
-@app.route("/api/scan/breakout/results", methods=["GET"])
-def scan_breakout_results():
-    results = app.config.get("LAST_BREAKOUT_RESULTS")
+@app.route("/api/scan/bollinger/results", methods=["GET"])
+def scan_bollinger_results():
+    results = app.config.get("LAST_BOLLINGER_RESULTS")
     if results is None:
-        results = load_last_scan(BREAKOUT_RESULTS_FILE)
+        results = load_last_scan(BOLLINGER_RESULTS_FILE)
         if results:
-            app.config["LAST_BREAKOUT_RESULTS"] = results
+            app.config["LAST_BOLLINGER_RESULTS"] = results
     if results is None:
         return jsonify({"ok": False, "error": "No scan results available"}), 404
     return jsonify(results)
 
-@app.route("/api/scan/breakout/full", methods=["POST"])
-def scan_breakout_full():
-    """Start a full market breakout/breakdown scan."""
+@app.route("/api/scan/bollinger/full", methods=["POST"])
+def scan_bollinger_full():
+    """Start a full market bollinger scan."""
     global _scan_running
     if _scan_running:
         return jsonify({"ok": False, "error": "A scan is already running"}), 409
@@ -350,27 +350,27 @@ def scan_breakout_full():
         global _scan_running
         _scan_running = True
         try:
-            from reversal_scanner import breakout_full_market_scan
+            from reversal_scanner import bollinger_full_market_scan
             et_tz = pytz.timezone("America/New_York")
-            df = breakout_full_market_scan(extended_hours=extended_hours)
+            df = bollinger_full_market_scan(extended_hours=extended_hours)
             results_data = {
                 "ok": True,
-                "mode": "breakout_full",
+                "mode": "bollinger_full",
                 "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
                 "count": len(df) if not df.empty else 0,
                 "results": df.to_dict(orient="records") if not df.empty else [],
             }
-            app.config["LAST_BREAKOUT_RESULTS"] = results_data
-            save_last_scan(results_data, BREAKOUT_RESULTS_FILE)
+            app.config["LAST_BOLLINGER_RESULTS"] = results_data
+            save_last_scan(results_data, BOLLINGER_RESULTS_FILE)
         except Exception as e:
-            app.config["LAST_BREAKOUT_RESULTS"] = {"ok": False, "error": str(e)}
+            app.config["LAST_BOLLINGER_RESULTS"] = {"ok": False, "error": str(e)}
             scan_progress["status"] = "error"
             scan_progress["phase_label"] = str(e)
         finally:
             _scan_running = False
 
     threading.Thread(target=_run, daemon=True).start()
-    return jsonify({"ok": True, "message": "Full breakout scan started"})
+    return jsonify({"ok": True, "message": "Full bollinger scan started"})
 
 # ── API: Watchlist CRUD ─────────────────────────────────────────────
 

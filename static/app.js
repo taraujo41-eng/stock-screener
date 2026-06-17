@@ -38,8 +38,8 @@ function updateModeDesc() {
     desc.textContent = "Scans for high-probability options setups — takes 2-3 minutes";
   } else if (scanMode === "watchlist") {
     desc.textContent = "Scans your custom watchlist for reversals — very fast";
-  } else if (scanMode === "breakout") {
-    desc.textContent = "Scans for breakout/breakdown & gap setups — squeeze, consolidation, volume surge";
+  } else if (scanMode === "bollinger") {
+    desc.textContent = "Scans for stocks hitting/crossing the upper or lower Bollinger Bands (20 period, 3 std dev)";
   }
 }
 
@@ -132,12 +132,12 @@ async function setMode(mode, btn) {
       </div>
     `;
     hideAuxUI();
-  } else if (mode === "breakout") {
+  } else if (mode === "bollinger") {
     toggleEditButton(false);
-    scanBtn.querySelector(".scan-btn__text").textContent = "🔺  Scan Breakouts";
+    scanBtn.querySelector(".scan-btn__text").textContent = "🔵  Scan Bollinger Bands";
     try {
       showSkeleton();
-      const res = await fetch("/api/scan/breakout/results");
+      const res = await fetch("/api/scan/bollinger/results");
       if (res.ok) {
         const data = await res.json();
         if (data.ok && data.results) {
@@ -147,14 +147,14 @@ async function setMode(mode, btn) {
         }
       }
     } catch (e) {
-      console.error("No saved breakout scan available yet");
+      console.error("No saved bollinger scan available yet");
     }
 
     document.getElementById("results").innerHTML = `
       <div class="empty-state">
-        <div class="empty-state__icon">🔺</div>
+        <div class="empty-state__icon">🔵</div>
         <div class="empty-state__title">Ready to scan</div>
-        <div class="empty-state__text">Click above to find breakout/breakdown &amp; gap setups<br>Squeeze · Consolidation · Volume Surge · MA Alignment</div>
+        <div class="empty-state__text">Click above to scan for stocks hitting the upper or lower Bollinger Band</div>
       </div>
     `;
     hideAuxUI();
@@ -759,9 +759,9 @@ async function runScan() {
   } else if (scanMode === "watchlist") {
     endpoint = "/api/scan";
     resultsEndpoint = "/api/scan/results";
-  } else if (scanMode === "breakout") {
-    endpoint = "/api/scan/breakout/full";
-    resultsEndpoint = "/api/scan/breakout/results";
+  } else if (scanMode === "bollinger") {
+    endpoint = "/api/scan/bollinger/full";
+    resultsEndpoint = "/api/scan/bollinger/results";
   } else {
     endpoint = "/api/scan/full";
     resultsEndpoint = "/api/scan/full/results";
