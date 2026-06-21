@@ -221,11 +221,37 @@ def precalculate_daily_bands(tickers):
             
     logger.info(f"Successfully pre-calculated daily bands for {len(_daily_bands_map)} tickers.")
 
+def is_market_hours():
+    """Returns True if current time is within regular market hours (9:30 AM to 4:15 PM EST, Mon-Fri)."""
+    try:
+        ny_tz = pytz.timezone("America/New_York")
+        now = datetime.now(ny_tz)
+        
+        # Weekends (Saturday=5, Sunday=6)
+        if now.weekday() >= 5:
+            return False
+            
+        # Convert to minutes since midnight
+        current_minutes = now.hour * 60 + now.minute
+        
+        start_minutes = 9 * 60 + 30   # 9:30 AM
+        end_minutes = 16 * 60 + 15    # 4:15 PM (15m buffer after close)
+        
+        return start_minutes <= current_minutes <= end_minutes
+    except Exception as e:
+        logger.error(f"Error checking market hours: {e}")
+        return True  # Default to True on exception to ensure we don't block bot permanently
+
 def bot_loop():
     logger.info("Starting background 3-Sigma alert bot loop...")
     
     while True:
         try:
+            if not is_market_hours():
+                logger.info("Market is closed (weekends or outside 9:30 AM - 4:15 PM EST). Bot sleeping for 5 minutes...")
+                time.sleep(300)
+                continue
+                
             logger.info("--- Starting 3-Sigma Reversal Bot Cycle ---")
             
             # 1. Determine tickers to scan
