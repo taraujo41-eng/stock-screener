@@ -23,6 +23,13 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0  # No browser caching of static files
 CORS(app)
 
+# ── Start 3-Sigma Background Alerting Bot ──────────────────────────────
+try:
+    from indicator_bot import start_bot_thread
+    start_bot_thread()
+except Exception as e:
+    print(f"Error starting background indicator bot: {e}")
+
 # ── Watchlist & Scan Persistence ───────────────────────────────────────
 
 WATCHLIST_FILE = os.path.join(os.path.dirname(__file__), "watchlist.json")

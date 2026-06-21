@@ -12,3 +12,5 @@ webull_credentials.json
 webull_data_sdk.log
 last_orb_scan.json
 conf/
+3sigma_bot.log
+last_bollinger_scan.json
