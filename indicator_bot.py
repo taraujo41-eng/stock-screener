@@ -32,6 +32,8 @@ if not logger.handlers:
 
 # Global map to store pre-calculated daily bands: {ticker: (upper_bb_daily, lower_bb_daily)}
 _daily_bands_map = {}
+# Global state to keep track of sent alerts: {ticker: last_alerted_candle_timestamp}
+_last_alerts_sent = {}
 
 def send_sms_notification(message):
     """Sends a text message alert using Yahoo SMTP and mobile carrier SMS gateway."""
@@ -153,14 +155,16 @@ def evaluate_ticker_process(ticker, df):
             'action': 'BUY',
             'type': 'bullish',
             'price': close_price,
-            'vwap': vwap_target
+            'vwap': vwap_target,
+            'time': df_ind.index[-1]
         }
     elif short_trigger:
         return {
             'action': 'SELL',
             'type': 'bearish',
             'price': close_price,
-            'vwap': vwap_target
+            'vwap': vwap_target,
+            'time': df_ind.index[-1]
         }
     return None
 
@@ -274,6 +278,10 @@ def bot_loop():
             triggered_count = 0
             for ticker, res in results.items():
                 if res:
+                    candle_time = res.get('time')
+                    if candle_time and _last_alerts_sent.get(ticker) == candle_time:
+                        continue
+                        
                     trigger_alerts(
                         ticker=ticker,
                         action=res['action'],
@@ -281,6 +289,8 @@ def bot_loop():
                         last_price=res['price'],
                         vwap_target=res['vwap']
                     )
+                    if candle_time:
+                        _last_alerts_sent[ticker] = candle_time
                     triggered_count += 1
                     
             logger.info(f"--- 3-Sigma Bot Cycle Complete. Triggers found: {triggered_count}. Sleeping for {scan_interval}s ---")
