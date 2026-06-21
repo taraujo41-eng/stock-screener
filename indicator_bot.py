@@ -4,6 +4,7 @@ import time
 import logging
 import smtplib
 import threading
+import pytz
 from email.mime.text import MIMEText
 from datetime import datetime
 
@@ -28,6 +29,9 @@ if not logger.handlers:
     console = logging.StreamHandler(sys.stdout)
     console.setFormatter(formatter)
     logger.addHandler(console)
+
+# Global map to store pre-calculated daily bands: {ticker: (upper_bb_daily, lower_bb_daily)}
+_daily_bands_map = {}
 
 def send_sms_notification(message):
     """Sends a text message alert using Yahoo SMTP and mobile carrier SMS gateway."""
@@ -103,9 +107,19 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target):
 
 def evaluate_ticker_process(ticker, df):
     """
-    Called in parallel background threads to evaluate the dataframe.
-    Returns trigger dict if signal found, else None.
+    Called in parallel background threads to evaluate the 15m dataframe against Daily Bollinger Bands.
     """
+    global _daily_bands_map
+    
+    daily_upper_bb = None
+    daily_lower_bb = None
+    
+    if ticker in _daily_bands_map:
+        daily_upper_bb, daily_lower_bb = _daily_bands_map[ticker]
+    else:
+        # Fallback if no daily bands pre-calculated
+        return None
+        
     bb_length = int(os.getenv("BB_LENGTH", "20"))
     bb_mult = float(os.getenv("BB_MULT", "3.0"))
     rsi_length = int(os.getenv("RSI_LENGTH", "14"))
@@ -114,13 +128,15 @@ def evaluate_ticker_process(ticker, df):
     if len(df) < max(bb_length, rsi_length) + lookback + 5:
         return None
         
-    # Compute 3-Sigma indicators
+    # Compute 3-Sigma indicators using pre-calculated daily bands
     df_ind = calculate_3_sigma_divergence(
         df,
         bb_length=bb_length,
         bb_mult=bb_mult,
         rsi_length=rsi_length,
-        lookback=lookback
+        lookback=lookback,
+        daily_upper_bb=daily_upper_bb,
+        daily_lower_bb=daily_lower_bb
     )
     
     # Inspect latest state
@@ -129,6 +145,8 @@ def evaluate_ticker_process(ticker, df):
     short_trigger = last_row['short_trigger']
     close_price = last_row['Close']
     vwap_target = last_row['vwap']
+    
+    logger.info(f"[{ticker} 15m] Price: {close_price:.2f} | RSI: {last_row['rsi']:.1f} | Daily BB: [{daily_lower_bb:.2f} - {daily_upper_bb:.2f}] | Trigger: {'LONG' if long_trigger else 'SHORT' if short_trigger else 'None'}")
     
     if long_trigger:
         return {
@@ -145,6 +163,59 @@ def evaluate_ticker_process(ticker, df):
             'vwap': vwap_target
         }
     return None
+
+def precalculate_daily_bands(tickers):
+    """
+    Fetches daily candles for all tickers in parallel and calculates their daily BB bands.
+    Stores results in the global _daily_bands_map.
+    """
+    global _daily_bands_map
+    _daily_bands_map.clear()
+    
+    bb_length = int(os.getenv("BB_LENGTH", "20"))
+    bb_mult = float(os.getenv("BB_MULT", "3.0"))
+    
+    logger.info(f"Pre-calculating daily Bollinger Bands for {len(tickers)} tickers...")
+    
+    # Fetch 1d candles (45 days is enough for 20 BB)
+    daily_dfs = fetch_batch_concurrent(
+        tickers=tickers,
+        days=45,
+        max_workers=25,
+        interval="1d",
+        includePrePost="false",
+        skip_webull=False
+    )
+    
+    ny_tz = pytz.timezone("America/New_York")
+    today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
+    
+    for ticker, df in daily_dfs.items():
+        if df is None or len(df) < bb_length:
+            continue
+        try:
+            # Calculate Bollinger Bands on Daily Close
+            middle = df['Close'].rolling(window=bb_length).mean()
+            std = df['Close'].rolling(window=bb_length).std()
+            upper = middle + bb_mult * std
+            lower = middle - bb_mult * std
+            
+            # Check if last row is today (still forming)
+            last_idx = df.index[-1]
+            last_date_str = last_idx.strftime("%Y-%m-%d")
+            
+            if last_date_str == today_str and len(df) > 1:
+                u_val = upper.iloc[-2]
+                l_val = lower.iloc[-2]
+            else:
+                u_val = upper.iloc[-1]
+                l_val = lower.iloc[-1]
+                
+            _daily_bands_map[ticker] = (float(u_val), float(l_val))
+        except Exception as e:
+            logger.error(f"Error calculating daily bands for {ticker}: {e}")
+            
+    logger.info(f"Successfully pre-calculated daily bands for {len(_daily_bands_map)} tickers.")
 
 def bot_loop():
     logger.info("Starting background 3-Sigma alert bot loop...")
@@ -180,20 +251,26 @@ def bot_loop():
             candle_interval = os.getenv("CANDLE_INTERVAL_3SIGMA", "15m")
             scan_interval = int(os.getenv("SCAN_INTERVAL_3SIGMA", "60"))
             
-            logger.info(f"Scanning {len(tickers)} tickers in parallel (interval={candle_interval})...")
+            # For 3-Sigma Daily Close + 15m strategy, force candle_interval to 15m
+            candle_interval = "15m"
             
-            # 2. Download and compute in parallel (sufficient for BB 20 + RSI 14 + lookback 15)
+            # 2. Pre-calculate daily bands
+            precalculate_daily_bands(tickers)
+            
+            logger.info(f"Scanning {len(tickers)} tickers in parallel (15m regular market hours)...")
+            
+            # 3. Download and compute 15m in parallel
             results = fetch_batch_concurrent(
                 tickers=tickers,
                 days=15,
                 max_workers=25,
                 interval=candle_interval,
-                includePrePost="false",
+                includePrePost="false",  # Regular market hours only
                 process_fn=evaluate_ticker_process,
                 skip_webull=False
             )
             
-            # 3. Process matches in main thread
+            # 4. Process matches in main thread
             triggered_count = 0
             for ticker, res in results.items():
                 if res:

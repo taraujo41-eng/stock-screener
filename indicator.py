@@ -38,8 +38,11 @@ def pandas_valuewhen(condition, source, occurrence=1):
     shifted = source_true.shift(occurrence).reindex(condition.index)
     return shifted.ffill()
 
-def calculate_3_sigma_divergence(df, bb_length=20, bb_mult=3.0, rsi_length=14, lookback=15):
-    """Executes Mind In Money Reversal Pro indicator logic on the input DataFrame."""
+def calculate_3_sigma_divergence(df, bb_length=20, bb_mult=3.0, rsi_length=14, lookback=15, daily_upper_bb=None, daily_lower_bb=None):
+    """
+    Executes Mind In Money Reversal Pro indicator logic on the input DataFrame.
+    If daily_upper_bb and daily_lower_bb are passed, it checks 15m prices against these daily bands.
+    """
     if len(df) < max(bb_length, rsi_length) + lookback + 5:
         df_res = df.copy()
         df_res['upper_bb'] = np.nan
@@ -52,10 +55,20 @@ def calculate_3_sigma_divergence(df, bb_length=20, bb_mult=3.0, rsi_length=14, l
         return df_res
 
     df_res = df.copy()
-    upper_bb, middle_bb, lower_bb = compute_bollinger_bands(df_res['Close'], bb_length, bb_mult)
-    df_res['upper_bb'] = upper_bb
-    df_res['middle_bb'] = middle_bb
-    df_res['lower_bb'] = lower_bb
+    
+    if daily_upper_bb is not None and daily_lower_bb is not None:
+        upper_bb = daily_upper_bb
+        lower_bb = daily_lower_bb
+        middle_bb = (daily_upper_bb + daily_lower_bb) / 2
+        df_res['upper_bb'] = upper_bb
+        df_res['lower_bb'] = lower_bb
+        df_res['middle_bb'] = middle_bb
+    else:
+        upper_bb, middle_bb, lower_bb = compute_bollinger_bands(df_res['Close'], bb_length, bb_mult)
+        df_res['upper_bb'] = upper_bb
+        df_res['middle_bb'] = middle_bb
+        df_res['lower_bb'] = lower_bb
+        
     df_res['vwap'] = compute_vwap(df_res)
     df_res['rsi'] = compute_rsi(df_res['Close'], rsi_length)
     
