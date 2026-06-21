@@ -11,7 +11,7 @@ from datetime import datetime
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from indicator import calculate_3_sigma_divergence
-from data_fetcher import fetch_one
+from data_fetcher import fetch_batch_concurrent
 
 # Set up local log file
 logger = logging.getLogger("3sigma_bot")
@@ -101,20 +101,18 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target):
         )
         send_telegram_notification(tg_msg)
 
-def evaluate_ticker(ticker):
-    candle_interval = os.getenv("CANDLE_INTERVAL_3SIGMA", "5m")
+def evaluate_ticker_process(ticker, df):
+    """
+    Called in parallel background threads to evaluate the dataframe.
+    Returns trigger dict if signal found, else None.
+    """
     bb_length = int(os.getenv("BB_LENGTH", "20"))
     bb_mult = float(os.getenv("BB_MULT", "3.0"))
     rsi_length = int(os.getenv("RSI_LENGTH", "14"))
     lookback = int(os.getenv("LOOKBACK", "15"))
     
-    # Fetch candles (Leverage data_fetcher)
-    df = fetch_one(ticker, days=15, interval=candle_interval)
-    if df is None or df.empty:
-        return
-        
     if len(df) < max(bb_length, rsi_length) + lookback + 5:
-        return
+        return None
         
     # Compute 3-Sigma indicators
     df_ind = calculate_3_sigma_divergence(
@@ -132,40 +130,85 @@ def evaluate_ticker(ticker):
     close_price = last_row['Close']
     vwap_target = last_row['vwap']
     
-    logger.info(f"[{ticker} {candle_interval}] Price: {close_price:.2f} | RSI: {last_row['rsi']:.1f} | Trigger: {'LONG' if long_trigger else 'SHORT' if short_trigger else 'None'}")
-    
     if long_trigger:
-        trigger_alerts(ticker, "BUY", "bullish", close_price, vwap_target)
+        return {
+            'action': 'BUY',
+            'type': 'bullish',
+            'price': close_price,
+            'vwap': vwap_target
+        }
     elif short_trigger:
-        trigger_alerts(ticker, "SELL", "bearish", close_price, vwap_target)
+        return {
+            'action': 'SELL',
+            'type': 'bearish',
+            'price': close_price,
+            'vwap': vwap_target
+        }
+    return None
 
 def bot_loop():
     logger.info("Starting background 3-Sigma alert bot loop...")
-    
-    # Load tickers from config
-    tickers_str = os.getenv("TICKERS_3SIGMA", "AAPL,MSFT,NVDA,SPY,QQQ")
-    tickers = [t.strip().upper() for t in tickers_str.split(",") if t.strip()]
-    
-    scan_interval = int(os.getenv("SCAN_INTERVAL_3SIGMA", "60"))
     
     while True:
         try:
             logger.info("--- Starting 3-Sigma Reversal Bot Cycle ---")
             
-            # Reload settings in case they change on the server .env
-            tickers_str = os.getenv("TICKERS_3SIGMA", "AAPL,MSFT,NVDA,SPY,QQQ")
-            tickers = [t.strip().upper() for t in tickers_str.split(",") if t.strip()]
+            # 1. Determine tickers to scan
+            tickers_mode = os.getenv("TICKERS_3SIGMA", "ALL").upper().strip()
+            
+            tickers = []
+            if tickers_mode == "ALL":
+                try:
+                    from reversal_scanner import get_us_tickers
+                    tickers = get_us_tickers()
+                except Exception as e:
+                    logger.error(f"Failed to load full US tickers list: {e}")
+            elif tickers_mode == "WATCHLIST":
+                try:
+                    from app import user_watchlist
+                    tickers = list(user_watchlist)
+                except Exception as e:
+                    logger.warning(f"Could not load dynamic user_watchlist: {e}")
+            
+            # Fallback if watchlist/all fails or custom comma-separated list
+            if not tickers:
+                tickers_str = os.getenv("TICKERS_3SIGMA", "AAPL,MSFT,NVDA,SPY,QQQ")
+                if tickers_str.upper() in ("ALL", "WATCHLIST"):
+                    tickers_str = "AAPL,MSFT,NVDA,SPY,QQQ"
+                tickers = [t.strip().upper() for t in tickers_str.split(",") if t.strip()]
+                
+            candle_interval = os.getenv("CANDLE_INTERVAL_3SIGMA", "15m")
             scan_interval = int(os.getenv("SCAN_INTERVAL_3SIGMA", "60"))
             
-            for ticker in tickers:
-                try:
-                    evaluate_ticker(ticker)
-                except Exception as e:
-                    logger.error(f"Error evaluating {ticker}: {e}")
-                time.sleep(1)
-                
-            logger.info(f"--- 3-Sigma Bot Cycle Complete. Sleeping for {scan_interval}s ---")
+            logger.info(f"Scanning {len(tickers)} tickers in parallel (interval={candle_interval})...")
+            
+            # 2. Download and compute in parallel (sufficient for BB 20 + RSI 14 + lookback 15)
+            results = fetch_batch_concurrent(
+                tickers=tickers,
+                days=15,
+                max_workers=25,
+                interval=candle_interval,
+                includePrePost="false",
+                process_fn=evaluate_ticker_process,
+                skip_webull=False
+            )
+            
+            # 3. Process matches in main thread
+            triggered_count = 0
+            for ticker, res in results.items():
+                if res:
+                    trigger_alerts(
+                        ticker=ticker,
+                        action=res['action'],
+                        signal_type=res['type'],
+                        last_price=res['price'],
+                        vwap_target=res['vwap']
+                    )
+                    triggered_count += 1
+                    
+            logger.info(f"--- 3-Sigma Bot Cycle Complete. Triggers found: {triggered_count}. Sleeping for {scan_interval}s ---")
             time.sleep(scan_interval)
+            
         except Exception as e:
             logger.error(f"General exception in bot_loop: {e}")
             time.sleep(60)
