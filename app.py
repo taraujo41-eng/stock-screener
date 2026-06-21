@@ -489,11 +489,19 @@ def scan_reset():
 @app.route("/api/test", methods=["GET"])
 def test_api():
     """Diagnostic endpoint: test if the data fetcher works on this server."""
-    from data_fetcher import test_connection
-    ticker = request.args.get("ticker", "AAPL")
-    diag = test_connection(ticker)
-    diag["server_time"] = datetime.now().isoformat()
-    return jsonify(diag)
+    try:
+        from data_fetcher import test_connection
+        ticker = request.args.get("ticker", "AAPL")
+        diag = test_connection(ticker)
+        diag["server_time"] = datetime.now().isoformat()
+        return jsonify(diag)
+    except Exception as e:
+        import traceback
+        return jsonify({
+            "ok": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
 
 # ── Start ────────────────────────────────────────────────────────────
 
