@@ -105,17 +105,8 @@ def calculate_3_sigma_divergence(df, bb_length=20, bb_mult=3.0, rsi_length=14, l
         (close_0 < close_1)
     )
     
-    lower_pierce = low_0 < lower_bb
-    recent_lower_pierce = pandas_barssince(lower_pierce.shift(1)) <= lookback
-    rsi_at_prev_low = pandas_valuewhen(lower_pierce, df_res['rsi'], 1)
-    bullish_divergence = df_res['rsi'] > rsi_at_prev_low
-    df_res['long_trigger'] = recent_lower_pierce & bullish_divergence & morning_star & (low_0 <= lower_bb * 1.01)
-    
-    upper_pierce = high_0 > upper_bb
-    recent_upper_pierce = pandas_barssince(upper_pierce.shift(1)) <= lookback
-    rsi_at_prev_high = pandas_valuewhen(upper_pierce, df_res['rsi'], 1)
-    bearish_divergence = df_res['rsi'] < rsi_at_prev_high
-    df_res['short_trigger'] = recent_upper_pierce & bearish_divergence & three_black_crows & (high_0 >= upper_bb * 0.99)
+    df_res['long_trigger'] = (close_0 <= lower_bb)
+    df_res['short_trigger'] = (close_0 >= upper_bb)
     
     df_res['long_trigger'] = df_res['long_trigger'].fillna(False).astype(bool)
     df_res['short_trigger'] = df_res['short_trigger'].fillna(False).astype(bool)
