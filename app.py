@@ -412,9 +412,11 @@ def scan_3sigma():
             app.config["LAST_3SIGMA_RESULTS"] = results_data
             save_last_scan(results_data, THREE_SIGMA_RESULTS_FILE)
         except Exception as e:
-            app.config["LAST_3SIGMA_RESULTS"] = {"ok": False, "error": str(e)}
+            import traceback
+            traceback.print_exc()
+            app.config["LAST_3SIGMA_RESULTS"] = {"ok": False, "error": str(e), "traceback": traceback.format_exc()}
             scan_progress["status"] = "error"
-            scan_progress["phase_label"] = str(e)
+            scan_progress["phase_label"] = traceback.format_exc()
         finally:
             _scan_running = False
 
