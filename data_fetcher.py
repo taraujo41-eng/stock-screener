@@ -64,13 +64,13 @@ def get_unofficial_client():
             credentials_file = os.path.join(token_path, "webull_credentials.json")
             
             # 1. Try to load cached token from environment variables (great for cloud environments like Render!)
-            env_access_token = os.getenv("WEBULL_ACCESS_TOKEN")
-            env_did = os.getenv("WEBULL_DID")
+            env_access_token = (os.getenv("WEBULL_ACCESS_TOKEN") or "").strip() or None
+            env_did = (os.getenv("WEBULL_DID") or "").strip() or None
             if env_access_token and env_did:
                 try:
                     wb._access_token = env_access_token
                     wb._did = env_did
-                    wb._refresh_token = os.getenv("WEBULL_REFRESH_TOKEN", "dummy_refresh_token_bypassed")
+                    wb._refresh_token = (os.getenv("WEBULL_REFRESH_TOKEN") or "dummy_refresh_token_bypassed").strip()
                     
                     # Ensure we set did.bin cache if running locally
                     try:
