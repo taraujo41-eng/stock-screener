@@ -74,8 +74,8 @@ def detect_news_catalyst(ticker, lookback_hours=48):
         if not articles:
             return False, None, None
             
-        import pytz
-        now = datetime.now(pytz.UTC)
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
         cutoff = now - timedelta(hours=lookback_hours)
         
         # High impact catalyst terms to search for
@@ -2738,9 +2738,12 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True):
         if len(df_15m) < 20 or len(df_daily) < 20:
             return None
 
-        # 1. Calculate Daily Bollinger Bands on Daily df
-        import pytz
-        ny_tz = pytz.timezone("America/New_York")
+        try:
+            from zoneinfo import ZoneInfo
+            ny_tz = ZoneInfo("America/New_York")
+        except Exception:
+            import pytz
+            ny_tz = pytz.timezone("America/New_York")
         today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
         
         middle_series = df_daily['Close'].rolling(window=20).mean()

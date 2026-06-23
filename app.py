@@ -19,6 +19,13 @@ import os
 import traceback
 import pytz
 
+def get_ny_timezone():
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo("America/New_York")
+    except Exception:
+        return pytz.timezone("America/New_York")
+
 app = Flask(__name__, static_folder="static", static_url_path="")
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0  # No browser caching of static files
 CORS(app)
@@ -100,7 +107,7 @@ def scan():
         global _scan_running
         _scan_running = True
         try:
-            et_tz = pytz.timezone("America/New_York")
+            et_tz = get_ny_timezone()
             df = reversal_scanner(user_watchlist, extended_hours=extended_hours)
             app.config["LAST_SCAN_RESULTS"] = {
                 "ok": True,
@@ -152,7 +159,7 @@ def scan_full():
         global _scan_running
         _scan_running = True
         try:
-            et_tz = pytz.timezone("America/New_York")
+            et_tz = get_ny_timezone()
             df = full_market_scan(extended_hours=extended_hours)
             results_data = {
                 "ok": True,
@@ -219,7 +226,7 @@ def scan_options():
         global _scan_running
         _scan_running = True
         try:
-            et_tz = pytz.timezone("America/New_York")
+            et_tz = get_ny_timezone()
             df = options_watchlist_scan(user_watchlist, extended_hours=extended_hours)
             app.config["LAST_OPTIONS_RESULTS"] = {
                 "ok": True,
@@ -260,7 +267,7 @@ def scan_options_full():
         global _scan_running
         _scan_running = True
         try:
-            et_tz = pytz.timezone("America/New_York")
+            et_tz = get_ny_timezone()
             df = options_full_market_scan(extended_hours=extended_hours)
             results_data = {
                 "ok": True,
@@ -312,7 +319,7 @@ def scan_bollinger():
         _scan_running = True
         try:
             from reversal_scanner import bollinger_watchlist_scan
-            et_tz = pytz.timezone("America/New_York")
+            et_tz = get_ny_timezone()
             df = bollinger_watchlist_scan(user_watchlist, extended_hours=extended_hours)
             app.config["LAST_BOLLINGER_RESULTS"] = {
                 "ok": True,
@@ -358,7 +365,7 @@ def scan_bollinger_full():
         _scan_running = True
         try:
             from reversal_scanner import bollinger_full_market_scan
-            et_tz = pytz.timezone("America/New_York")
+            et_tz = get_ny_timezone()
             df = bollinger_full_market_scan(extended_hours=extended_hours)
             results_data = {
                 "ok": True,
@@ -395,7 +402,7 @@ def scan_3sigma():
         _scan_running = True
         try:
             from reversal_scanner import three_sigma_watchlist_scan, get_us_tickers
-            et_tz = pytz.timezone("America/New_York")
+            et_tz = get_ny_timezone()
             
             # Combine watchlist + full market tickers
             full_market_tickers = get_us_tickers()
@@ -446,7 +453,7 @@ def scan_3sigma_full():
         _scan_running = True
         try:
             from reversal_scanner import three_sigma_full_market_scan
-            et_tz = pytz.timezone("America/New_York")
+            et_tz = get_ny_timezone()
             df = three_sigma_full_market_scan()
             results_data = {
                 "ok": True,

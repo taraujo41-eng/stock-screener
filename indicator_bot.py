@@ -5,6 +5,13 @@ import logging
 import smtplib
 import threading
 import pytz
+
+def get_ny_timezone():
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo("America/New_York")
+    except Exception:
+        return pytz.timezone("America/New_York")
 from email.mime.text import MIMEText
 from datetime import datetime
 
@@ -193,7 +200,7 @@ def precalculate_daily_bands(tickers):
         skip_webull=False
     )
     
-    ny_tz = pytz.timezone("America/New_York")
+    ny_tz = get_ny_timezone()
     today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
     
     for ticker, df in daily_dfs.items():
@@ -226,7 +233,7 @@ def precalculate_daily_bands(tickers):
 def is_market_hours():
     """Returns True if current time is within regular market hours (9:30 AM to 4:15 PM EST, Mon-Fri)."""
     try:
-        ny_tz = pytz.timezone("America/New_York")
+        ny_tz = get_ny_timezone()
         now = datetime.now(ny_tz)
         
         # Weekends (Saturday=5, Sunday=6)
