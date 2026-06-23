@@ -394,22 +394,12 @@ def scan_3sigma():
         global _scan_running
         _scan_running = True
         try:
-            from reversal_scanner import three_sigma_watchlist_scan
+            from reversal_scanner import three_sigma_watchlist_scan, get_us_tickers
             et_tz = pytz.timezone("America/New_York")
             
-            # Combine watchlist + top 100 liquid tickers
-            top_liquid = [
-                "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "BRK-B", "UNH", "JNJ",
-                "JPM", "XOM", "V", "PG", "AVGO", "COST", "AMD", "NFLX", "ADBE", "CRM",
-                "QCOM", "TXN", "INTC", "CSCO", "AMGN", "HON", "SBUX", "DIS", "HD", "NKE",
-                "MRK", "PEP", "KO", "PM", "PFE", "WMT", "BAC", "T", "VZ", "CAT",
-                "SPY", "QQQ", "IWM", "DIA", "GLD", "SLV", "USO", "UNG", "XLF", "XLK",
-                "ABBV", "ACN", "ADSK", "AIG", "ALL", "AMAT", "AMP", "AMT", "ANET", "ASML",
-                "AXP", "BA", "BABA", "BAC", "BDX", "BIIB", "BMY", "BSX", "C", "CAT",
-                "CHTR", "CI", "CL", "CMCSA", "COF", "COP", "CPRT", "CSGP", "CSX", "CTAS",
-                "CVS", "DE", "DFS", "DG", "DLTR", "DOW", "DHR", "EL", "EMR", "ENPH"
-            ]
-            combined = list(dict.fromkeys(user_watchlist + top_liquid))
+            # Combine watchlist + full market tickers
+            full_market_tickers = get_us_tickers()
+            combined = list(dict.fromkeys(user_watchlist + full_market_tickers))
             
             df = three_sigma_watchlist_scan(combined)
             results_data = {

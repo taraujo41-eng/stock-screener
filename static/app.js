@@ -41,7 +41,7 @@ function updateModeDesc() {
   } else if (scanMode === "bollinger") {
     desc.textContent = "Scans for stocks hitting/crossing the upper or lower Bollinger Bands (20 period, 3 std dev)";
   } else if (scanMode === "3sigma") {
-    desc.textContent = "Scans your watchlist for 15m regular hour Close piercing Daily 3-Sigma Bollinger Bands";
+    desc.textContent = "Scans full market list for 15m regular hour Close piercing Daily 3-Sigma Bollinger Bands";
   }
 }
 
@@ -161,7 +161,7 @@ async function setMode(mode, btn) {
     `;
     hideAuxUI();
   } else if (mode === "3sigma") {
-    toggleEditButton(true);
+    toggleEditButton(false);
     scanBtn.querySelector(".scan-btn__text").textContent = "🔔  Scan 3-Sigma Bot";
     try {
       showSkeleton();
@@ -182,7 +182,7 @@ async function setMode(mode, btn) {
       <div class="empty-state">
         <div class="empty-state__icon">🔔</div>
         <div class="empty-state__title">Ready to scan</div>
-        <div class="empty-state__text">Click above to scan your watchlist for 15m Close crossing Daily 3-Sigma Bollinger Bands</div>
+        <div class="empty-state__text">Click above to scan the full market list for 15m Close crossing Daily 3-Sigma Bollinger Bands</div>
       </div>
     `;
     hideAuxUI();

@@ -2954,19 +2954,7 @@ def three_sigma_watchlist_scan(tickers, extended_hours=False):
 
 def three_sigma_full_market_scan(extended_hours=False):
     """Scan top US liquid tickers for 3-Sigma setups."""
-    tickers = [
-        "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "BRK-B", "UNH", "JNJ",
-        "JPM", "XOM", "V", "PG", "AVGO", "COST", "AMD", "NFLX", "ADBE", "CRM",
-        "QCOM", "TXN", "INTC", "CSCO", "AMGN", "HON", "SBUX", "DIS", "HD", "NKE",
-        "MRK", "PEP", "KO", "PM", "PFE", "WMT", "BAC", "T", "VZ", "CAT",
-        "SPY", "QQQ", "IWM", "DIA", "GLD", "SLV", "USO", "UNG", "XLF", "XLK",
-        "ABBV", "ACN", "ADSK", "AIG", "ALL", "AMAT", "AMP", "AMT", "ANET", "ASML",
-        "AXP", "BA", "BABA", "BAC", "BDX", "BIIB", "BMY", "BSX", "C", "CAT",
-        "CHTR", "CI", "CL", "CMCSA", "COF", "COP", "CPRT", "CSGP", "CSX", "CTAS",
-        "CVS", "DE", "DFS", "DG", "DLTR", "DOW", "DHR", "EL", "EMR", "ENPH"
-    ]
-    # Clean duplicates
-    tickers = list(dict.fromkeys(tickers))
+    tickers = get_us_tickers()
     return three_sigma_watchlist_scan(tickers)
 
 
