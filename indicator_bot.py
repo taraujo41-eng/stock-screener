@@ -34,6 +34,8 @@ if not logger.handlers:
 _daily_bands_map = {}
 # Global state to keep track of sent alerts: {ticker: last_alerted_candle_timestamp}
 _last_alerts_sent = {}
+# Global state to keep track of last self-ping timestamp (Render keep-alive)
+_last_self_ping_time = 0
 
 def send_sms_notification(message):
     """Sends a text message alert using Yahoo SMTP and mobile carrier SMS gateway."""
@@ -251,6 +253,21 @@ def bot_loop():
                 logger.info("Market is closed (weekends or outside 9:30 AM - 4:15 PM EST). Bot sleeping for 5 minutes...")
                 time.sleep(300)
                 continue
+                
+            # Perform self-ping to keep Render container awake during market hours
+            global _last_self_ping_time
+            now_ts = time.time()
+            if now_ts - _last_self_ping_time >= 600:  # 10 minutes
+                _last_self_ping_time = now_ts
+                self_url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("SELF_PING_URL")
+                if self_url:
+                    try:
+                        import requests
+                        ping_url = f"{self_url.rstrip('/')}/api/ping"
+                        requests.get(ping_url, timeout=5)
+                        logger.info(f"Self-ping sent to keep Render container awake: {ping_url}")
+                    except Exception as e:
+                        logger.warning(f"Self-ping failed: {e}")
                 
             logger.info("--- Starting 3-Sigma Reversal Bot Cycle ---")
             

@@ -484,7 +484,15 @@ def scan_reset():
     _reset_progress()
     return jsonify({"ok": True, "message": "Scan status reset to idle"})
 
+# ── API: Ping Endpoint ──────────────────────────────────────────────
+
+@app.route("/api/ping", methods=["GET"])
+def ping():
+    """Lightweight health check endpoint to keep the server awake."""
+    return jsonify({"ok": True, "status": "active", "timestamp": datetime.now().isoformat()})
+
 # ── API: Diagnostics ────────────────────────────────────────────────
+
 
 @app.route("/api/test", methods=["GET"])
 def test_api():
