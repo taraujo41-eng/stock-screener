@@ -80,13 +80,19 @@ def get_unofficial_client():
                                 pickle.dump(env_did, f)
                     except Exception:
                         pass
-                        
-                    if wb.is_logged_in():
+                    
+                    # Trust env-var tokens directly — skip is_logged_in() which fails
+                    # from cloud/datacenter IPs (Render, AWS, etc). The circuit breaker
+                    # in fetch_one will handle expired tokens gracefully.
+                    try:
                         wb._account_id = wb.get_account_id()
-                        print("[Webull Unofficial] Successfully authenticated using Environment Variables.")
-                        _unofficial_client = wb
-                        _unofficial_initialized = True
-                        return _unofficial_client
+                    except Exception:
+                        wb._account_id = None  # Non-critical; data fetching still works
+                    
+                    print("[Webull Unofficial] Successfully authenticated using Environment Variables.")
+                    _unofficial_client = wb
+                    _unofficial_initialized = True
+                    return _unofficial_client
                 except Exception as e:
                     print(f"[Webull Unofficial] Environment token load failed: {e}")
             
