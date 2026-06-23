@@ -2726,10 +2726,253 @@ WATCHLIST = [
 ]
 
 # =====================================================================
+# 3-Sigma scanners (Manual Web-app trigger modes)
+# =====================================================================
+
+def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True):
+    """
+    Evaluates 15m regular-hours Close against Daily Bollinger Bands (20 SMA, 3.0 std dev).
+    Matches when the last 15m Close pierces the Daily Bollinger Bands.
+    """
+    try:
+        if len(df_15m) < 20 or len(df_daily) < 20:
+            return None
+
+        # 1. Calculate Daily Bollinger Bands on Daily df
+        import pytz
+        ny_tz = pytz.timezone("America/New_York")
+        today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
+        
+        middle_series = df_daily['Close'].rolling(window=20).mean()
+        std_series = df_daily['Close'].rolling(window=20).std()
+        upper_series = middle_series + 3.0 * std_series
+        lower_series = middle_series - 3.0 * std_series
+        
+        last_daily_date_str = df_daily.index[-1].strftime("%Y-%m-%d")
+        if last_daily_date_str == today_str and len(df_daily) > 1:
+            daily_upper = float(upper_series.iloc[-2])
+            daily_lower = float(lower_series.iloc[-2])
+        else:
+            daily_upper = float(upper_series.iloc[-1])
+            daily_lower = float(lower_series.iloc[-1])
+
+        # 2. Get last 15m row
+        curr = df_15m.iloc[-1]
+        last_price = float(curr['Close'])
+        
+        # 3. Check for touches/piercing
+        is_bullish = last_price <= daily_lower
+        is_bearish = last_price >= daily_upper
+        
+        if not is_bullish and not is_bearish:
+            return None
+
+        # 4. Standard indicators on 15m close
+        rsi_series = compute_rsi(df_15m['Close'], 14)
+        rsi_val = float(rsi_series.iloc[-1])
+        rvol = compute_rvol(df_15m)
+        adr_pct = compute_adr_pct(df_15m, 14)
+        
+        try:
+            squeeze_on, _, _ = detect_squeeze(df_15m)
+        except Exception:
+            squeeze_on = False
+
+        # Moving Averages distance on 15m
+        ema20_series = compute_ema(df_15m['Close'], 20)
+        ema20 = float(ema20_series.iloc[-1]) if len(ema20_series) > 0 else None
+        
+        sma50_series = compute_sma(df_15m['Close'], 50)
+        sma50 = float(sma50_series.iloc[-1]) if len(sma50_series) > 0 and not np.isnan(sma50_series.iloc[-1]) else None
+        
+        sma200_series = compute_sma(df_15m['Close'], 200)
+        sma200 = float(sma200_series.iloc[-1]) if len(sma200_series) > 0 and not np.isnan(sma200_series.iloc[-1]) else None
+        
+        ema20_dist = ((last_price - ema20) / ema20) * 100 if ema20 else 0.0
+        sma50_dist = ((last_price - sma50) / sma50) * 100 if sma50 else 0.0
+        sma200_dist = ((last_price - sma200) / sma200) * 100 if sma200 else 0.0
+
+        bb_pct_b = 50.0
+        if (daily_upper - daily_lower) != 0:
+            bb_pct_b = ((last_price - daily_lower) / (daily_upper - daily_lower)) * 100
+
+        # Constructing dynamic score & tags
+        score = 10
+        reasons_list = []
+        
+        if is_bullish:
+            reasons_list.append("Pierced Daily Lower BB")
+            if rsi_val <= 30:
+                score += 2
+                reasons_list.append(f"RSI Oversold ({rsi_val:.1f})")
+            if rvol > 1.5:
+                score += 2
+                reasons_list.append(f"High RVOL ({rvol:.1f}x)")
+            if squeeze_on:
+                score += 1
+                reasons_list.append("Squeeze Active")
+            if ema20_dist < -2.0:
+                score += 1
+                reasons_list.append("EMA Extension")
+        else:
+            reasons_list.append("Pierced Daily Upper BB")
+            if rsi_val >= 70:
+                score += 2
+                reasons_list.append(f"RSI Overbought ({rsi_val:.1f})")
+            if rvol > 1.5:
+                score += 2
+                reasons_list.append(f"High RVOL ({rvol:.1f}x)")
+            if squeeze_on:
+                score += 1
+                reasons_list.append("Squeeze Active")
+            if ema20_dist > 2.0:
+                score += 1
+                reasons_list.append("EMA Extension")
+
+        # Grade assignment
+        grade = "A+" if score >= 12 else "A"
+        reasons = " | ".join(reasons_list)
+
+        # 5. Options setups
+        opt_str = "—"
+        try:
+            opt_setup = find_best_option(sym, "bullish" if is_bullish else "bearish", last_price)
+            if opt_setup:
+                opt_str = f"{opt_setup['symbol']} (${opt_setup['mid_price']:.2f})"
+        except Exception:
+            pass
+
+        # 6. News details
+        news_details = None
+        try:
+            has_news, tag, details = detect_news_catalyst(sym)
+            if has_news and details:
+                news_details = details
+                # Add news tag to signals list
+                headline_pill = f"News: {details['title'][:35]}..."
+                reasons += f" | {headline_pill}"
+                score += 2
+        except Exception:
+            pass
+
+        # Calculate Stop Loss & Profit Target
+        atr_series = compute_atr(df_15m, 14)
+        atr_val = float(atr_series.iloc[-1]) if len(atr_series) > 0 else 0.05 * last_price
+        
+        entry = last_price
+        if is_bullish:
+            sl = last_price - 2.0 * atr_val
+            pt = last_price + 4.0 * atr_val
+        else:
+            sl = last_price + 2.0 * atr_val
+            pt = last_price - 4.0 * atr_val
+
+        return {
+            "Ticker": sym,
+            "Last Price": round(last_price, 2),
+            "Volume": int(curr['Volume']),
+            "RSI": round(rsi_val, 1),
+            "Score": score,
+            "Grade": grade,
+            "Bullish Signals": reasons if is_bullish else "—",
+            "Bearish Signals": reasons if is_bearish else "—",
+            "Suggested Option": opt_str,
+            "News Details": news_details,
+            "RVOL": round(rvol, 2) if rvol is not None else 0.0,
+            "ADR": round(adr_pct, 2) if adr_pct is not None else 0.0,
+            "EMA20_Dist": round(ema20_dist, 2),
+            "SMA50_Dist": round(sma50_dist, 2),
+            "SMA200_Dist": round(sma200_dist, 2),
+            "Squeeze": bool(squeeze_on),
+            "BB_Pct": round(bb_pct_b, 1),
+            "Patterns": "—",
+            "Entry": round(entry, 2),
+            "Stop Loss": round(sl, 2),
+            "Profit Target": round(pt, 2)
+        }
+    except Exception as e:
+        print(f"  Error analyzing 3-sigma for {sym}: {e}")
+    return None
+
+
+def three_sigma_watchlist_scan(tickers, extended_hours=False):
+    """Scan watchlist for 3-Sigma Daily Bands + 15m regular hours crossings."""
+    _reset_progress()
+    scan_progress["status"] = "running"
+    start_time = time.time()
+    
+    is_market_bullish = check_spy_regime()
+    
+    results = []
+    total = len(tickers)
+    _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
+    
+    # Pre-calculate daily data
+    # Fetch 45 days of 1d data for Bollinger Bands
+    daily_data = fetch_batch_concurrent(
+        tickers, days=45, max_workers=6,
+        delay=0.05, interval="1d", includePrePost="false"
+    )
+    
+    # Fetch 15 days of 15m regular hours data
+    def _on_dl_progress(i, tot, sym):
+        _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=len(results))
+        
+    _update_progress("downloading", f"Downloading 15m bars for {total} tickers...", 0, total)
+    stock_data = fetch_batch_concurrent(
+        tickers, days=15, max_workers=6,
+        on_progress=_on_dl_progress, delay=0.05, interval="15m", includePrePost="false"
+    )
+    
+    for i, (sym, df_15m) in enumerate(stock_data.items()):
+        _update_progress("analyzing", f"Analyzing {sym}...", i, len(stock_data), ticker=sym, found=len(results))
+        try:
+            df_daily = daily_data.get(sym)
+            if df_15m is None or df_daily is None or len(df_15m) < 20 or len(df_daily) < 20:
+                continue
+            
+            result = _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=is_market_bullish)
+            if result:
+                results.append(result)
+        except Exception as e:
+            print(f"Error processing 3-sigma for {sym}: {e}")
+            continue
+            
+    total_time = time.time() - start_time
+    scan_progress.update({
+        "status": "done", "phase": "complete",
+        "phase_label": f"Done — {len(results)} 3-sigma signals found",
+        "current": total, "total": total,
+        "found": len(results), "pct": 100, "eta_seconds": 0,
+    })
+    
+    print(f"[Done] 3-Sigma watchlist scan: {len(results)} signals in {total_time:.0f}s")
+    if not results:
+        return pd.DataFrame()
+    return pd.DataFrame(results).sort_values(by="Score", ascending=False).head(15)
+
+
+def three_sigma_full_market_scan(extended_hours=False):
+    """Scan top US liquid tickers for 3-Sigma setups."""
+    tickers = [
+        "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "BRK-B", "UNH", "JNJ",
+        "JPM", "XOM", "V", "PG", "AVGO", "COST", "AMD", "NFLX", "ADBE", "CRM",
+        "QCOM", "TXN", "INTC", "CSCO", "AMGN", "HON", "SBUX", "DIS", "HD", "NKE",
+        "MRK", "PEP", "KO", "PM", "PFE", "WMT", "BAC", "T", "VZ", "CAT",
+        "SPY", "QQQ", "IWM", "DIA", "GLD", "SLV", "USO", "UNG", "XLF", "XLK",
+        "ABBV", "ACN", "ADSK", "AIG", "ALL", "AMAT", "AMP", "AMT", "ANET", "ASML",
+        "AXP", "BA", "BABA", "BAC", "BDX", "BIIB", "BMY", "BSX", "C", "CAT",
+        "CHTR", "CI", "CL", "CMCSA", "COF", "COP", "CPRT", "CSGP", "CSX", "CTAS",
+        "CVS", "DE", "DFS", "DG", "DLTR", "DOW", "DHR", "EL", "EMR", "ENPH"
+    ]
+    # Clean duplicates
+    tickers = list(dict.fromkeys(tickers))
+    return three_sigma_watchlist_scan(tickers)
+
+
+# =====================================================================
 # CLI entry point
-# =====================================================================    return df
-
-
+# =====================================================================
 
 if __name__ == "__main__":
     import sys

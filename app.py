@@ -379,6 +379,87 @@ def scan_bollinger_full():
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"ok": True, "message": "Full bollinger scan started"})
 
+# ── API: 3-Sigma Scans (async) ──────────────────────────────────────
+
+THREE_SIGMA_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_3sigma_scan.json")
+
+@app.route("/api/scan/3sigma", methods=["POST"])
+def scan_3sigma():
+    """Start a watchlist 3-sigma scan in the background."""
+    global _scan_running
+    if _scan_running:
+        return jsonify({"ok": False, "error": "A scan is already running"}), 409
+
+    def _run():
+        global _scan_running
+        _scan_running = True
+        try:
+            from reversal_scanner import three_sigma_watchlist_scan
+            et_tz = pytz.timezone("America/New_York")
+            df = three_sigma_watchlist_scan(user_watchlist)
+            results_data = {
+                "ok": True,
+                "mode": "3sigma",
+                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
+                "count": len(df) if not df.empty else 0,
+                "results": df.to_dict(orient="records") if not df.empty else [],
+            }
+            app.config["LAST_3SIGMA_RESULTS"] = results_data
+            save_last_scan(results_data, THREE_SIGMA_RESULTS_FILE)
+        except Exception as e:
+            app.config["LAST_3SIGMA_RESULTS"] = {"ok": False, "error": str(e)}
+            scan_progress["status"] = "error"
+            scan_progress["phase_label"] = str(e)
+        finally:
+            _scan_running = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "3-Sigma scan started"})
+
+@app.route("/api/scan/3sigma/results", methods=["GET"])
+def scan_3sigma_results():
+    results = app.config.get("LAST_3SIGMA_RESULTS")
+    if results is None:
+        results = load_last_scan(THREE_SIGMA_RESULTS_FILE)
+        if results:
+            app.config["LAST_3SIGMA_RESULTS"] = results
+    if results is None:
+        return jsonify({"ok": False, "error": "No scan results available"}), 404
+    return jsonify(results)
+
+@app.route("/api/scan/3sigma/full", methods=["POST"])
+def scan_3sigma_full():
+    """Start a full market 3-sigma scan in the background."""
+    global _scan_running
+    if _scan_running:
+        return jsonify({"ok": False, "error": "A scan is already running"}), 409
+
+    def _run():
+        global _scan_running
+        _scan_running = True
+        try:
+            from reversal_scanner import three_sigma_full_market_scan
+            et_tz = pytz.timezone("America/New_York")
+            df = three_sigma_full_market_scan()
+            results_data = {
+                "ok": True,
+                "mode": "3sigma_full",
+                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
+                "count": len(df) if not df.empty else 0,
+                "results": df.to_dict(orient="records") if not df.empty else [],
+            }
+            app.config["LAST_3SIGMA_RESULTS"] = results_data
+            save_last_scan(results_data, THREE_SIGMA_RESULTS_FILE)
+        except Exception as e:
+            app.config["LAST_3SIGMA_RESULTS"] = {"ok": False, "error": str(e)}
+            scan_progress["status"] = "error"
+            scan_progress["phase_label"] = str(e)
+        finally:
+            _scan_running = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "Full 3-Sigma scan started"})
+
 # ── API: Watchlist CRUD ─────────────────────────────────────────────
 
 @app.route("/api/watchlist", methods=["GET"])

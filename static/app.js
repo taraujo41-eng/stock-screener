@@ -40,6 +40,8 @@ function updateModeDesc() {
     desc.textContent = "Scans your custom watchlist for reversals — very fast";
   } else if (scanMode === "bollinger") {
     desc.textContent = "Scans for stocks hitting/crossing the upper or lower Bollinger Bands (20 period, 3 std dev)";
+  } else if (scanMode === "3sigma") {
+    desc.textContent = "Scans your watchlist for 15m regular hour Close piercing Daily 3-Sigma Bollinger Bands";
   }
 }
 
@@ -155,6 +157,32 @@ async function setMode(mode, btn) {
         <div class="empty-state__icon">🔵</div>
         <div class="empty-state__title">Ready to scan</div>
         <div class="empty-state__text">Click above to scan for stocks hitting the upper or lower Bollinger Band</div>
+      </div>
+    `;
+    hideAuxUI();
+  } else if (mode === "3sigma") {
+    toggleEditButton(true);
+    scanBtn.querySelector(".scan-btn__text").textContent = "🔔  Scan 3-Sigma Bot";
+    try {
+      showSkeleton();
+      const res = await fetch("/api/scan/3sigma/results");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && data.results) {
+          displayResults(data);
+          updateModeDesc();
+          return;
+        }
+      }
+    } catch (e) {
+      console.error("No saved 3-sigma scan available yet");
+    }
+
+    document.getElementById("results").innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state__icon">🔔</div>
+        <div class="empty-state__title">Ready to scan</div>
+        <div class="empty-state__text">Click above to scan your watchlist for 15m Close crossing Daily 3-Sigma Bollinger Bands</div>
       </div>
     `;
     hideAuxUI();
@@ -762,6 +790,9 @@ async function runScan() {
   } else if (scanMode === "bollinger") {
     endpoint = "/api/scan/bollinger/full";
     resultsEndpoint = "/api/scan/bollinger/results";
+  } else if (scanMode === "3sigma") {
+    endpoint = "/api/scan/3sigma";
+    resultsEndpoint = "/api/scan/3sigma/results";
   } else {
     endpoint = "/api/scan/full";
     resultsEndpoint = "/api/scan/full/results";
