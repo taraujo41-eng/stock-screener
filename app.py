@@ -396,7 +396,22 @@ def scan_3sigma():
         try:
             from reversal_scanner import three_sigma_watchlist_scan
             et_tz = pytz.timezone("America/New_York")
-            df = three_sigma_watchlist_scan(user_watchlist)
+            
+            # Combine watchlist + top 100 liquid tickers
+            top_liquid = [
+                "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "TSLA", "BRK-B", "UNH", "JNJ",
+                "JPM", "XOM", "V", "PG", "AVGO", "COST", "AMD", "NFLX", "ADBE", "CRM",
+                "QCOM", "TXN", "INTC", "CSCO", "AMGN", "HON", "SBUX", "DIS", "HD", "NKE",
+                "MRK", "PEP", "KO", "PM", "PFE", "WMT", "BAC", "T", "VZ", "CAT",
+                "SPY", "QQQ", "IWM", "DIA", "GLD", "SLV", "USO", "UNG", "XLF", "XLK",
+                "ABBV", "ACN", "ADSK", "AIG", "ALL", "AMAT", "AMP", "AMT", "ANET", "ASML",
+                "AXP", "BA", "BABA", "BAC", "BDX", "BIIB", "BMY", "BSX", "C", "CAT",
+                "CHTR", "CI", "CL", "CMCSA", "COF", "COP", "CPRT", "CSGP", "CSX", "CTAS",
+                "CVS", "DE", "DFS", "DG", "DLTR", "DOW", "DHR", "EL", "EMR", "ENPH"
+            ]
+            combined = list(dict.fromkeys(user_watchlist + top_liquid))
+            
+            df = three_sigma_watchlist_scan(combined)
             results_data = {
                 "ok": True,
                 "mode": "3sigma",
