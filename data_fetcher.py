@@ -382,8 +382,11 @@ def _fetch_webull_unofficial_one(ticker, days=180, interval="1d", includePrePost
         extend = 1 if includePrePost == "true" else 0
         
         import requests
-        import pytz
         from datetime import datetime
+        try:
+            from zoneinfo import ZoneInfo as _ZI
+        except ImportError:
+            from backports.zoneinfo import ZoneInfo as _ZI
         
         tId = wb_un.get_ticker(ticker)
         timeStamp = int(time.time())
@@ -404,7 +407,7 @@ def _fetch_webull_unofficial_one(ticker, days=180, interval="1d", includePrePost
         if not result or not result[0].get('data'):
             return None
             
-        time_zone = pytz.timezone(result[0]['timeZone'])
+        time_zone = _ZI(result[0]['timeZone'])
         records = []
         for row in result[0]['data']:
             parts = row.split(',')
@@ -967,7 +970,7 @@ def fetch_news(ticker, limit=5):
     Returns standard list of dicts:
       [{"title": "...", "publisher": "...", "publish_time": datetime_object, "url": "..."}, ...]
     """
-    import pytz
+    from datetime import timezone as _tz
     
     # 1. Try Webull Unofficial
     wb_un = get_unofficial_client()
@@ -1008,11 +1011,11 @@ def fetch_news(ticker, limit=5):
                         try:
                             # Format: 2026-06-04T00:10:00.000+0000
                             base_dt = datetime.strptime(date_str[:19], "%Y-%m-%dT%H:%M:%S")
-                            publish_time = base_dt.replace(tzinfo=pytz.UTC)
+                            publish_time = base_dt.replace(tzinfo=_tz.utc)
                         except Exception:
-                            publish_time = datetime.now(pytz.UTC)
+                            publish_time = datetime.now(_tz.utc)
                     else:
-                        publish_time = datetime.now(pytz.UTC)
+                        publish_time = datetime.now(_tz.utc)
                     
                     normalized.append({
                         "title": title,
@@ -1072,9 +1075,9 @@ def fetch_news(ticker, limit=5):
                     
                 pub_ts = item.get("providerPublishTime")
                 if pub_ts:
-                    publish_time = datetime.fromtimestamp(int(pub_ts), pytz.UTC)
+                    publish_time = datetime.fromtimestamp(int(pub_ts), _tz.utc)
                 else:
-                    publish_time = datetime.now(pytz.UTC)
+                    publish_time = datetime.now(_tz.utc)
                 normalized.append({
                     "title": title,
                     "publisher": publisher,
