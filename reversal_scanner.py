@@ -43,7 +43,6 @@ scan_progress = {
     "eta_seconds": 0,
     "debug_log": [],
 }
-
 def _reset_progress():
     scan_progress.update({
         "status": "idle", "phase": "", "phase_label": "",
@@ -52,14 +51,17 @@ def _reset_progress():
         "debug_log": [],
     })
 
-def _update_progress(phase, label, current, total, ticker="", found=None):
+def _update_progress(phase, label, current, total, ticker="", found=None, pct=None):
     scan_progress["status"] = "running"
     scan_progress["phase"] = phase
     scan_progress["phase_label"] = label
     scan_progress["current"] = current
     scan_progress["total"] = total
     scan_progress["ticker"] = ticker
-    scan_progress["pct"] = int((current / total) * 100) if total else 0
+    if pct is not None:
+        scan_progress["pct"] = pct
+    else:
+        scan_progress["pct"] = int((current / total) * 100) if total else 0
     if found is not None:
         scan_progress["found"] = found
 
@@ -1195,7 +1197,14 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
 
         news_details = None
         # --- NEWS CATALYST ---
-        if bull_score >= 3 or bear_score >= 3:
+        # Only check news if the stock has a realistic chance of qualifying:
+        # e.g., technical score >= 4, or technical score >= 3 with a matching candle pattern.
+        # This prevents thousands of slow, rate-limited HTTP news calls for low-conviction setups.
+        needs_news_check = (
+            (bull_score >= 4 or (bull_score >= 3 and has_bull_pattern)) or
+            (bear_score >= 4 or (bear_score >= 3 and has_bear_pattern))
+        )
+        if needs_news_check:
             has_news, news_tag, news_item = detect_news_catalyst(sym)
             if has_news and news_tag:
                 news_details = news_item
@@ -1575,7 +1584,14 @@ def _analyze_options_setup(sym, df, iv_history):
 
         news_details = None
         # --- NEWS CATALYST ---
-        if bull_catalyst >= 3 or bear_catalyst >= 3:
+        has_bull_pattern = patterns['hammer'] or patterns['bull_engulf'] or patterns['bottoming_tail']
+        has_bear_pattern = patterns['star'] or patterns['bear_engulf'] or patterns['topping_tail']
+        
+        needs_news_check = (
+            (bull_catalyst >= 4 or (bull_catalyst >= 3 and has_bull_pattern)) or
+            (bear_catalyst >= 4 or (bear_catalyst >= 3 and has_bear_pattern))
+        )
+        if needs_news_check:
             has_news, news_tag, news_item = detect_news_catalyst(sym)
             if has_news and news_tag:
                 news_details = news_item
@@ -1586,10 +1602,10 @@ def _analyze_options_setup(sym, df, iv_history):
                     bear_catalyst += 2
                     bear_reasons.append(f"{news_tag} (+2)")
 
-        # Need at least score 4 on one side to proceed (raised from 3 to filter out B-grades)
+        # Need at least score 5 on one side to proceed (raised from 4 to filter for top-tier candidates)
         max_catalyst = max(bull_catalyst, bear_catalyst)
         print(f"  {sym}: Bull={bull_catalyst} Bear={bear_catalyst} RSI={rsi_val:.1f} Chg={day_chg_pct:.1f}%")
-        if max_catalyst < 4:
+        if max_catalyst < 5:
             return None
 
         # Determine dominant direction
@@ -2134,27 +2150,31 @@ def three_sigma_full_market_scan(extended_hours=False):
 
     results = []
     total = len(tickers)
-    _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
+    # Daily progress callback (0% - 40%)
+    def _on_daily_progress(i, tot, sym):
+        pct = int((i / tot) * 40)
+        _update_progress("downloading", f"Downloading daily candles... ({i}/{tot})", i, tot, ticker=sym, pct=pct)
 
-    # Pre-calculate daily data
-    # Fetch 45 days of 1d data for Bollinger Bands
+    _update_progress("downloading", "Initiating daily candle download...", 0, total, pct=0)
     daily_data = fetch_batch_concurrent(
         tickers, days=45, max_workers=6,
-        delay=0.05, interval="1d", includePrePost="false"
+        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
     )
 
-    # Fetch 15 days of 15m regular hours data
-    def _on_dl_progress(i, tot, sym):
-        _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=len(results))
+    # 15m progress callback (40% - 85%)
+    def _on_15m_progress(i, tot, sym):
+        pct = 40 + int((i / tot) * 45)
+        _update_progress("downloading", f"Downloading 15m bars... ({i}/{tot})", i, tot, ticker=sym, found=len(results), pct=pct)
 
-    _update_progress("downloading", f"Downloading 15m bars for {total} tickers...", 0, total)
+    _update_progress("downloading", "Initiating 15m bar download...", 0, total, pct=40)
     stock_data = fetch_batch_concurrent(
         tickers, days=15, max_workers=6,
-        on_progress=_on_dl_progress, delay=0.05, interval="15m", includePrePost="false"
+        on_progress=_on_15m_progress, delay=0.05, interval="15m", includePrePost="false"
     )
 
     for i, (sym, df_15m) in enumerate(stock_data.items()):
-        _update_progress("analyzing", f"Analyzing {sym}...", i, len(stock_data), ticker=sym, found=len(results))
+        pct = 85 + int((i / len(stock_data)) * 15) if len(stock_data) else 100
+        _update_progress("analyzing", f"Analyzing 3-Sigma for {sym}...", i, len(stock_data), ticker=sym, found=len(results), pct=pct)
         try:
             df_daily = daily_data.get(sym)
             if df_15m is None or df_daily is None or len(df_15m) < 20 or len(df_daily) < 20:
