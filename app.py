@@ -30,6 +30,15 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0  # No browser caching of static files
 CORS(app)
 
+@app.after_request
+def add_header(r):
+    """Disable caching for all dynamic API responses."""
+    if r.path.startswith("/api/"):
+        r.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, public, max-age=0"
+        r.headers["Pragma"] = "no-cache"
+        r.headers["Expires"] = "0"
+    return r
+
 # ── Start 3-Sigma Background Alerting Bot ──────────────────────────────
 try:
     from indicator_bot import start_bot_thread
@@ -78,15 +87,16 @@ def scan_full():
     """Start a full market reversal scan in the background."""
     global _scan_running
 
-    if _scan_running:
-        return jsonify({"ok": False, "error": "A scan is already running"}), 409
+    with _scan_lock:
+        if _scan_running:
+            return jsonify({"ok": False, "error": "A scan is already running"}), 409
+        _scan_running = True
 
     req_data = request.get_json(silent=True) or {}
     extended_hours = req_data.get("extended_hours", False)
 
     def _run():
         global _scan_running
-        _scan_running = True
         try:
             et_tz = get_ny_timezone()
             df = full_market_scan(extended_hours=extended_hours)
@@ -107,7 +117,8 @@ def scan_full():
             scan_progress["status"] = "error"
             scan_progress["phase_label"] = str(e)
         finally:
-            _scan_running = False
+            with _scan_lock:
+                _scan_running = False
 
     thread = threading.Thread(target=_run, daemon=True)
     thread.start()
@@ -145,15 +156,17 @@ def scan_full_results():
 def scan_options_full():
     """Start a full market options scan."""
     global _scan_running
-    if _scan_running:
-        return jsonify({"ok": False, "error": "A scan is already running"}), 409
+
+    with _scan_lock:
+        if _scan_running:
+            return jsonify({"ok": False, "error": "A scan is already running"}), 409
+        _scan_running = True
 
     req_data = request.get_json(silent=True) or {}
     extended_hours = req_data.get("extended_hours", False)
 
     def _run():
         global _scan_running
-        _scan_running = True
         try:
             et_tz = get_ny_timezone()
             df = options_full_market_scan(extended_hours=extended_hours)
@@ -171,7 +184,8 @@ def scan_options_full():
             scan_progress["status"] = "error"
             scan_progress["phase_label"] = str(e)
         finally:
-            _scan_running = False
+            with _scan_lock:
+                _scan_running = False
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"ok": True, "message": "Full options scan started"})
@@ -194,12 +208,14 @@ def scan_options_full_results():
 def scan_3sigma():
     """Start a full market 3-sigma scan in the background."""
     global _scan_running
-    if _scan_running:
-        return jsonify({"ok": False, "error": "A scan is already running"}), 409
+
+    with _scan_lock:
+        if _scan_running:
+            return jsonify({"ok": False, "error": "A scan is already running"}), 409
+        _scan_running = True
 
     def _run():
         global _scan_running
-        _scan_running = True
         try:
             et_tz = get_ny_timezone()
             df = three_sigma_full_market_scan()
@@ -219,7 +235,8 @@ def scan_3sigma():
             scan_progress["status"] = "error"
             scan_progress["phase_label"] = traceback.format_exc()
         finally:
-            _scan_running = False
+            with _scan_lock:
+                _scan_running = False
 
     threading.Thread(target=_run, daemon=True).start()
     return jsonify({"ok": True, "message": "3-Sigma scan started"})
@@ -241,7 +258,8 @@ def scan_3sigma_results():
 def scan_reset():
     """Reset the scan running status to idle."""
     global _scan_running
-    _scan_running = False
+    with _scan_lock:
+        _scan_running = False
     _reset_progress()
     return jsonify({"ok": True, "message": "Scan status reset to idle"})
 

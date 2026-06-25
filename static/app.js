@@ -650,7 +650,7 @@ function startProgressPolling(resultsEndpoint) {
 
   pollTimer = setInterval(async () => {
     try {
-      const res = await fetch("/api/scan/progress");
+      const res = await fetch(`/api/scan/progress?t=${Date.now()}`);
       const p = await res.json();
 
       document.getElementById("progressPhase").textContent = p.phase_label || "Working...";
