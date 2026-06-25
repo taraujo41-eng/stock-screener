@@ -288,14 +288,8 @@ def bot_loop():
                     tickers = get_us_tickers()
                 except Exception as e:
                     logger.error(f"Failed to load full US tickers list: {e}")
-            elif tickers_mode == "WATCHLIST":
-                try:
-                    from app import user_watchlist
-                    tickers = list(user_watchlist)
-                except Exception as e:
-                    logger.warning(f"Could not load dynamic user_watchlist: {e}")
             
-            # Fallback if watchlist/all fails or custom comma-separated list
+            # Fallback if all fails or custom comma-separated list
             if not tickers:
                 tickers_str = os.getenv("TICKERS_3SIGMA", "AAPL,MSFT,NVDA,SPY,QQQ")
                 if tickers_str.upper() in ("ALL", "WATCHLIST"):

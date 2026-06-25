@@ -3,8 +3,9 @@ Stock Reversal Scanner — Full Market Edition
 Scans the entire US stock market for bullish/bearish reversal setups.
 
 Modes:
-  • Watchlist scan  — fast, scans a custom list
-  • Full market scan — fetches all US tickers, pre-filters, then analyzes
+  • Full market scan — fetches all US tickers (S&P 500 + NASDAQ 100 + ETFs + watchlist), pre-filters, then analyzes
+  • Options scan    — full market options setup scanner
+  • 3-Sigma Bot     — 15m regular-hours Close vs Daily 3-Sigma Bollinger Bands
 
 Data source: Yahoo Finance chart API via data_fetcher.py
 (works on cloud servers — no yfinance library dependency)
@@ -175,6 +176,22 @@ def get_us_tickers():
     print(f"  Source 3 (Major ETFs): added {added_etfs} unique ETFs (Total list: {len(etfs)})")
     if "SPY" in tickers: print("  ✓ Verified: SPY is in the scan list")
     if "QQQ" in tickers: print("  ✓ Verified: QQQ is in the scan list")
+
+    # ── Source 4: User Watchlist ──
+    watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
+    if os.path.exists(watchlist_file):
+        try:
+            with open(watchlist_file, "r") as f:
+                wl = json.load(f)
+            added_wl = 0
+            for sym in wl:
+                clean = str(sym).strip().upper()
+                if clean and clean not in tickers:
+                    tickers.add(clean)
+                    added_wl += 1
+            print(f"  Source 4 (Watchlist): +{added_wl} unique tickers")
+        except Exception as e:
+            print(f"  Source 4 (Watchlist): failed ({e})")
 
     # Remove known non-equity / test symbols
     exclude = {"TRUE", "NONE", "NULL", "CTEST", "NTEST", "ZTEST"}
@@ -1281,112 +1298,9 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
 
 
 # =====================================================================
-# Watchlist scanner  (original, fast)
-# =====================================================================
-
-def reversal_scanner(tickers, min_volume=500_000, min_price=5.0,
-                     rsi_bull_thresh=35, rsi_bear_thresh=65,
-                     swing_tolerance=0.05, extended_hours=False):
-    """Scan a watchlist using direct Yahoo Finance API (cloud-safe)."""
-    _reset_progress()
-    scan_progress["status"] = "running"
-    start_time = time.time()
-    log = scan_progress["debug_log"]
-
-    is_market_bullish = check_spy_regime()
-    earnings_map = get_upcoming_earnings_map(tickers)
-
-    results = []
-    total = len(tickers)
-    log.append(f"Starting watchlist scan: {total} tickers")
-
-    # ── Phase 1: Download all tickers ────────────────────────
-    _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
-    print(f"\n[Phase 1] Downloading {total} tickers via direct API...")
-
-    def _on_dl_progress(i, tot, sym):
-        _update_progress("downloading", f"Downloading {sym}...", i, tot,
-                         ticker=sym, found=0)
-
-    interval = "15m" if extended_hours else "1d"
-    includePrePost = "true" if extended_hours else "false"
-    # Need enough bars for 200 SMA on daily chart (same as full market scan)
-    fetch_days = 60 if extended_hours else 280
-
-    stock_data = fetch_batch_concurrent(
-        tickers, days=fetch_days, max_workers=4,
-        on_progress=_on_dl_progress, delay=0.05, interval=interval, includePrePost=includePrePost
-    )
-
-    log.append(f"Downloaded: {len(stock_data)}/{total} tickers have data")
-    print(f"  Downloaded {len(stock_data)}/{total} tickers")
-
-    if not stock_data:
-        log.append("No data returned — API may be blocking this server")
-        scan_progress.update({
-            "status": "done", "phase": "complete",
-            "phase_label": "No data — API may be blocking this server",
-            "current": total, "total": total,
-            "found": 0, "pct": 100, "eta_seconds": 0,
-        })
-        return pd.DataFrame()
-
-    # ── Phase 2: Analyze each ticker ─────────────────────────
-    print(f"\n[Phase 2] Analyzing {len(stock_data)} tickers...")
-    skipped_filter = 0
-
-    for i, (sym, df) in enumerate(stock_data.items()):
-        _update_progress("analyzing", f"Analyzing {sym}...", i, len(stock_data),
-                         ticker=sym, found=len(results))
-
-        try:
-            today_date = df.index.date[-1]
-            recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
-
-            last_price = float(df['Close'].iloc[-1])
-
-            if recent_vol < min_volume or last_price < min_price:
-                print(f"  [{i+1}/{len(stock_data)}] {sym}... skip (vol={recent_vol:.0f}, price={last_price:.2f})")
-                skipped_filter += 1
-                continue
-
-            if is_earnings_imminent(sym, earnings_map):
-                print(f"  [{i+1}/{len(stock_data)}] {sym}... skip (imminent earnings)")
-                skipped_filter += 1
-                continue
-
-            result = _analyze_stock(sym, df, rsi_bull_thresh, rsi_bear_thresh, swing_tolerance, is_market_bullish=is_market_bullish)
-            if result:
-                results.append(result)
-                print(f"  [{i+1}/{len(stock_data)}] {sym}... ✓ signal")
-            else:
-                print(f"  [{i+1}/{len(stock_data)}] {sym}... no signal")
-        except Exception as e:
-            print(f"  [{i+1}/{len(stock_data)}] {sym}... error ({e})")
-            continue
-
-    # ── Done ─────────────────────────────────────────────────
-    total_time = time.time() - start_time
-    summary = (f"Done in {total_time:.1f}s: {len(results)} signals, "
-               f"{skipped_filter} filtered out")
-    log.append(summary)
-    print(f"\n[Done] {summary}")
-
-    scan_progress.update({
-        "status": "done", "phase": "complete",
-        "phase_label": f"Done — {len(results)} signals found",
-        "current": total, "total": total,
-        "found": len(results), "pct": 100, "eta_seconds": 0,
-    })
-
-    if not results:
-        return pd.DataFrame()
-    return pd.DataFrame(results).sort_values(by="Volume", ascending=False)
-
-
-# =====================================================================
 # Full market scanner  (batch download, pre-filter, then analyze)
 # =====================================================================
+
 
 def full_market_scan(min_volume=500_000, min_price=5.0,
                      rsi_bull_thresh=35, rsi_bear_thresh=65,
@@ -1495,337 +1409,6 @@ def full_market_scan(min_volume=500_000, min_price=5.0,
         return pd.DataFrame()
     return pd.DataFrame(results).sort_values(by="Volume", ascending=False)
 
-
-# =====================================================================
-# Momentum Analysis Scoring
-# =====================================================================
-
-def _analyze_momentum(sym, df, is_market_bullish=True):
-    """
-    Momentum/Breakout scoring system.
-    Identifies stocks with strong directional thrust (like the INTC rally).
-    """
-    try:
-        if len(df) < 50: return None
-        
-        curr = df.iloc[-1]
-        prev = df.iloc[-2]
-        last_price = float(curr['Close'])
-        open_price = float(curr['Open'])
-        prev_close = float(prev['Close'])
-        
-        # 1. Metadata
-        fiftyTwoWeekHigh = df.attrs.get("fiftyTwoWeekHigh")
-        fiftyTwoWeekLow = df.attrs.get("fiftyTwoWeekLow")
-        
-        # Yesterday's High/Low for "Gap and Go" detection
-        yesterday_high = float(prev['High'])
-        yesterday_low = float(prev['Low'])
-        
-        # 2. RVOL (20-day avg)
-        rvol = compute_rvol(df)
-        
-        # 3. RSI
-        rsi_series = compute_rsi(df['Close'], 14)
-        rsi_val = float(rsi_series.iloc[-1])
-        
-        # 4. Moving Averages
-        sma20 = float(compute_sma(df['Close'], 20).iloc[-1])
-        sma50 = float(compute_sma(df['Close'], 50).iloc[-1])
-        sma200 = float(compute_sma(df['Close'], 200).iloc[-1])
-        
-        # 5. MACD
-        macd_line, signal_line, macd_hist = compute_macd(df['Close'])
-        macd_val = float(macd_line.iloc[-1])
-        sig_val = float(signal_line.iloc[-1])
-        hist_val = float(macd_hist.iloc[-1])
-
-        # 6. Returns
-        day_chg_pct = ((last_price - prev_close) / prev_close) * 100
-        gap_pct = ((open_price - prev_close) / prev_close) * 100
-        five_day_ret = ((last_price - df['Close'].iloc[-max(len(df), 6)]) / df['Close'].iloc[-max(len(df), 6)]) * 100 if len(df) >= 6 else 0
-        
-        # 7. Prior Session High/Low (Robust detection for intraday bars)
-        # Find the high/low of the ACTUAL previous trading day
-        dates = df.index.date
-        unique_dates = sorted(list(set(dates)))
-        if len(unique_dates) >= 2:
-            # unique_dates[-1] is today, unique_dates[-2] is the previous session
-            prior_date = unique_dates[-2]
-            prior_day_df = df[df.index.date == prior_date]
-            prior_high = float(prior_day_df['High'].max())
-            prior_low = float(prior_day_df['Low'].min())
-        else:
-            # Fallback to previous candle if only one day of data exists
-            prior_high = float(prev['High'])
-            prior_low = float(prev['Low'])
-
-        # 8. Candle Shape
-        total_range = curr['High'] - curr['Low'] if curr['High'] != curr['Low'] else 0.01
-        upper_wick = curr['High'] - max(curr['Close'], curr['Open'])
-        lower_wick = min(curr['Close'], curr['Open']) - curr['Low']
-        is_green = last_price > open_price
-        
-        MIN_MOMENTUM_SCORE = 5
-
-        # --- BULLISH MOMENTUM (BREAKOUT) ---
-        bull_score = 0
-        bull_tags = []
-        if is_market_bullish:
-            bull_score += 1
-            bull_tags.append("Market Trend +1")
-
-        if gap_pct > 3.0:
-            bull_score += 2; bull_tags.append(f"Gap Up {gap_pct:.1f}% +2")
-        
-        if last_price > prior_high:
-            bull_score += 3; bull_tags.append("Broke Prior Day High +3")
-        elif last_price > prior_high * 0.995:
-             bull_score += 1; bull_tags.append("Near Prior Day High +1")
-
-        if fiftyTwoWeekHigh and last_price >= fiftyTwoWeekHigh:
-            bull_score += 4; bull_tags.append("Hits 52w High +4")
-        elif fiftyTwoWeekHigh and last_price >= fiftyTwoWeekHigh * 0.98:
-            bull_score += 3; bull_tags.append("At 52w High +3")
-        
-        if rvol > 2.0:
-            bull_score += 2; bull_tags.append(f"RVOL {rvol:.1f}x +2")
-            if rvol > 3.0:
-                bull_score += 1; bull_tags.append("Extreme Vol +1")
-        
-        if rsi_val > 70:
-            bull_score += 1; bull_tags.append(f"RSI {rsi_val:.0f} (Strength) +1")
-            
-        if last_price > sma20 and last_price > sma50 and last_price > sma200:
-            bull_score += 1; bull_tags.append("Above SMAs +1")
-            
-        if hist_val > 0 and macd_val > sig_val:
-            bull_score += 1; bull_tags.append("MACD Bullish +1")
-            
-        if five_day_ret > 10:
-            bull_score += 1; bull_tags.append(f"5d Ret {five_day_ret:.0f}% +1")
-            
-        if is_green and upper_wick < 0.2 * total_range:
-            bull_score += 1; bull_tags.append("Strong Close +1")
-
-        # --- BEARISH MOMENTUM (BREAKDOWN) ---
-        bear_score = 0
-        bear_tags = []
-        if not is_market_bullish:
-            bear_score += 1
-            bear_tags.append("Market Trend +1")
-
-        if gap_pct < -3.0:
-            bear_score += 2; bear_tags.append(f"Gap Down {abs(gap_pct):.1f}% +2")
-            
-        if last_price < prior_low:
-            bear_score += 3; bear_tags.append("Broke Prior Day Low +3")
-        elif last_price < prior_low * 1.005:
-            bear_score += 1; bear_tags.append("Near Prior Day Low +1")
-
-        if fiftyTwoWeekLow and last_price <= fiftyTwoWeekLow:
-            bear_score += 4; bear_tags.append("Hits 52w Low +4")
-        elif fiftyTwoWeekLow and last_price <= fiftyTwoWeekLow * 1.02:
-            bear_score += 3; bear_tags.append("At 52w Low +3")
-            
-        if rvol > 2.0:
-            bear_score += 2; bear_tags.append(f"RVOL {rvol:.1f}x +2")
-            if rvol > 3.0:
-                bear_score += 1; bear_tags.append("Extreme Vol +1")
-                
-        if rsi_val < 30:
-            bear_score += 1; bear_tags.append(f"RSI {rsi_val:.0f} (Weakness) +1")
-            
-        if last_price < sma20 and last_price < sma50 and last_price < sma200:
-            bear_score += 1; bear_tags.append("Below SMAs +1")
-            
-        if hist_val < 0 and macd_val < sig_val:
-            bear_score += 1; bear_tags.append("MACD Bearish +1")
-            
-        if five_day_ret < -10:
-            bear_score += 1; bear_tags.append(f"5d Ret {five_day_ret:.0f}% +1")
-            
-        if not is_green and lower_wick < 0.2 * total_range:
-            bear_score += 1; bear_tags.append("Weak Close +1")
-
-        news_details = None
-        # --- NEWS CATALYST ---
-        if bull_score >= 3 or bear_score >= 3:
-            has_news, news_tag, news_item = detect_news_catalyst(sym)
-            if has_news and news_tag:
-                news_details = news_item
-                if bull_score >= 3:
-                    bull_score += 2
-                    bull_tags.append(f"{news_tag} (+2)")
-                if bear_score >= 3:
-                    bear_score += 2
-                    bear_tags.append(f"{news_tag} (+2)")
-
-        # --- DECISION ---
-        is_bullish = bull_score >= MIN_MOMENTUM_SCORE
-        is_bearish = bear_score >= MIN_MOMENTUM_SCORE
-
-        if not is_bullish and not is_bearish:
-            return None
-
-        # Use stronger direction
-        if is_bullish and is_bearish:
-            if bull_score >= bear_score: is_bearish = False
-            else: is_bullish = False
-
-        score = bull_score if is_bullish else bear_score
-        tags = bull_tags if is_bullish else bear_tags
-        
-        if score >= 8: grade = "A+"
-        elif score >= 6: grade = "A"
-        else: grade = "B"
-
-        reasons = f"[{' | '.join(tags)}]"
-
-        # Filter out B-grades
-        if grade not in ["A", "A+"]:
-            return None
-
-        atr_series = compute_atr(df, 14)
-        atr_val = float(atr_series.iloc[-1]) if len(atr_series) > 0 else 0.05 * last_price
-        entry = last_price
-        if is_bullish:
-            sl = last_price - 2.0 * atr_val
-            pt = last_price + 4.0 * atr_val
-        else:
-            sl = last_price + 2.0 * atr_val
-            pt = last_price - 4.0 * atr_val
-
-        return {
-            "Ticker": sym,
-            "Last Price": round(last_price, 2),
-            "Volume": int(curr['Volume']),
-            "RSI": round(rsi_val, 1),
-            "Score": score,
-            "Grade": grade,
-            "Bullish Signals": reasons if is_bullish else "—",
-            "Bearish Signals": reasons if is_bearish else "—",
-            "Suggested Option": "—", # Momentum trades usually need different strategy
-            "News Details": news_details,
-            "Entry": round(entry, 2),
-            "Stop Loss": round(sl, 2),
-            "Profit Target": round(pt, 2)
-        }
-    except Exception as e:
-        print(f"  Error analyzing momentum for {sym}: {e}")
-    return None
-
-# =====================================================================
-# Momentum Scanners
-# =====================================================================
-
-def momentum_watchlist_scan(tickers, min_volume=500_000, min_price=5.0, extended_hours=False):
-    _reset_progress()
-    scan_progress["status"] = "running"
-    start_time = time.time()
-    
-    results = []
-    total = len(tickers)
-    _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
-    
-    def _on_dl_progress(i, tot, sym):
-        _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=len(results))
-
-    interval = "15m" if extended_hours else "1d"
-    includePrePost = "true" if extended_hours else "false"
-    fetch_days = 14 if extended_hours else 280
-
-    stock_data = fetch_batch_concurrent(
-        tickers, days=fetch_days, max_workers=4,
-        on_progress=_on_dl_progress, delay=0.05, interval=interval, includePrePost=includePrePost
-    )
-
-    for i, (sym, df) in enumerate(stock_data.items()):
-        _update_progress("analyzing", f"Analyzing {sym}...", i, len(stock_data), ticker=sym, found=len(results))
-        try:
-            today_date = df.index.date[-1]
-            recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
-            last_price = float(df['Close'].iloc[-1])
-
-            if recent_vol < min_volume or last_price < min_price:
-                continue
-
-            result = _analyze_momentum(sym, df)
-            if result:
-                results.append(result)
-        except:
-            continue
-
-    scan_progress.update({
-        "status": "done", "phase": "complete",
-        "phase_label": f"Done — {len(results)} momentum signals found",
-        "current": total, "total": total,
-        "found": len(results), "pct": 100, "eta_seconds": 0,
-    })
-    
-    if not results: return pd.DataFrame()
-    return pd.DataFrame(results).sort_values(by="Score", ascending=False)
-
-def momentum_full_market_scan(min_volume=500_000, min_price=5.0, extended_hours=False):
-    _reset_progress()
-    scan_progress["status"] = "running"
-    start_time = time.time()
-    
-    all_tickers = get_us_tickers()
-    if not all_tickers: return pd.DataFrame()
-    
-    total_tickers = len(all_tickers)
-    
-    def _on_dl_progress(done, tot, sym):
-        _update_progress("downloading", f"Downloading... ({done}/{tot})", done, tot, ticker=sym, found=0)
-        elapsed = time.time() - start_time
-        if done > 0:
-            rate = elapsed / done
-            scan_progress["eta_seconds"] = int((tot - done) * rate)
-
-    interval = "15m" if extended_hours else "1d"
-    includePrePost = "true" if extended_hours else "false"
-    fetch_days = 14 if extended_hours else 280 
-
-    stock_data = fetch_batch_concurrent(
-        all_tickers, days=fetch_days, max_workers=8, 
-        on_progress=_on_dl_progress, delay=0.05, 
-        interval=interval, includePrePost=includePrePost
-    )
-
-    candidates = []
-    for sym, df in stock_data.items():
-        try:
-            today_date = df.index.date[-1]
-            recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
-            price = float(df['Close'].iloc[-1])
-            if recent_vol >= min_volume and price >= min_price:
-                candidates.append((sym, df))
-        except: continue
-
-    results = []
-    total_candidates = len(candidates)
-    phase3_start = time.time()
-
-    for j, (sym, df) in enumerate(candidates):
-        _update_progress("analyzing", f"Analyzing {sym}...", j, total_candidates, ticker=sym, found=len(results))
-        elapsed = time.time() - phase3_start
-        if j > 0:
-            rate = elapsed / j
-            scan_progress["eta_seconds"] = int((total_candidates - j) * rate)
-
-        result = _analyze_momentum(sym, df)
-        if result: results.append(result)
-
-    scan_progress.update({
-        "status": "done", "phase": "complete",
-        "phase_label": f"Done — {len(results)} momentum signals found",
-        "current": total_candidates, "total": total_candidates,
-        "found": len(results), "pct": 100, "eta_seconds": 0,
-    })
-    
-    if not results: return pd.DataFrame()
-    return pd.DataFrame(results).sort_values(by="Score", ascending=False)
 
 # =====================================================================
 # IV Rank Tracker  (DIY — logs ATM IV per ticker per day)
@@ -2298,61 +1881,6 @@ def _analyze_options_setup(sym, df, iv_history):
     return None
 
 
-# =====================================================================
-# Options Scanners
-# =====================================================================
-
-def options_watchlist_scan(tickers, min_volume=500_000, min_price=5.0, extended_hours=False):
-    """Scan watchlist tickers for options setups."""
-    _reset_progress()
-    scan_progress["status"] = "running"
-    start_time = time.time()
-    iv_history = _load_iv_history()
-
-    earnings_map = get_upcoming_earnings_map(tickers)
-
-    results = []
-    total = len(tickers)
-    _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
-
-    def _on_dl_progress(i, tot, sym):
-        _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=len(results))
-
-    stock_data = fetch_batch_concurrent(
-        tickers, days=280, max_workers=4,
-        on_progress=_on_dl_progress, delay=0.05, interval="1d"
-    )
-
-    for i, (sym, df) in enumerate(stock_data.items()):
-        _update_progress("analyzing", f"Analyzing {sym} options...", i, len(stock_data), ticker=sym, found=len(results))
-        try:
-            today_date = df.index.date[-1]
-            recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
-            last_price = float(df['Close'].iloc[-1])
-            if recent_vol < min_volume or last_price < min_price:
-                continue
-            if is_earnings_imminent(sym, earnings_map):
-                continue
-            result = _analyze_options_setup(sym, df, iv_history)
-            if result:
-                results.append(result)
-        except:
-            continue
-
-    # Save updated IV history
-    _save_iv_history(iv_history)
-
-    total_time = time.time() - start_time
-    scan_progress.update({
-        "status": "done", "phase": "complete",
-        "phase_label": f"Done — {len(results)} options setups found",
-        "current": total, "total": total,
-        "found": len(results), "pct": 100, "eta_seconds": 0,
-    })
-
-    if not results:
-        return pd.DataFrame()
-    return pd.DataFrame(results).sort_values(by="Catalyst Score", ascending=False)
 
 
 def options_full_market_scan(min_volume=500_000, min_price=5.0, extended_hours=False):
@@ -2421,309 +1949,6 @@ def options_full_market_scan(min_volume=500_000, min_price=5.0, extended_hours=F
     return pd.DataFrame(results).sort_values(by="Catalyst Score", ascending=False)
 
 
-# =====================================================================
-# Breakout / Breakdown & Gap Scanner — Analysis
-# =====================================================================
-
-def _analyze_bollinger_setup(sym, df, is_market_bullish=True):
-    """
-    Bollinger Band Scanner.
-    Detects when price hits/crosses the upper or lower Bollinger Band.
-    Using a 20-period SMA and 2 standard deviations.
-    """
-    try:
-        if len(df) < 50:
-            return None
-
-        curr = df.iloc[-1]
-        last_price = float(curr['Close'])
-        high_price = float(curr['High'])
-        low_price = float(curr['Low'])
-
-        # Compute Bollinger Bands with length=20, num_std=3
-        bb_upper_series, bb_mid_series, bb_lower_series = compute_bollinger_bands(df['Close'], 20, 3)
-        bb_upper = float(bb_upper_series.iloc[-1])
-        bb_lower = float(bb_lower_series.iloc[-1])
-
-        # Check for touches
-        is_upper_hit = high_price >= bb_upper
-        is_lower_hit = low_price <= bb_lower
-
-        if not is_upper_hit and not is_lower_hit:
-            return None
-
-        # Calculate standard fields for dashboard
-        rsi_series = compute_rsi(df['Close'], 14)
-        rsi_val = float(rsi_series.iloc[-1])
-        rvol = compute_rvol(df)
-        adr_pct = compute_adr_pct(df, 14)
-        
-        # Squeeze detection
-        try:
-            squeeze_on, _, _ = detect_squeeze(df)
-        except Exception:
-            squeeze_on = False
-
-        # Moving Averages distance
-        ema20_series = compute_ema(df['Close'], 20)
-        ema20 = float(ema20_series.iloc[-1]) if len(ema20_series) > 0 else None
-        
-        sma50_series = compute_sma(df['Close'], 50)
-        sma50 = float(sma50_series.iloc[-1]) if len(sma50_series) > 0 and not np.isnan(sma50_series.iloc[-1]) else None
-        
-        sma200_series = compute_sma(df['Close'], 200)
-        sma200 = float(sma200_series.iloc[-1]) if len(sma200_series) > 0 and not np.isnan(sma200_series.iloc[-1]) else None
-        
-        ema20_dist = ((last_price - ema20) / ema20) * 100 if ema20 else 0.0
-        sma50_dist = ((last_price - sma50) / sma50) * 100 if sma50 else 0.0
-        sma200_dist = ((last_price - sma200) / sma200) * 100 if sma200 else 0.0
-
-        bb_pct_b = 50.0
-        if (bb_upper - bb_lower) != 0:
-            bb_pct_b = ((last_price - bb_lower) / (bb_upper - bb_lower)) * 100
-
-        # Constructing dynamic score & tags for premium feel
-        score = 10
-        tags = []
-
-        if is_upper_hit:
-            tags.append("Hits Upper Band")
-            if rsi_val >= 70:
-                score += 2
-                tags.append(f"RSI Overbought ({rsi_val:.0f})")
-            if rvol > 1.5:
-                score += 2
-                tags.append(f"High RVOL ({rvol:.1f}x)")
-            if squeeze_on:
-                score += 1
-                tags.append("Squeeze Active")
-            
-            is_bullish = True
-            is_bearish = False
-        else:
-            tags.append("Hits Lower Band")
-            if rsi_val <= 30:
-                score += 2
-                tags.append(f"RSI Oversold ({rsi_val:.0f})")
-            if rvol > 1.5:
-                score += 2
-                tags.append(f"High RVOL ({rvol:.1f}x)")
-            if squeeze_on:
-                score += 1
-                tags.append("Squeeze Active")
-            
-            is_bullish = False
-            is_bearish = True
-
-        # Check news if score is high
-        news_details = None
-        if score >= 12:
-            has_news, news_tag, news_item = detect_news_catalyst(sym)
-            if has_news and news_tag:
-                news_details = news_item
-                score += 3
-                tags.append("News Catalyst")
-
-        # Grade
-        if score >= 12:
-            grade = "A+"
-        else:
-            grade = "A"
-
-        reasons = f"[{' | '.join(tags)}]"
-
-        # Trade Levels based on ATR
-        atr_series = compute_atr(df, 14)
-        atr_val = float(atr_series.iloc[-1]) if len(atr_series) > 0 else 0.05 * last_price
-        entry = last_price
-        
-        if is_bullish:
-            sl = last_price - 2.0 * atr_val
-            pt = last_price + 4.0 * atr_val
-        else:
-            sl = last_price + 2.0 * atr_val
-            pt = last_price - 4.0 * atr_val
-
-        return {
-            "Ticker": sym,
-            "Last Price": round(last_price, 2),
-            "Volume": int(curr['Volume']),
-            "RSI": round(rsi_val, 1),
-            "Score": score,
-            "Grade": grade,
-            "Bullish Signals": reasons if is_bullish else "—",
-            "Bearish Signals": reasons if is_bearish else "—",
-            "Suggested Option": "—",
-            "News Details": news_details,
-            "RVOL": round(rvol, 2) if rvol is not None else 0.0,
-            "ADR": round(adr_pct, 2) if adr_pct is not None else 0.0,
-            "EMA20_Dist": round(ema20_dist, 2),
-            "SMA50_Dist": round(sma50_dist, 2),
-            "SMA200_Dist": round(sma200_dist, 2),
-            "Squeeze": bool(squeeze_on),
-            "BB_Pct": round(bb_pct_b, 1),
-            "Patterns": "—",
-            "Entry": round(entry, 2),
-            "Stop Loss": round(sl, 2),
-            "Profit Target": round(pt, 2)
-        }
-    except Exception as e:
-        print(f"  Error analyzing bollinger for {sym}: {e}")
-    return None
-
-
-# =====================================================================
-# Bollinger Band Scanners (Watchlist + Full Market)
-# =====================================================================
-
-def bollinger_watchlist_scan(tickers, min_volume=2_000_000, min_price=10.0, extended_hours=False):
-    """Scan watchlist for Bollinger Band touch setups."""
-    _reset_progress()
-    scan_progress["status"] = "running"
-    start_time = time.time()
-
-    is_market_bullish = check_spy_regime()
-    earnings_map = get_upcoming_earnings_map(tickers)
-
-    results = []
-    total = len(tickers)
-    _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
-
-    def _on_dl_progress(i, tot, sym):
-        _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=len(results))
-
-    interval = "15m" if extended_hours else "1d"
-    includePrePost = "true" if extended_hours else "false"
-    fetch_days = 14 if extended_hours else 280
-
-    stock_data = fetch_batch_concurrent(
-        tickers, days=fetch_days, max_workers=4,
-        on_progress=_on_dl_progress, delay=0.05, interval=interval, includePrePost=includePrePost
-    )
-
-    for i, (sym, df) in enumerate(stock_data.items()):
-        _update_progress("analyzing", f"Analyzing {sym}...", i, len(stock_data), ticker=sym, found=len(results))
-        try:
-            if len(df) < 50:
-                continue
-            if is_earnings_imminent(sym, earnings_map):
-                continue
-            today_date = df.index.date[-1]
-            recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
-            last_price = float(df['Close'].iloc[-1])
-            dollar_volume = recent_vol * last_price
-
-            # Big Cap / High Liquidity filter (requires ~$150M+ traded today)
-            if dollar_volume < 150_000_000:
-                continue
-
-            if recent_vol < min_volume or last_price < min_price:
-                continue
-            result = _analyze_bollinger_setup(sym, df, is_market_bullish=is_market_bullish)
-            if result:
-                results.append(result)
-        except:
-            continue
-
-    total_time = time.time() - start_time
-    scan_progress.update({
-        "status": "done", "phase": "complete",
-        "phase_label": f"Done — {len(results)} bollinger signals found",
-        "current": total, "total": total,
-        "found": len(results), "pct": 100, "eta_seconds": 0,
-    })
-
-    print(f"[Done] Bollinger watchlist scan: {len(results)} signals in {total_time:.1f}s")
-    if not results:
-        return pd.DataFrame()
-    return pd.DataFrame(results).sort_values(by="Score", ascending=False).head(15)
-
-
-def bollinger_full_market_scan(min_volume=2_000_000, min_price=10.0, extended_hours=False):
-    """Scan the full US market for Bollinger Band touch setups."""
-    _reset_progress()
-    scan_progress["status"] = "running"
-    start_time = time.time()
-
-    all_tickers = get_us_tickers()
-    is_market_bullish = check_spy_regime()
-    earnings_map = get_upcoming_earnings_map(all_tickers)
-    if not all_tickers:
-        scan_progress["status"] = "error"
-        scan_progress["phase_label"] = "Failed to fetch ticker list"
-        return pd.DataFrame()
-
-    total_tickers = len(all_tickers)
-    found_signals = []
-
-    def process_bollinger(sym, df):
-        try:
-            if len(df) < 50:
-                return None
-            if is_earnings_imminent(sym, earnings_map):
-                return None
-            today_date = df.index.date[-1]
-            recent_vol = float(df[df.index.date == today_date]['Volume'].sum())
-            price = float(df['Close'].iloc[-1])
-            dollar_volume = recent_vol * price
-
-            # Big Cap / High Liquidity filter (requires ~$150M+ traded today)
-            if dollar_volume < 150_000_000:
-                return None
-
-            if recent_vol >= min_volume and price >= min_price:
-                result = _analyze_bollinger_setup(sym, df, is_market_bullish=is_market_bullish)
-                if result:
-                    found_signals.append(sym)
-                    return result
-        except Exception:
-            pass
-        return None
-
-    def _on_dl_progress(done, tot, sym):
-        _update_progress("downloading",
-                         f"Downloading & Analyzing... ({done}/{tot})",
-                         done, tot, ticker=sym, found=len(found_signals))
-        elapsed = time.time() - start_time
-        if done > 0:
-            rate = elapsed / done
-            scan_progress["eta_seconds"] = int((tot - done) * rate)
-
-    interval = "15m" if extended_hours else "1d"
-    includePrePost = "true" if extended_hours else "false"
-    fetch_days = 14 if extended_hours else 280
-
-    stock_results = fetch_batch_concurrent(
-        all_tickers, days=fetch_days, max_workers=8,
-        on_progress=_on_dl_progress, delay=0.05, interval=interval, includePrePost=includePrePost,
-        process_fn=process_bollinger
-    )
-
-    results = [r for r in stock_results.values() if r is not None]
-
-    total_time = time.time() - start_time
-    scan_progress.update({
-        "status": "done", "phase": "complete",
-        "phase_label": f"Done — {len(results)} bollinger signals found",
-        "current": total_tickers, "total": total_tickers,
-        "found": len(results), "pct": 100, "eta_seconds": 0,
-    })
-
-    print(f"[Done] Bollinger full market scan: {len(results)} signals in {total_time:.0f}s")
-    if not results:
-        return pd.DataFrame()
-    return pd.DataFrame(results).sort_values(by="Score", ascending=False).head(15)
-
-
-# =====================================================================
-# Watchlist (for quick scans)
-# =====================================================================
-
-WATCHLIST = [
-    "AAPL", "MSFT", "TSLA", "AMZN", "GOOGL", "META", "NVDA",
-    "NFLX", "PYPL", "INTC", "AMD", "SNAP", "UBER", "BABA",
-    "PLTR", "F", "GM", "XOM", "OXY", "DIS", "BA", "COIN"
-]
 
 # =====================================================================
 # 3-Sigma scanners (Manual Web-app trigger modes)
@@ -2898,49 +2123,50 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True):
     return None
 
 
-def three_sigma_watchlist_scan(tickers, extended_hours=False):
-    """Scan watchlist for 3-Sigma Daily Bands + 15m regular hours crossings."""
+def three_sigma_full_market_scan(extended_hours=False):
+    """Scan all US tickers for 3-Sigma Daily Bands + 15m regular hours crossings."""
     _reset_progress()
     scan_progress["status"] = "running"
     start_time = time.time()
-    
+
+    tickers = get_us_tickers()
     is_market_bullish = check_spy_regime()
-    
+
     results = []
     total = len(tickers)
     _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
-    
+
     # Pre-calculate daily data
     # Fetch 45 days of 1d data for Bollinger Bands
     daily_data = fetch_batch_concurrent(
         tickers, days=45, max_workers=6,
         delay=0.05, interval="1d", includePrePost="false"
     )
-    
+
     # Fetch 15 days of 15m regular hours data
     def _on_dl_progress(i, tot, sym):
         _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=len(results))
-        
+
     _update_progress("downloading", f"Downloading 15m bars for {total} tickers...", 0, total)
     stock_data = fetch_batch_concurrent(
         tickers, days=15, max_workers=6,
         on_progress=_on_dl_progress, delay=0.05, interval="15m", includePrePost="false"
     )
-    
+
     for i, (sym, df_15m) in enumerate(stock_data.items()):
         _update_progress("analyzing", f"Analyzing {sym}...", i, len(stock_data), ticker=sym, found=len(results))
         try:
             df_daily = daily_data.get(sym)
             if df_15m is None or df_daily is None or len(df_15m) < 20 or len(df_daily) < 20:
                 continue
-            
+
             result = _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=is_market_bullish)
             if result:
                 results.append(result)
         except Exception as e:
             print(f"Error processing 3-sigma for {sym}: {e}")
             continue
-            
+
     total_time = time.time() - start_time
     scan_progress.update({
         "status": "done", "phase": "complete",
@@ -2948,17 +2174,11 @@ def three_sigma_watchlist_scan(tickers, extended_hours=False):
         "current": total, "total": total,
         "found": len(results), "pct": 100, "eta_seconds": 0,
     })
-    
-    print(f"[Done] 3-Sigma watchlist scan: {len(results)} signals in {total_time:.0f}s")
+
+    print(f"[Done] 3-Sigma full market scan: {len(results)} signals in {total_time:.0f}s")
     if not results:
         return pd.DataFrame()
     return pd.DataFrame(results).sort_values(by="Score", ascending=False).head(15)
-
-
-def three_sigma_full_market_scan(extended_hours=False):
-    """Scan top US liquid tickers for 3-Sigma setups."""
-    tickers = get_us_tickers()
-    return three_sigma_watchlist_scan(tickers)
 
 
 # =====================================================================
@@ -2966,23 +2186,14 @@ def three_sigma_full_market_scan(extended_hours=False):
 # =====================================================================
 
 if __name__ == "__main__":
-    import sys
-
-    mode = sys.argv[1] if len(sys.argv) > 1 else "watchlist"
-
     print("=" * 60)
     print("  📈  STOCK REVERSAL SCANNER")
     print("=" * 60)
     print(f"  Date : {datetime.today().strftime('%Y-%m-%d %H:%M')}")
-    print(f"  Mode : {mode}")
+    print(f"  Mode : full market")
     print("=" * 60)
 
-    if mode == "full":
-        result_df = full_market_scan()
-    else:
-        print(f"  Tickers : {len(WATCHLIST)}")
-        print()
-        result_df = reversal_scanner(WATCHLIST)
+    result_df = full_market_scan()
 
     print()
     if result_df.empty:
@@ -2993,3 +2204,4 @@ if __name__ == "__main__":
         print("=" * 60)
         print(result_df.to_string(index=False))
         print()
+
