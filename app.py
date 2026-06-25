@@ -33,7 +33,7 @@ CORS(app)
 @app.after_request
 def add_header(r):
     """Disable caching for all dynamic API responses."""
-    if r.path.startswith("/api/"):
+    if request.path.startswith("/api/"):
         r.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, public, max-age=0"
         r.headers["Pragma"] = "no-cache"
         r.headers["Expires"] = "0"
