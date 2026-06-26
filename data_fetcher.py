@@ -35,11 +35,16 @@ _webull_unofficial_failures = 0
 _webull_openapi_failures = 0
 _WEBULL_MAX_FAILURES = 2  # After this many consecutive failures, skip for the rest of the scan
 
+_yahoo_failures = 0
+_YAHOO_MAX_FAILURES = 10  # After this many consecutive failures, skip Yahoo Finance
+
 def reset_webull_circuit_breaker():
     """Reset the circuit breaker — call at the start of each new scan."""
-    global _webull_unofficial_failures, _webull_openapi_failures
+    global _webull_unofficial_failures, _webull_openapi_failures, _yahoo_failures
     _webull_unofficial_failures = 0
     _webull_openapi_failures = 0
+    _yahoo_failures = 0
+
 
 # ── Webull Unofficial Client Loader (Option B — inherits personal subscriptions) ──
 
@@ -214,42 +219,55 @@ _HEADERS = {
     ),
 }
 
+import threading
+
 _session = None
 _crumb = None
 _session_time = 0
+_last_force_new_time = 0
+_session_lock = threading.Lock()
 
 
 def _get_session(force_new=False):
     """Create (or reuse) a session with Yahoo cookie + crumb."""
-    global _session, _crumb, _session_time
+    global _session, _crumb, _session_time, _last_force_new_time
 
-    # Reuse session for up to 10 minutes
-    if not force_new and _session is not None and (time.time() - _session_time) < 600:
+    with _session_lock:
+        # Reuse session for up to 10 minutes
+        if not force_new and _session is not None and (time.time() - _session_time) < 600:
+            return _session, _crumb
+
+        # Throttle force_new to at most once per 60 seconds
+        if force_new:
+            now = time.time()
+            if now - _last_force_new_time < 60:
+                return _session, _crumb
+            _last_force_new_time = now
+
+        _session = requests.Session()
+        _session.headers.update(_HEADERS)
+
+        # Step 1: Get A3 cookie from fc.yahoo.com (returns 404 but sets cookie)
+        try:
+            _session.get("https://fc.yahoo.com", timeout=3)
+        except Exception:
+            pass
+
+        # Step 2: Get crumb using the cookie
+        _crumb = None
+        try:
+            resp = _session.get(
+                "https://query2.finance.yahoo.com/v1/test/getcrumb",
+                timeout=3,
+            )
+            if resp.status_code == 200 and len(resp.text) < 50:
+                _crumb = resp.text.strip()
+        except Exception:
+            pass
+
+        _session_time = time.time()
         return _session, _crumb
 
-    _session = requests.Session()
-    _session.headers.update(_HEADERS)
-
-    # Step 1: Get A3 cookie from fc.yahoo.com (returns 404 but sets cookie)
-    try:
-        _session.get("https://fc.yahoo.com", timeout=10)
-    except Exception:
-        pass
-
-    # Step 2: Get crumb using the cookie
-    _crumb = None
-    try:
-        resp = _session.get(
-            "https://query2.finance.yahoo.com/v1/test/getcrumb",
-            timeout=10,
-        )
-        if resp.status_code == 200 and len(resp.text) < 50:
-            _crumb = resp.text.strip()
-    except Exception:
-        pass
-
-    _session_time = time.time()
-    return _session, _crumb
 
 
 def _ensure_session():
@@ -483,13 +501,14 @@ def _fetch_yahoo_one(ticker, days=180, interval="1d", includePrePost="false"):
         params["crumb"] = crumb
 
     try:
-        resp = session.get(url, params=params, timeout=15)
+        resp = session.get(url, params=params, timeout=5)
 
         if resp.status_code in (401, 403):
             session, crumb = _get_session(force_new=True)
             if crumb:
                 params["crumb"] = crumb
-            resp = session.get(url, params=params, timeout=15)
+            resp = session.get(url, params=params, timeout=5)
+
 
         if resp.status_code != 200:
             return None
@@ -578,7 +597,18 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webu
                     print(f"[Circuit Breaker] Webull OpenAPI failed {_WEBULL_MAX_FAILURES}x consecutively — skipping for rest of scan")
 
     # 3. Fallback to Yahoo Finance
-    return _fetch_yahoo_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
+    global _yahoo_failures
+    if _yahoo_failures < _YAHOO_MAX_FAILURES:
+        df = _fetch_yahoo_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
+        if df is not None:
+            _yahoo_failures = 0
+            return df
+        else:
+            _yahoo_failures += 1
+            if _yahoo_failures >= _YAHOO_MAX_FAILURES:
+                print(f"[Circuit Breaker] Yahoo Finance failed {_YAHOO_MAX_FAILURES}x consecutively — skipping for rest of scan")
+    return None
+
 
 
 # ── Options Chain Download (Webull Unofficial & Yahoo) ───────────────
@@ -592,8 +622,9 @@ def _fetch_yahoo_options_chain(ticker):
     if crumb: params["crumb"] = crumb
 
     try:
-        resp = session.get(url, params=params, timeout=15)
+        resp = session.get(url, params=params, timeout=5)
         if resp.status_code != 200:
+
             return None
         
         data = resp.json()
@@ -698,7 +729,18 @@ def fetch_options_chain(ticker):
             print(f"[Webull Unofficial] Error fetching option chain for {ticker}: {e}")
             
     # Fallback to Yahoo
-    return _fetch_yahoo_options_chain(ticker)
+    global _yahoo_failures
+    if _yahoo_failures < _YAHOO_MAX_FAILURES:
+        res = _fetch_yahoo_options_chain(ticker)
+        if res is not None:
+            _yahoo_failures = 0
+            return res
+        else:
+            _yahoo_failures += 1
+            if _yahoo_failures >= _YAHOO_MAX_FAILURES:
+                print(f"[Circuit Breaker] Yahoo Finance failed {_YAHOO_MAX_FAILURES}x consecutively — skipping for rest of scan")
+    return None
+
 
 
 def _fetch_yahoo_options_for_expiration(ticker, expiration_ts):
@@ -709,8 +751,9 @@ def _fetch_yahoo_options_for_expiration(ticker, expiration_ts):
     if crumb: params["crumb"] = crumb
 
     try:
-        resp = session.get(url, params=params, timeout=15)
+        resp = session.get(url, params=params, timeout=5)
         if resp.status_code != 200: return None
+
         
         data = resp.json()
         result = data.get("optionChain", {}).get("result", [])
@@ -766,7 +809,18 @@ def fetch_options_for_expiration(ticker, expiration_ts):
             print(f"[Webull Unofficial] Error fetching options at expiration timestamp {expiration_ts}: {e}")
             
     # Fallback to Yahoo
-    return _fetch_yahoo_options_for_expiration(ticker, expiration_ts)
+    global _yahoo_failures
+    if _yahoo_failures < _YAHOO_MAX_FAILURES:
+        res = _fetch_yahoo_options_for_expiration(ticker, expiration_ts)
+        if res is not None:
+            _yahoo_failures = 0
+            return res
+        else:
+            _yahoo_failures += 1
+            if _yahoo_failures >= _YAHOO_MAX_FAILURES:
+                print(f"[Circuit Breaker] Yahoo Finance failed {_YAHOO_MAX_FAILURES}x consecutively — skipping for rest of scan")
+    return None
+
 
 
 # ── Batch download (sequential — for watchlists) ────────────────────
