@@ -56,8 +56,17 @@ def get_unofficial_client():
     global _unofficial_client, _unofficial_initialized
     if _unofficial_initialized:
         return _unofficial_client
+
+    # Bypass immediately in cloud or non-interactive environments to prevent network hangs
+    import sys
+    if os.getenv("RENDER") or not (sys.stdin and sys.stdin.isatty()):
+        print("[Webull Unofficial] Skipping Webull client in cloud/non-interactive environment to prevent hangs.")
+        _unofficial_client = None
+        _unofficial_initialized = True
+        return None
         
     email = os.getenv("WEBULL_EMAIL")
+
     password = os.getenv("WEBULL_PASSWORD")
     trade_pin = os.getenv("WEBULL_TRADE_PIN")
     
@@ -177,8 +186,17 @@ def get_webull_client():
     global _webull_client, _webull_initialized
     if _webull_initialized:
         return _webull_client
-    
+
+    # Bypass immediately in cloud or non-interactive environments to prevent network hangs
+    import sys
+    if os.getenv("RENDER") or not (sys.stdin and sys.stdin.isatty()):
+        print("[Webull OpenAPI] Skipping Webull OpenAPI client in cloud/non-interactive environment to prevent hangs.")
+        _webull_client = None
+        _webull_initialized = True
+        return None
+        
     app_key = os.getenv("WEBULL_APP_KEY")
+
     app_secret = os.getenv("WEBULL_APP_SECRET")
     region_str = os.getenv("WEBULL_REGION", "us").lower()
     

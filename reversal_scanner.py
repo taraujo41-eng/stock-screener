@@ -251,6 +251,10 @@ def fetch_upcoming_earnings(tickers):
     Returns a dict of {ticker: (start_timestamp, end_timestamp)}.
     """
     try:
+        import data_fetcher
+        if data_fetcher._yahoo_failures >= data_fetcher._YAHOO_MAX_FAILURES:
+            return {}
+
         from data_fetcher import _ensure_session
         session, crumb = _ensure_session()
         symbols_str = ",".join(tickers)
@@ -258,8 +262,9 @@ def fetch_upcoming_earnings(tickers):
         params = {"symbols": symbols_str}
         if crumb:
             params["crumb"] = crumb
-        resp = session.get(url, params=params, timeout=10)
+        resp = session.get(url, params=params, timeout=5)
         if resp.status_code == 200:
+            data_fetcher._yahoo_failures = 0  # Reset on success
             data = resp.json()
             results = data.get("quoteResponse", {}).get("result", [])
             earnings = {}
@@ -270,9 +275,14 @@ def fetch_upcoming_earnings(tickers):
                 if sym and (start or end):
                     earnings[sym] = (start, end)
             return earnings
+        else:
+            data_fetcher._yahoo_failures += 1
     except Exception as e:
+        import data_fetcher
+        data_fetcher._yahoo_failures += 1
         print(f"  Error fetching earnings dates: {e}")
     return {}
+
 
 def get_upcoming_earnings_map(tickers):
     """
