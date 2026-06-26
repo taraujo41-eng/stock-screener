@@ -133,10 +133,11 @@ def get_us_tickers():
     """Fetch large-cap US stock tickers (S&P 500 + NASDAQ 100)."""
     tickers = set()
     headers = {"User-Agent": "Mozilla/5.0"}
+    fallback_file = os.path.join(os.path.dirname(__file__), "sp500_nasdaq_fallback.json")
 
     # ── Source 1: S&P 500 ──
     try:
-        html = requests.get("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", headers=headers).text
+        html = requests.get("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", headers=headers, timeout=10).text
         tables = pd.read_html(StringIO(html), attrs={"id": "constituents"})
         sp = tables[0]
         for sym in sp["Symbol"]:
@@ -149,7 +150,7 @@ def get_us_tickers():
 
     # ── Source 2: NASDAQ 100 ──
     try:
-        html = requests.get("https://en.wikipedia.org/wiki/Nasdaq-100", headers=headers).text
+        html = requests.get("https://en.wikipedia.org/wiki/Nasdaq-100", headers=headers, timeout=10).text
         tables = pd.read_html(StringIO(html), attrs={"id": "constituents"})
         ndx = tables[0]
         added = 0
@@ -161,6 +162,32 @@ def get_us_tickers():
         print(f"  Source 2 (NASDAQ 100): +{added} unique tickers")
     except Exception as e:
         print(f"  Source 2 (NASDAQ 100): failed ({e})")
+
+    # ── Local Fallback for Cloud Environments ──
+    # If we couldn't fetch S&P/Nasdaq from Wikipedia, load the local fallback cache.
+    if len(tickers) < 400:
+        if os.path.exists(fallback_file):
+            try:
+                with open(fallback_file, "r") as f:
+                    cached_list = json.load(f)
+                added_cached = 0
+                for sym in cached_list:
+                    if sym not in tickers:
+                        tickers.add(sym)
+                        added_cached += 1
+                print(f"  Loaded {added_cached} tickers from local fallback cache: {fallback_file}")
+            except Exception as e:
+                print(f"  Failed to load fallback tickers: {e}")
+        else:
+            print("  Warning: No local fallback cache file found.")
+    else:
+        # Save successfully fetched tickers to fallback cache
+        try:
+            with open(fallback_file, "w") as f:
+                json.dump(list(tickers), f, indent=2)
+            print(f"  Saved {len(tickers)} tickers to local fallback cache: {fallback_file}")
+        except Exception as e:
+            print(f"  Failed to save fallback tickers: {e}")
 
     # ── Source 3: Major ETFs ──
     etfs = {
