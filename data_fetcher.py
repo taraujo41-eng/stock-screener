@@ -117,6 +117,14 @@ def get_unofficial_client():
                     print(f"[Webull Unofficial] Cached token load failed: {e}")
             
             # 2. Perform Login if cached token fails/does not exist
+            import sys
+            is_interactive = sys.stdin and sys.stdin.isatty() and not os.getenv("RENDER")
+            if not is_interactive:
+                print("[Webull Unofficial] Skipping fresh login in non-interactive/Render environment to prevent hanging.")
+                _unofficial_client = None
+                _unofficial_initialized = True
+                return None
+
             print(f"[Webull Unofficial] Logging in as '{email}'...")
             res = wb.login(email, password, save_token=True, token_path=token_path)
             
