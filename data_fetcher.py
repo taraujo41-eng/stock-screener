@@ -503,6 +503,7 @@ def _fetch_webull_unofficial_one(ticker, days=180, interval="1d", includePrePost
 
 def _fetch_yahoo_one(ticker, days=180, interval="1d", includePrePost="false"):
     """Fetch OHLCV data using direct Yahoo Finance chart API."""
+    global _yahoo_failures
     session, crumb = _ensure_session()
 
     end_ts = int(datetime.now().timestamp())
@@ -527,9 +528,14 @@ def _fetch_yahoo_one(ticker, days=180, interval="1d", includePrePost="false"):
                 params["crumb"] = crumb
             resp = session.get(url, params=params, timeout=5)
 
+        if resp.status_code in (401, 403):
+            _yahoo_failures = _YAHOO_MAX_FAILURES
+            print(f"[Circuit Breaker] Yahoo Finance blocked (HTTP {resp.status_code}) — triggering circuit breaker")
+            return None
 
         if resp.status_code != 200:
             return None
+
 
         data = resp.json()
         chart = data.get("chart", {})
@@ -570,8 +576,13 @@ def _fetch_yahoo_one(ticker, days=180, interval="1d", includePrePost="false"):
 
         return df if not df.empty else None
 
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+        _yahoo_failures = _YAHOO_MAX_FAILURES
+        print(f"[Circuit Breaker] Yahoo Finance timeout/connection error ({e}) — triggering circuit breaker")
+        return None
     except Exception:
         return None
+
 
 
 # ── Unified Single Ticker Fetcher (Resilient Ordering) ────────────────
@@ -614,17 +625,7 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webu
                 if _webull_openapi_failures >= _WEBULL_MAX_FAILURES:
                     print(f"[Circuit Breaker] Webull OpenAPI failed {_WEBULL_MAX_FAILURES}x consecutively — skipping for rest of scan")
 
-    # 3. Fallback to Yahoo Finance
-    global _yahoo_failures
-    if _yahoo_failures < _YAHOO_MAX_FAILURES:
-        df = _fetch_yahoo_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
-        if df is not None:
-            _yahoo_failures = 0
-            return df
-        else:
-            _yahoo_failures += 1
-            if _yahoo_failures >= _YAHOO_MAX_FAILURES:
-                print(f"[Circuit Breaker] Yahoo Finance failed {_YAHOO_MAX_FAILURES}x consecutively — skipping for rest of scan")
+    # 3. Fallback to Yahoo Finance disabled (strictly use Webull data)
     return None
 
 
@@ -633,6 +634,7 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webu
 
 def _fetch_yahoo_options_chain(ticker):
     """Fetch option chain metadata using Yahoo Finance fallback."""
+    global _yahoo_failures
     session, crumb = _ensure_session()
     
     url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker}"
@@ -641,8 +643,12 @@ def _fetch_yahoo_options_chain(ticker):
 
     try:
         resp = session.get(url, params=params, timeout=5)
-        if resp.status_code != 200:
+        if resp.status_code in (401, 403):
+            _yahoo_failures = _YAHOO_MAX_FAILURES
+            print(f"[Circuit Breaker] Yahoo Finance options chain blocked (HTTP {resp.status_code}) — triggering circuit breaker")
+            return None
 
+        if resp.status_code != 200:
             return None
         
         data = resp.json()
@@ -659,8 +665,13 @@ def _fetch_yahoo_options_chain(ticker):
             "underlyingPrice": result.get("quote", {}).get("regularMarketPrice"),
             "firstChain": result.get("options", [{}])[0]
         }
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+        _yahoo_failures = _YAHOO_MAX_FAILURES
+        print(f"[Circuit Breaker] Yahoo Finance options chain timeout/connection error ({e}) — triggering circuit breaker")
+        return None
     except Exception:
         return None
+
 
 
 def fetch_options_chain(ticker):
@@ -746,17 +757,7 @@ def fetch_options_chain(ticker):
         except Exception as e:
             print(f"[Webull Unofficial] Error fetching option chain for {ticker}: {e}")
             
-    # Fallback to Yahoo
-    global _yahoo_failures
-    if _yahoo_failures < _YAHOO_MAX_FAILURES:
-        res = _fetch_yahoo_options_chain(ticker)
-        if res is not None:
-            _yahoo_failures = 0
-            return res
-        else:
-            _yahoo_failures += 1
-            if _yahoo_failures >= _YAHOO_MAX_FAILURES:
-                print(f"[Circuit Breaker] Yahoo Finance failed {_YAHOO_MAX_FAILURES}x consecutively — skipping for rest of scan")
+    # Fallback to Yahoo disabled (strictly use Webull data)
     return None
 
 
@@ -826,17 +827,7 @@ def fetch_options_for_expiration(ticker, expiration_ts):
         except Exception as e:
             print(f"[Webull Unofficial] Error fetching options at expiration timestamp {expiration_ts}: {e}")
             
-    # Fallback to Yahoo
-    global _yahoo_failures
-    if _yahoo_failures < _YAHOO_MAX_FAILURES:
-        res = _fetch_yahoo_options_for_expiration(ticker, expiration_ts)
-        if res is not None:
-            _yahoo_failures = 0
-            return res
-        else:
-            _yahoo_failures += 1
-            if _yahoo_failures >= _YAHOO_MAX_FAILURES:
-                print(f"[Circuit Breaker] Yahoo Finance failed {_YAHOO_MAX_FAILURES}x consecutively — skipping for rest of scan")
+    # Fallback to Yahoo disabled (strictly use Webull data)
     return None
 
 
@@ -1109,66 +1100,8 @@ def fetch_news(ticker, limit=5):
         except Exception as e:
             print(f"[Webull Unofficial] News fetch error for {ticker}: {e}")
 
-    # 2. Fallback to Yahoo Finance search endpoint
-    try:
-        print(f"[Yahoo Fallback] Fetching news for {ticker}...")
-        session, crumb = _ensure_session()
-        url = "https://query2.finance.yahoo.com/v1/finance/search"
-        raw_limit = max(20, limit * 3)
-        params = {"q": ticker, "newsCount": raw_limit}
-        if crumb:
-            params["crumb"] = crumb
-        resp = session.get(url, params=params, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            yahoo_news = data.get("news", [])
-            normalized = []
-            for item in yahoo_news:
-                title = item.get("title", "")
-                
-                # Check related tickers tag
-                related_tickers = item.get("relatedTickers", [])
-                
-                # Yahoo search results filtering:
-                # Must be tagged with ticker, AND must apply to <= 3 tickers (avoiding macro index roundups).
-                # If relatedTickers is completely missing, fallback to title/regex checking.
-                ticker_upper = ticker.upper()
-                is_target_stock_specific = False
-                
-                if related_tickers:
-                    if ticker_upper in related_tickers and len(related_tickers) <= 3:
-                        is_target_stock_specific = True
-                else:
-                    # Fallback if relatedTickers list is not present
-                    if is_news_relevant(title, ticker):
-                        is_target_stock_specific = True
-                        
-                if not is_target_stock_specific:
-                    continue
-                    
-                publisher = item.get("publisher", "Yahoo Finance")
-                url = item.get("link", "")
-                
-                # Filter out TipRanks articles (paid site)
-                if publisher.lower() == "tipranks" or "tipranks.com" in url.lower():
-                    continue
-                    
-                pub_ts = item.get("providerPublishTime")
-                if pub_ts:
-                    publish_time = datetime.fromtimestamp(int(pub_ts), _tz.utc)
-                else:
-                    publish_time = datetime.now(_tz.utc)
-                normalized.append({
-                    "title": title,
-                    "publisher": publisher,
-                    "publish_time": publish_time,
-                    "url": url
-                })
-                if len(normalized) >= limit:
-                    break
-            return normalized
-    except Exception as e:
-        print(f"[Yahoo Fallback] News fetch error for {ticker}: {e}")
+    # 2. Fallback to Yahoo Finance search endpoint disabled (strictly use Webull)
+    pass
 
     return []
 

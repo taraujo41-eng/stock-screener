@@ -6,8 +6,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#0a0e17">
-  <meta name="description" content="Real-time stock reversal scanner — scans the entire US market for RSI, candlestick patterns, and swing setups.">
-  <title>Reversal Scanner</title>
+  <meta name="description" content="Real-time 3-Sigma Bot Reversal Scanner — scans for 15m Close crossing Daily 3-Sigma Bollinger Bands.">
+  <title>3-Sigma Bot Scanner</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="/icon.png">
   <link rel="icon" href="/icon.png">
@@ -23,42 +23,20 @@
 
     <!-- Header -->
     <header class="header">
-      <span class="header__icon">📈</span>
-      <h1 class="header__title">Reversal Scanner</h1>
-      <p class="header__subtitle">Candlestick · RSI · Swing Levels</p>
+      <span class="header__icon">🔔</span>
+      <h1 class="header__title">3-Sigma Bot Scanner</h1>
+      <p class="header__subtitle">15m Close × Daily 3-Sigma Bollinger Bands</p>
     </header>
 
-    <!-- Scan Mode Tabs -->
-    <div class="mode-tabs" id="modeTabs">
-      <button class="mode-tab mode-tab--active" data-mode="full" onclick="setMode('full', this)">
-        🌐 Full Market
-      </button>
-      <button class="mode-tab" data-mode="options" onclick="setMode('options', this)">
-        🎯 Options
-      </button>
-      <button class="mode-tab" data-mode="3sigma" onclick="setMode('3sigma', this)">
-        🔔 3-Sigma Bot
-      </button>
-    </div>
-
-    <!-- Mode description -->
+    <!-- Scanner description -->
     <div class="mode-info">
-      <p class="mode-desc" id="modeDesc">Scans entire US market — takes 2-3 minutes</p>
-    </div>
-
-    <!-- Extended Hours Toggle -->
-    <div class="ext-hours-wrap" id="extHoursWrap">
-      <label class="ext-hours-label">
-        <input type="checkbox" id="extHoursToggle" class="ext-hours-checkbox">
-        <span class="ext-hours-slider"></span>
-        <span class="ext-hours-text">🌙 Include Extended Hours</span>
-      </label>
+      <p class="mode-desc" id="modeDesc">Scans full market list for 15m Close piercing Daily 3-Sigma Bollinger Bands</p>
     </div>
 
     <!-- Scan Button -->
     <button class="scan-btn" id="scanBtn" onclick="runScan()">
       <div class="scan-btn__spinner"></div>
-      <span class="scan-btn__text">🌐  Scan Full Market</span>
+      <span class="scan-btn__text">🔔  Scan 3-Sigma Bot</span>
     </button>
 
     <!-- Progress bar (full scan only) -->

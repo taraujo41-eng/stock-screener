@@ -4,7 +4,7 @@
 
 let scanData = [];
 let currentFilter = "all";
-let scanMode = "full";
+let scanMode = "3sigma";
 let pollTimer = null;
 
 // ── Format helpers ─────────────────────────────────────────
@@ -32,102 +32,35 @@ function fmtEta(seconds) {
 
 function updateModeDesc() {
   const desc = document.getElementById("modeDesc");
-  if (scanMode === "full") {
-    desc.textContent = "Scans entire US market — takes 2-3 minutes";
-  } else if (scanMode === "options") {
-    desc.textContent = "Scans for high-probability options setups — takes 2-3 minutes";
-  } else if (scanMode === "3sigma") {
-    desc.textContent = "Scans full market list for 15m regular hour Close piercing Daily 3-Sigma Bollinger Bands";
-  }
+  desc.textContent = "Scans full market list for 15m regular hour Close piercing Daily 3-Sigma Bollinger Bands";
 }
 
-// ── Mode switching ─────────────────────────────────────────
-
-async function setMode(mode, btn) {
-  scanMode = mode;
-  document.querySelectorAll(".mode-tab").forEach(b =>
-    b.classList.remove("mode-tab--active"));
-  btn.classList.add("mode-tab--active");
-
+async function loadLast3SigmaScan() {
   const scanBtn = document.getElementById("scanBtn");
-  if (mode === "full") {
-    scanBtn.querySelector(".scan-btn__text").textContent = "🌐  Scan Full Market";
-    // Auto-load the persistent full market scan results
-    try {
-      showSkeleton();
-      const res = await fetch("/api/scan/full/results");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.ok && data.results) {
-          displayResults(data);
-          updateModeDesc();
-          return;
-        }
+  scanBtn.querySelector(".scan-btn__text").textContent = "🔔  Scan 3-Sigma Bot";
+  try {
+    showSkeleton();
+    const res = await fetch("/api/scan/3sigma/results");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok && data.results) {
+        displayResults(data);
+        updateModeDesc();
+        return;
       }
-    } catch (e) {
-      console.error("No saved full scan available yet");
     }
-    
-    // If no saved scan exists yet
-    document.getElementById("results").innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state__icon">🌐</div>
-        <div class="empty-state__title">Ready to scan</div>
-        <div class="empty-state__text">Click the button above to scan the full market</div>
-      </div>
-    `;
-    hideAuxUI();
-  } else if (mode === "options") {
-    scanBtn.querySelector(".scan-btn__text").textContent = "🎯  Scan Options";
-    try {
-      showSkeleton();
-      const res = await fetch("/api/scan/options/full/results");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.ok && data.results) {
-          displayResults(data);
-          updateModeDesc();
-          return;
-        }
-      }
-    } catch (e) {
-      console.error("No saved options scan available yet");
-    }
-
-    document.getElementById("results").innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state__icon">🎯</div>
-        <div class="empty-state__title">Ready to scan</div>
-        <div class="empty-state__text">Click above to find high-probability options setups<br>DTE 20-60 · Delta 0.40-0.70 · IV Rank &lt;30%</div>
-      </div>
-    `;
-    hideAuxUI();
-  } else if (mode === "3sigma") {
-    scanBtn.querySelector(".scan-btn__text").textContent = "🔔  Scan 3-Sigma Bot";
-    try {
-      showSkeleton();
-      const res = await fetch("/api/scan/3sigma/results");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.ok && data.results) {
-          displayResults(data);
-          updateModeDesc();
-          return;
-        }
-      }
-    } catch (e) {
-      console.error("No saved 3-sigma scan available yet");
-    }
-
-    document.getElementById("results").innerHTML = `
-      <div class="empty-state">
-        <div class="empty-state__icon">🔔</div>
-        <div class="empty-state__title">Ready to scan</div>
-        <div class="empty-state__text">Click above to scan the full market list for 15m Close crossing Daily 3-Sigma Bollinger Bands</div>
-      </div>
-    `;
-    hideAuxUI();
+  } catch (e) {
+    console.error("No saved 3-sigma scan available yet");
   }
+
+  document.getElementById("results").innerHTML = `
+    <div class="empty-state">
+      <div class="empty-state__icon">🔔</div>
+      <div class="empty-state__title">Ready to scan</div>
+      <div class="empty-state__text">Click above to scan the full market list for 15m Close crossing Daily 3-Sigma Bollinger Bands</div>
+    </div>
+  `;
+  hideAuxUI();
   updateModeDesc();
 }
 
@@ -578,8 +511,8 @@ function displayResults(data) {
   if (data.tickers_scanned) {
     badge.textContent = `Scanned ${data.tickers_scanned.toLocaleString()} tickers`;
     badge.classList.remove("hidden");
-  } else if (data.mode === "full_market" || data.mode === "options_full") {
-    badge.textContent = `Full market scan`;
+  } else if (data.mode === "3sigma") {
+    badge.textContent = `3-Sigma Bot scan`;
     badge.classList.remove("hidden");
   }
 
@@ -689,7 +622,7 @@ function startProgressPolling(resultsEndpoint) {
         const btn = document.getElementById("scanBtn");
         btn.classList.remove("scan-btn--loading");
         btn.disabled = false;
-        document.getElementById("modeTabs").classList.remove("hidden");
+        // No tabs to show
       }
     } catch (e) {
       console.error("Progress poll error:", e);
@@ -716,22 +649,9 @@ async function runScan() {
 
   document.getElementById("emptyState")?.classList.add("hidden");
   document.getElementById("results").innerHTML = "";
-  document.getElementById("modeTabs").classList.add("hidden");
 
-  const extHours = document.getElementById("extHoursToggle")?.checked || false;
-
-  // All modes use the same async pattern
-  let endpoint, resultsEndpoint;
-  if (scanMode === "options") {
-    endpoint = "/api/scan/options/full";
-    resultsEndpoint = "/api/scan/options/full/results";
-  } else if (scanMode === "3sigma") {
-    endpoint = "/api/scan/3sigma";
-    resultsEndpoint = "/api/scan/3sigma/results";
-  } else {
-    endpoint = "/api/scan/full";
-    resultsEndpoint = "/api/scan/full/results";
-  }
+  const endpoint = "/api/scan/3sigma";
+  const resultsEndpoint = "/api/scan/3sigma/results";
 
   // Retry logic for Render cold starts
   const maxRetries = 3;
@@ -751,7 +671,7 @@ async function runScan() {
       const res = await fetch(endpoint, { 
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ extended_hours: extHours })
+        body: JSON.stringify({})
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "Failed to start scan");
@@ -780,7 +700,6 @@ async function runScan() {
         document.getElementById("results").innerHTML = errorHtml;
         btn.classList.remove("scan-btn--loading");
         btn.disabled = false;
-        document.getElementById("modeTabs").classList.remove("hidden");
       }
     }
   }
@@ -825,7 +744,7 @@ async function resetServerScanState(btnEl) {
 
 // ── Init ───────────────────────────────────────────────────────
 
-updateModeDesc();
+loadLast3SigmaScan();
 
 function openNewsModal(newsJsonEncoded) {
   try {

@@ -7,7 +7,6 @@ Then open http://<your-mac-ip>:5050 on your phone.
 from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
 from reversal_scanner import (
-    full_market_scan, options_full_market_scan,
     three_sigma_full_market_scan,
     scan_progress, _reset_progress
 )
@@ -48,11 +47,9 @@ except Exception as e:
 
 # ── Scan Persistence ───────────────────────────────────────────────────
 
-SCAN_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_scan.json")
-OPTIONS_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_options_scan.json")
 THREE_SIGMA_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_3sigma_scan.json")
 
-def load_last_scan(filepath=SCAN_RESULTS_FILE):
+def load_last_scan(filepath=THREE_SIGMA_RESULTS_FILE):
     """Load the last scan results from file."""
     if os.path.exists(filepath):
         try:
@@ -62,7 +59,7 @@ def load_last_scan(filepath=SCAN_RESULTS_FILE):
             pass
     return None
 
-def save_last_scan(data, filepath=SCAN_RESULTS_FILE):
+def save_last_scan(data, filepath=THREE_SIGMA_RESULTS_FILE):
     """Save the scan results to file for persistence."""
     try:
         with open(filepath, "w") as f:
@@ -80,50 +77,7 @@ _scan_running = False
 def index():
     return send_from_directory("static", "index.html")
 
-# ── API: Full market reversal scan (async) ─────────────────────────────
 
-@app.route("/api/scan/full", methods=["POST"])
-def scan_full():
-    """Start a full market reversal scan in the background."""
-    global _scan_running
-
-    with _scan_lock:
-        if _scan_running:
-            return jsonify({"ok": False, "error": "A scan is already running"}), 409
-        _scan_running = True
-
-    req_data = request.get_json(silent=True) or {}
-    extended_hours = req_data.get("extended_hours", False)
-
-    def _run():
-        global _scan_running
-        try:
-            et_tz = get_ny_timezone()
-            df = full_market_scan(extended_hours=extended_hours)
-            results_data = {
-                "ok": True,
-                "mode": "full_market",
-                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
-                "count": len(df) if not df.empty else 0,
-                "results": df.to_dict(orient="records") if not df.empty else [],
-            }
-            app.config["LAST_FULL_RESULTS"] = results_data
-            save_last_scan(results_data)
-        except Exception as e:
-            app.config["LAST_FULL_RESULTS"] = {
-                "ok": False,
-                "error": str(e),
-            }
-            scan_progress["status"] = "error"
-            scan_progress["phase_label"] = str(e)
-        finally:
-            with _scan_lock:
-                _scan_running = False
-
-    thread = threading.Thread(target=_run, daemon=True)
-    thread.start()
-
-    return jsonify({"ok": True, "message": "Full market reversal scan started"})
 
 # ── API: Check scan progress ────────────────────────────────────────
 
@@ -132,75 +86,7 @@ def scan_full_progress():
     """Return current progress of the scan."""
     return jsonify(scan_progress)
 
-# ── API: Get full reversal scan results ────────────────────────────────
 
-@app.route("/api/scan/full/results", methods=["GET"])
-def scan_full_results():
-    """Return the results of the last full market reversal scan."""
-    results = app.config.get("LAST_FULL_RESULTS")
-    
-    # If not in memory, try loading from file
-    if results is None:
-        results = load_last_scan(SCAN_RESULTS_FILE)
-        if results:
-            app.config["LAST_FULL_RESULTS"] = results
-
-    if results is None:
-        return jsonify({"ok": False, "error": "No scan results available"}), 404
-        
-    return jsonify(results)
-
-# ── API: Options full market scan (async) ──────────────────────────────
-
-@app.route("/api/scan/options/full", methods=["POST"])
-def scan_options_full():
-    """Start a full market options scan."""
-    global _scan_running
-
-    with _scan_lock:
-        if _scan_running:
-            return jsonify({"ok": False, "error": "A scan is already running"}), 409
-        _scan_running = True
-
-    req_data = request.get_json(silent=True) or {}
-    extended_hours = req_data.get("extended_hours", False)
-
-    def _run():
-        global _scan_running
-        try:
-            et_tz = get_ny_timezone()
-            df = options_full_market_scan(extended_hours=extended_hours)
-            results_data = {
-                "ok": True,
-                "mode": "options_full",
-                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
-                "count": len(df) if not df.empty else 0,
-                "results": df.to_dict(orient="records") if not df.empty else [],
-            }
-            app.config["LAST_OPTIONS_FULL_RESULTS"] = results_data
-            save_last_scan(results_data, OPTIONS_RESULTS_FILE)
-        except Exception as e:
-            app.config["LAST_OPTIONS_FULL_RESULTS"] = {"ok": False, "error": str(e)}
-            scan_progress["status"] = "error"
-            scan_progress["phase_label"] = str(e)
-        finally:
-            with _scan_lock:
-                _scan_running = False
-
-    threading.Thread(target=_run, daemon=True).start()
-    return jsonify({"ok": True, "message": "Full options scan started"})
-
-@app.route("/api/scan/options/full/results", methods=["GET"])
-def scan_options_full_results():
-    results = app.config.get("LAST_OPTIONS_FULL_RESULTS")
-    if results is None:
-        results = load_last_scan(OPTIONS_RESULTS_FILE)
-        if results:
-            app.config["LAST_OPTIONS_FULL_RESULTS"] = results
-
-    if results is None:
-        return jsonify({"ok": False, "error": "No scan results available"}), 404
-    return jsonify(results)
 
 # ── API: 3-Sigma Scans (async) ──────────────────────────────────────
 
