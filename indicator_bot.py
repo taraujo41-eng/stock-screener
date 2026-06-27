@@ -5,6 +5,7 @@ import logging
 import smtplib
 import threading
 import pytz
+import json
 
 def get_ny_timezone():
     try:
@@ -288,6 +289,15 @@ def bot_loop():
                     tickers = get_us_tickers()
                 except Exception as e:
                     logger.error(f"Failed to load full US tickers list: {e}")
+            elif tickers_mode == "WATCHLIST":
+                try:
+                    watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
+                    if os.path.exists(watchlist_file):
+                        with open(watchlist_file, "r") as f:
+                            tickers = json.load(f)
+                        logger.info(f"Loaded {len(tickers)} tickers from watchlist.json")
+                except Exception as e:
+                    logger.error(f"Failed to load watchlist.json: {e}")
             
             # Fallback if all fails or custom comma-separated list
             if not tickers:
