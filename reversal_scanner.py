@@ -2038,7 +2038,7 @@ def three_sigma_full_market_scan(extended_hours=False):
     _update_progress("downloading", "Initiating 15m bar download...", 0, total, pct=40)
     stock_data = fetch_batch_concurrent(
         tickers, days=15, max_workers=6,
-        on_progress=_on_15m_progress, delay=0.05, interval="15m", includePrePost="false"
+        on_progress=_on_15m_progress, delay=0.05, interval="15m", includePrePost="true" if extended_hours else "false"
     )
 
     for i, (sym, df_15m) in enumerate(stock_data.items()):

@@ -650,6 +650,8 @@ async function runScan() {
   document.getElementById("emptyState")?.classList.add("hidden");
   document.getElementById("results").innerHTML = "";
 
+  const extHours = document.getElementById("extHoursToggle")?.checked || false;
+
   const endpoint = "/api/scan/3sigma";
   const resultsEndpoint = "/api/scan/3sigma/results";
 
@@ -671,7 +673,7 @@ async function runScan() {
       const res = await fetch(endpoint, { 
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({})
+        body: JSON.stringify({ extended_hours: extHours })
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "Failed to start scan");

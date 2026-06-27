@@ -100,11 +100,14 @@ def scan_3sigma():
             return jsonify({"ok": False, "error": "A scan is already running"}), 409
         _scan_running = True
 
+    req_data = request.get_json(silent=True) or {}
+    extended_hours = req_data.get("extended_hours", False)
+
     def _run():
         global _scan_running
         try:
             et_tz = get_ny_timezone()
-            df = three_sigma_full_market_scan()
+            df = three_sigma_full_market_scan(extended_hours=extended_hours)
             results_data = {
                 "ok": True,
                 "mode": "3sigma",
