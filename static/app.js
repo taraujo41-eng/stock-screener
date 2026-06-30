@@ -140,18 +140,40 @@ async function switchTab(mode) {
     tab.classList.remove("mode-tab--active");
   });
   
+  // Clear any existing polling timer if we change tabs
+  stopProgressPolling();
+  
+  // Reset scan button loading states and set text
+  const btn = document.getElementById("scanBtn");
+  btn.classList.remove("scan-btn--loading");
+  btn.disabled = false;
+  const btnText = btn.querySelector(".scan-btn__text");
+  
   if (mode === "3sigma") {
+    if (btnText) btnText.textContent = "🔔  Scan 3-Sigma Bot";
     document.getElementById("tab3Sigma").classList.add("mode-tab--active");
     document.getElementById("extHoursWrap")?.classList.remove("hidden");
-    await loadLast3SigmaScan();
   } else if (mode === "2sigma") {
+    if (btnText) btnText.textContent = "⚡  Scan 2-Sigma Bot";
     document.getElementById("tab2Sigma").classList.add("mode-tab--active");
     document.getElementById("extHoursWrap")?.classList.remove("hidden");
-    await loadLast2SigmaScan();
   } else if (mode === "52w") {
+    if (btnText) btnText.textContent = "📈  Scan 52-Week Reversal";
     document.getElementById("tab52w").classList.add("mode-tab--active");
     document.getElementById("extHoursWrap")?.classList.add("hidden");
-    await loadLast52wScan();
+  }
+
+  // Check if a scan is already running on the server
+  const running = await checkActiveScan();
+  if (!running) {
+    // If no scan is running, load historical results for the tab
+    if (mode === "3sigma") {
+      await loadLast3SigmaScan();
+    } else if (mode === "2sigma") {
+      await loadLast2SigmaScan();
+    } else if (mode === "52w") {
+      await loadLast52wScan();
+    }
   }
 }
 
@@ -676,15 +698,63 @@ function setFilter(filter, btnEl) {
 
 // ── Progress polling (both scan modes) ─────────────────────
 
-function startProgressPolling(resultsEndpoint) {
+function startProgressPolling() {
   const wrap = document.getElementById("progressWrap");
   wrap.classList.remove("hidden");
+
+  // Disable buttons and set loading state for the scanner button
+  const btn = document.getElementById("scanBtn");
+  btn.classList.add("scan-btn--loading");
+  btn.disabled = true;
+
+  if (pollTimer) {
+    clearInterval(pollTimer);
+  }
 
   pollTimer = setInterval(async () => {
     try {
       const res = await fetch(`/api/scan/progress?t=${Date.now()}`);
       const p = await res.json();
 
+      // If scanner is idle or not running, stop polling
+      if (p.status !== "running") {
+        stopProgressPolling();
+
+        if (p.status === "done") {
+          let targetResultsEndpoint;
+          if (p.mode === "3sigma") {
+            targetResultsEndpoint = "/api/scan/3sigma/results";
+          } else if (p.mode === "2sigma") {
+            targetResultsEndpoint = "/api/scan/2sigma/results";
+          } else if (p.mode === "52w") {
+            targetResultsEndpoint = "/api/scan/52w/results";
+          }
+
+          // Only display results if user is on the tab of the finished scan
+          if (p.mode === scanMode && targetResultsEndpoint) {
+            const resData = await fetch(`${targetResultsEndpoint}?t=${Date.now()}`);
+            const data = await resData.json();
+            if (data.ok) {
+              displayResults(data);
+            }
+          }
+        } else if (p.status === "error") {
+          document.getElementById("results").innerHTML = `
+            <div class="empty-state">
+              <div class="empty-state__icon">⚠️</div>
+              <div class="empty-state__title">Scan error</div>
+              <div class="empty-state__text">${p.phase_label}</div>
+            </div>
+          `;
+        }
+
+        const scanBtn = document.getElementById("scanBtn");
+        scanBtn.classList.remove("scan-btn--loading");
+        scanBtn.disabled = false;
+        return;
+      }
+
+      // If running, update UI
       document.getElementById("progressPhase").textContent = p.phase_label || "Working...";
       document.getElementById("progressPct").textContent = `${p.pct}%`;
       document.getElementById("progressFill").style.width = `${p.pct}%`;
@@ -697,31 +767,6 @@ function startProgressPolling(resultsEndpoint) {
         fill.style.background = "linear-gradient(90deg, #6366f1, #818cf8)";
       } else if (p.phase === "analyzing") {
         fill.style.background = "linear-gradient(90deg, #22c55e, #4ade80)";
-      }
-
-      if (p.status === "done" || p.status === "error") {
-        stopProgressPolling();
-
-        if (p.status === "done") {
-          const resData = await fetch(`${resultsEndpoint}?t=${Date.now()}`);
-          const data = await resData.json();
-          if (data.ok) {
-            displayResults(data);
-          }
-        } else {
-          document.getElementById("results").innerHTML = `
-            <div class="empty-state">
-              <div class="empty-state__icon">⚠️</div>
-              <div class="empty-state__title">Scan error</div>
-              <div class="empty-state__text">${p.phase_label}</div>
-            </div>
-          `;
-        }
-
-        const btn = document.getElementById("scanBtn");
-        btn.classList.remove("scan-btn--loading");
-        btn.disabled = false;
-        // No tabs to show
       }
     } catch (e) {
       console.error("Progress poll error:", e);
@@ -785,7 +830,7 @@ async function runScan() {
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "Failed to start scan");
-      startProgressPolling(resultsEndpoint);
+      startProgressPolling();
       return; // success — exit the retry loop
     } catch (err) {
       if (attempt === maxRetries) {
@@ -854,7 +899,26 @@ async function resetServerScanState(btnEl) {
 
 // ── Init ───────────────────────────────────────────────────────
 
-loadLast3SigmaScan();
+async function checkActiveScan() {
+  try {
+    const res = await fetch(`/api/scan/progress?t=${Date.now()}`);
+    if (!res.ok) return false;
+    const p = await res.json();
+    if (p.status === "running") {
+      startProgressPolling();
+      return true;
+    }
+  } catch (e) {
+    console.error("Error checking active scan:", e);
+  }
+  return false;
+}
+
+checkActiveScan().then(running => {
+  if (!running) {
+    loadLast3SigmaScan();
+  }
+});
 
 function openNewsModal(newsJsonEncoded) {
   try {

@@ -103,6 +103,8 @@ def scan_3sigma():
         if _scan_running:
             return jsonify({"ok": False, "error": "A scan is already running"}), 409
         _scan_running = True
+        _reset_progress(status="running", mode="3sigma")
+        scan_progress["phase_label"] = "Initiating scan..."
 
     req_data = request.get_json(silent=True) or {}
     extended_hours = req_data.get("extended_hours", False)
@@ -158,6 +160,8 @@ def scan_2sigma():
         if _scan_running:
             return jsonify({"ok": False, "error": "A scan is already running"}), 409
         _scan_running = True
+        _reset_progress(status="running", mode="2sigma")
+        scan_progress["phase_label"] = "Initiating scan..."
 
     req_data = request.get_json(silent=True) or {}
     extended_hours = req_data.get("extended_hours", False)
@@ -212,6 +216,8 @@ def scan_52w():
         if _scan_running:
             return jsonify({"ok": False, "error": "A scan is already running"}), 409
         _scan_running = True
+        _reset_progress(status="running", mode="52w")
+        scan_progress["phase_label"] = "Initiating scan..."
 
     req_data = request.get_json(silent=True) or {}
     extended_hours = req_data.get("extended_hours", False)

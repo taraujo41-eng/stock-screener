@@ -33,6 +33,7 @@ warnings.filterwarnings("ignore")
 
 scan_progress = {
     "status": "idle",       # idle | running | done | error
+    "mode": "",             # 3sigma | 2sigma | 52w
     "phase": "",            # fetching_tickers | downloading | analyzing | complete
     "phase_label": "",
     "current": 0,
@@ -43,9 +44,9 @@ scan_progress = {
     "eta_seconds": 0,
     "debug_log": [],
 }
-def _reset_progress():
+def _reset_progress(status="idle", mode=""):
     scan_progress.update({
-        "status": "idle", "phase": "", "phase_label": "",
+        "status": status, "mode": mode, "phase": "", "phase_label": "",
         "current": 0, "total": 0, "found": 0,
         "ticker": "", "pct": 0, "eta_seconds": 0,
         "debug_log": [],
@@ -2010,8 +2011,7 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
 
 def three_sigma_full_market_scan(extended_hours=False):
     """Scan all US tickers for 3-Sigma Daily Bands + 15m regular hours crossings."""
-    _reset_progress()
-    scan_progress["status"] = "running"
+    _reset_progress(status="running")
     start_time = time.time()
 
     tickers = get_us_tickers()
@@ -2072,8 +2072,7 @@ def three_sigma_full_market_scan(extended_hours=False):
 
 def two_sigma_full_market_scan(extended_hours=False):
     """Scan all US tickers for 2-Sigma Daily Bands + 15m regular hours crossings."""
-    _reset_progress()
-    scan_progress["status"] = "running"
+    _reset_progress(status="running")
     start_time = time.time()
 
     tickers = get_us_tickers()
@@ -2135,8 +2134,7 @@ def two_sigma_full_market_scan(extended_hours=False):
 
 def fifty_two_week_reversal_scan(extended_hours=False):
     """Scan all US tickers for 52-week high/low with daily RSI divergence."""
-    _reset_progress()
-    scan_progress["status"] = "running"
+    _reset_progress(status="running")
     start_time = time.time()
 
     tickers = get_us_tickers()
