@@ -119,6 +119,7 @@ def scan_3sigma():
             }
             app.config["LAST_3SIGMA_RESULTS"] = results_data
             save_last_scan(results_data, THREE_SIGMA_RESULTS_FILE)
+            scan_progress["status"] = "done"
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -172,6 +173,7 @@ def scan_52w():
             }
             app.config["LAST_52W_RESULTS"] = results_data
             save_last_scan(results_data, FIFTY_TWO_WEEK_RESULTS_FILE)
+            scan_progress["status"] = "done"
         except Exception as e:
             import traceback
             traceback.print_exc()

@@ -2058,7 +2058,7 @@ def three_sigma_full_market_scan(extended_hours=False):
 
     total_time = time.time() - start_time
     scan_progress.update({
-        "status": "done", "phase": "complete",
+        "status": "finishing", "phase": "complete",
         "phase_label": f"Done — {len(results)} 3-sigma signals found",
         "current": total, "total": total,
         "found": len(results), "pct": 100, "eta_seconds": 0,
@@ -2110,11 +2110,18 @@ def fifty_two_week_reversal_scan(extended_hours=False):
             fiftyTwoWeekHigh = float(df_daily['High'].max())
             fiftyTwoWeekLow = float(df_daily['Low'].min())
             
-            # Check near 52w high/low (within 3% tolerance)
-            at_52w_low = last_price <= fiftyTwoWeekLow * 1.03
-            at_52w_high = last_price >= fiftyTwoWeekHigh * 0.97
+            # Proximity thresholds
+            hit_52w_low = last_price <= fiftyTwoWeekLow
+            hit_52w_high = last_price >= fiftyTwoWeekHigh
+            near_52w_low_3pct = last_price <= fiftyTwoWeekLow * 1.03
+            near_52w_high_3pct = last_price >= fiftyTwoWeekHigh * 0.97
+            near_52w_low_5pct = last_price <= fiftyTwoWeekLow * 1.05
+            near_52w_high_5pct = last_price >= fiftyTwoWeekHigh * 0.95
             
-            if not at_52w_low and not at_52w_high:
+            is_bullish = near_52w_low_5pct
+            is_bearish = near_52w_high_5pct
+            
+            if not is_bullish and not is_bearish:
                 continue
 
             # Compute RSI
@@ -2122,30 +2129,59 @@ def fifty_two_week_reversal_scan(extended_hours=False):
             if len(rsi_series) < 22:
                 continue
             rsi_val = float(rsi_series.iloc[-1])
+            prev_rsi = float(rsi_series.iloc[-2]) if len(rsi_series) > 1 else rsi_val
+            
+            # RSI hooks
+            rsi_bull_hook = prev_rsi < 30 <= rsi_val
+            rsi_bear_hook = prev_rsi > 70 >= rsi_val
             
             # RSI Divergence detection
             bull_div, bear_div = detect_rsi_divergence(df_daily['Close'], rsi_series, lookback=20)
             
-            is_bullish = at_52w_low and bull_div
-            is_bearish = at_52w_high and bear_div
-            
-            if not is_bullish and not is_bearish:
-                continue
-
             # Confirmations score & tags
             score = 10
             reasons_list = []
             
             if is_bullish:
-                reasons_list.append("52w Low Bull Div")
+                if hit_52w_low:
+                    score += 3
+                    reasons_list.append("Hits 52w Low")
+                elif near_52w_low_3pct:
+                    score += 2
+                    reasons_list.append("At 52w Low")
+                else:
+                    score += 1
+                    reasons_list.append("Near 52w Low")
+                
+                if bull_div:
+                    score += 4
+                    reasons_list.append("RSI Divergence")
                 if rsi_val <= 30:
                     score += 2
                     reasons_list.append(f"RSI Oversold ({rsi_val:.1f})")
+                elif rsi_bull_hook:
+                    score += 2
+                    reasons_list.append("RSI Bull Hook")
             else:
-                reasons_list.append("52w High Bear Div")
+                if hit_52w_high:
+                    score += 3
+                    reasons_list.append("Hits 52w High")
+                elif near_52w_high_3pct:
+                    score += 2
+                    reasons_list.append("At 52w High")
+                else:
+                    score += 1
+                    reasons_list.append("Near 52w High")
+                    
+                if bear_div:
+                    score += 4
+                    reasons_list.append("RSI Divergence")
                 if rsi_val >= 70:
                     score += 2
                     reasons_list.append(f"RSI Overbought ({rsi_val:.1f})")
+                elif rsi_bear_hook:
+                    score += 2
+                    reasons_list.append("RSI Bear Hook")
 
             # Technical indicators
             rvol = compute_rvol(df_daily)
@@ -2255,7 +2291,7 @@ def fifty_two_week_reversal_scan(extended_hours=False):
 
     total_time = time.time() - start_time
     scan_progress.update({
-        "status": "done", "phase": "complete",
+        "status": "finishing", "phase": "complete",
         "phase_label": f"Done — {len(results)} 52w reversals found",
         "current": total, "total": total,
         "found": len(results), "pct": 100, "eta_seconds": 0,
