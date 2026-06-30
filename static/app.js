@@ -605,6 +605,14 @@ function displayResults(data) {
   } else if (data.mode === "3sigma") {
     badge.textContent = `3-Sigma Bot scan`;
     badge.classList.remove("hidden");
+  } else if (data.mode === "2sigma") {
+    badge.textContent = `2-Sigma Bot scan`;
+    badge.classList.remove("hidden");
+  } else if (data.mode === "52w") {
+    badge.textContent = `52-Week Reversal scan`;
+    badge.classList.remove("hidden");
+  } else {
+    badge.classList.add("hidden");
   }
 
   updateStats();
