@@ -6,6 +6,7 @@ let scanData = [];
 let currentFilter = "all";
 let scanMode = "3sigma";
 let pollTimer = null;
+let hideTimeout = null;
 
 // ── Format helpers ─────────────────────────────────────────
 
@@ -162,6 +163,7 @@ async function switchTab(mode) {
     document.getElementById("tab52w").classList.add("mode-tab--active");
     document.getElementById("extHoursWrap")?.classList.add("hidden");
   }
+  updateModeDesc();
 
   // Check if a scan is already running on the server
   const running = await checkActiveScan();
@@ -699,6 +701,10 @@ function setFilter(filter, btnEl) {
 // ── Progress polling (both scan modes) ─────────────────────
 
 function startProgressPolling() {
+  if (hideTimeout) {
+    clearTimeout(hideTimeout);
+    hideTimeout = null;
+  }
   const wrap = document.getElementById("progressWrap");
   wrap.classList.remove("hidden");
 
@@ -779,8 +785,13 @@ function stopProgressPolling() {
     clearInterval(pollTimer);
     pollTimer = null;
   }
-  setTimeout(() => {
+  if (hideTimeout) {
+    clearTimeout(hideTimeout);
+    hideTimeout = null;
+  }
+  hideTimeout = setTimeout(() => {
     document.getElementById("progressWrap").classList.add("hidden");
+    hideTimeout = null;
   }, 800);
 }
 
