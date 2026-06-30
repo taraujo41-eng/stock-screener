@@ -1839,9 +1839,9 @@ def _analyze_options_setup(sym, df, iv_history):
 # 3-Sigma scanners (Manual Web-app trigger modes)
 # =====================================================================
 
-def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True):
+def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev_mult=3.0):
     """
-    Evaluates 15m regular-hours Close against Daily Bollinger Bands (20 SMA, 3.0 std dev).
+    Evaluates 15m regular-hours Close against Daily Bollinger Bands (20 SMA, std_dev_mult std dev).
     Matches when the last 15m Close pierces the Daily Bollinger Bands.
     """
     try:
@@ -1858,8 +1858,8 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True):
         
         middle_series = df_daily['Close'].rolling(window=20).mean()
         std_series = df_daily['Close'].rolling(window=20).std()
-        upper_series = middle_series + 3.0 * std_series
-        lower_series = middle_series - 3.0 * std_series
+        upper_series = middle_series + std_dev_mult * std_series
+        lower_series = middle_series - std_dev_mult * std_series
         
         last_daily_date_str = df_daily.index[-1].strftime("%Y-%m-%d")
         if last_daily_date_str == today_str and len(df_daily) > 1:
@@ -1914,7 +1914,7 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True):
         reasons_list = []
         
         if is_bullish:
-            reasons_list.append("Pierced Daily Lower BB")
+            reasons_list.append(f"Pierced Daily Lower {int(std_dev_mult)}SD BB" if std_dev_mult.is_integer() else f"Pierced Daily Lower {std_dev_mult}SD BB")
             if rsi_val <= 30:
                 score += 2
                 reasons_list.append(f"RSI Oversold ({rsi_val:.1f})")
@@ -1928,7 +1928,7 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True):
                 score += 1
                 reasons_list.append("EMA Extension")
         else:
-            reasons_list.append("Pierced Daily Upper BB")
+            reasons_list.append(f"Pierced Daily Upper {int(std_dev_mult)}SD BB" if std_dev_mult.is_integer() else f"Pierced Daily Upper {std_dev_mult}SD BB")
             if rsi_val >= 70:
                 score += 2
                 reasons_list.append(f"RSI Overbought ({rsi_val:.1f})")
@@ -2065,6 +2065,69 @@ def three_sigma_full_market_scan(extended_hours=False):
     })
 
     print(f"[Done] 3-Sigma full market scan: {len(results)} signals in {total_time:.0f}s")
+    if not results:
+        return pd.DataFrame()
+    return pd.DataFrame(results).sort_values(by="Score", ascending=False).head(15)
+
+
+def two_sigma_full_market_scan(extended_hours=False):
+    """Scan all US tickers for 2-Sigma Daily Bands + 15m regular hours crossings."""
+    _reset_progress()
+    scan_progress["status"] = "running"
+    start_time = time.time()
+
+    tickers = get_us_tickers()
+    is_market_bullish = check_spy_regime()
+
+    results = []
+    total = len(tickers)
+
+    # Daily progress callback (0% - 40%)
+    def _on_daily_progress(i, tot, sym):
+        pct = int((i / tot) * 40)
+        _update_progress("downloading", f"Downloading daily candles... ({i}/{tot})", i, tot, ticker=sym, pct=pct)
+
+    _update_progress("downloading", "Initiating daily candle download...", 0, total, pct=0)
+    daily_data = fetch_batch_concurrent(
+        tickers, days=45, max_workers=6,
+        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
+    )
+
+    # 15m progress callback (40% - 85%)
+    def _on_15m_progress(i, tot, sym):
+        pct = 40 + int((i / tot) * 45)
+        _update_progress("downloading", f"Downloading 15m bars... ({i}/{tot})", i, tot, ticker=sym, found=len(results), pct=pct)
+
+    _update_progress("downloading", "Initiating 15m bar download...", 0, total, pct=40)
+    stock_data = fetch_batch_concurrent(
+        tickers, days=15, max_workers=6,
+        on_progress=_on_15m_progress, delay=0.05, interval="15m", includePrePost="true" if extended_hours else "false"
+    )
+
+    for i, (sym, df_15m) in enumerate(stock_data.items()):
+        pct = 85 + int((i / len(stock_data)) * 15) if len(stock_data) else 100
+        _update_progress("analyzing", f"Analyzing 2-Sigma for {sym}...", i, len(stock_data), ticker=sym, found=len(results), pct=pct)
+        try:
+            df_daily = daily_data.get(sym)
+            if df_15m is None or df_daily is None or len(df_15m) < 20 or len(df_daily) < 20:
+                continue
+
+            result = _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=is_market_bullish, std_dev_mult=2.0)
+            if result:
+                results.append(result)
+        except Exception as e:
+            print(f"Error processing 2-sigma for {sym}: {e}")
+            continue
+
+    total_time = time.time() - start_time
+    scan_progress.update({
+        "status": "finishing", "phase": "complete",
+        "phase_label": f"Done — {len(results)} 2-sigma signals found",
+        "current": total, "total": total,
+        "found": len(results), "pct": 100, "eta_seconds": 0,
+    })
+
+    print(f"[Done] 2-Sigma full market scan: {len(results)} signals in {total_time:.0f}s")
     if not results:
         return pd.DataFrame()
     return pd.DataFrame(results).sort_values(by="Score", ascending=False).head(15)

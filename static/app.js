@@ -36,6 +36,9 @@ function updateModeDesc() {
   if (scanMode === "3sigma") {
     desc.textContent = "Scans S&P 500, NASDAQ 100, and ETFs for 15m regular hour Close piercing Daily 3-Sigma Bollinger Bands";
     if (subtitle) subtitle.textContent = "15m Close × Daily 3-Sigma Bollinger Bands";
+  } else if (scanMode === "2sigma") {
+    desc.textContent = "Scans S&P 500, NASDAQ 100, and ETFs for 15m regular hour Close piercing Daily 2-Sigma Bollinger Bands";
+    if (subtitle) subtitle.textContent = "15m Close × Daily 2-Sigma Bollinger Bands";
   } else if (scanMode === "52w") {
     desc.textContent = "Scans S&P 500, NASDAQ 100, and ETFs for daily RSI divergence at 52-week Highs and Lows";
     if (subtitle) subtitle.textContent = "Daily 52-Week High/Low × RSI Divergence";
@@ -65,6 +68,35 @@ async function loadLast3SigmaScan() {
       <div class="empty-state__icon">🔔</div>
       <div class="empty-state__title">Ready to scan</div>
       <div class="empty-state__text">Click above to scan S&P 500, NASDAQ 100, and ETFs for 15m Close crossing Daily 3-Sigma Bollinger Bands</div>
+    </div>
+  `;
+  hideAuxUI();
+  updateModeDesc();
+}
+
+async function loadLast2SigmaScan() {
+  const scanBtn = document.getElementById("scanBtn");
+  scanBtn.querySelector(".scan-btn__text").textContent = "⚡  Scan 2-Sigma Bot";
+  try {
+    showSkeleton();
+    const res = await fetch("/api/scan/2sigma/results");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok && data.results) {
+        displayResults(data);
+        updateModeDesc();
+        return;
+      }
+    }
+  } catch (e) {
+    console.error("No saved 2-sigma scan available yet");
+  }
+
+  document.getElementById("results").innerHTML = `
+    <div class="empty-state">
+      <div class="empty-state__icon">⚡</div>
+      <div class="empty-state__title">Ready to scan</div>
+      <div class="empty-state__text">Click above to scan S&P 500, NASDAQ 100, and ETFs for 15m Close crossing Daily 2-Sigma Bollinger Bands</div>
     </div>
   `;
   hideAuxUI();
@@ -112,6 +144,10 @@ async function switchTab(mode) {
     document.getElementById("tab3Sigma").classList.add("mode-tab--active");
     document.getElementById("extHoursWrap")?.classList.remove("hidden");
     await loadLast3SigmaScan();
+  } else if (mode === "2sigma") {
+    document.getElementById("tab2Sigma").classList.add("mode-tab--active");
+    document.getElementById("extHoursWrap")?.classList.remove("hidden");
+    await loadLast2SigmaScan();
   } else if (mode === "52w") {
     document.getElementById("tab52w").classList.add("mode-tab--active");
     document.getElementById("extHoursWrap")?.classList.add("hidden");
@@ -711,6 +747,9 @@ async function runScan() {
   if (scanMode === "3sigma") {
     endpoint = "/api/scan/3sigma";
     resultsEndpoint = "/api/scan/3sigma/results";
+  } else if (scanMode === "2sigma") {
+    endpoint = "/api/scan/2sigma";
+    resultsEndpoint = "/api/scan/2sigma/results";
   } else if (scanMode === "52w") {
     endpoint = "/api/scan/52w";
     resultsEndpoint = "/api/scan/52w/results";
