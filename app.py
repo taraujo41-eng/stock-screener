@@ -8,6 +8,7 @@ from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
 from reversal_scanner import (
     three_sigma_full_market_scan,
+    fifty_two_week_reversal_scan,
     scan_progress, _reset_progress
 )
 from datetime import datetime, timedelta
@@ -48,6 +49,7 @@ except Exception as e:
 # ── Scan Persistence ───────────────────────────────────────────────────
 
 THREE_SIGMA_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_3sigma_scan.json")
+FIFTY_TWO_WEEK_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_52w_scan.json")
 
 def load_last_scan(filepath=THREE_SIGMA_RESULTS_FILE):
     """Load the last scan results from file."""
@@ -137,6 +139,59 @@ def scan_3sigma_results():
         results = load_last_scan(THREE_SIGMA_RESULTS_FILE)
         if results:
             app.config["LAST_3SIGMA_RESULTS"] = results
+    if results is None:
+        return jsonify({"ok": False, "error": "No scan results available"}), 404
+    return jsonify(results)
+
+# ── API: 52-Week Reversal Scans (async) ─────────────────────────────
+
+@app.route("/api/scan/52w", methods=["POST"])
+def scan_52w():
+    """Start a 52-week high/low reversal scan in the background."""
+    global _scan_running
+
+    with _scan_lock:
+        if _scan_running:
+            return jsonify({"ok": False, "error": "A scan is already running"}), 409
+        _scan_running = True
+
+    req_data = request.get_json(silent=True) or {}
+    extended_hours = req_data.get("extended_hours", False)
+
+    def _run():
+        global _scan_running
+        try:
+            et_tz = get_ny_timezone()
+            df = fifty_two_week_reversal_scan(extended_hours=extended_hours)
+            results_data = {
+                "ok": True,
+                "mode": "52w",
+                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
+                "count": len(df) if not df.empty else 0,
+                "results": df.to_dict(orient="records") if not df.empty else [],
+            }
+            app.config["LAST_52W_RESULTS"] = results_data
+            save_last_scan(results_data, FIFTY_TWO_WEEK_RESULTS_FILE)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            app.config["LAST_52W_RESULTS"] = {"ok": False, "error": str(e), "traceback": traceback.format_exc()}
+            scan_progress["status"] = "error"
+            scan_progress["phase_label"] = traceback.format_exc()
+        finally:
+            with _scan_lock:
+                _scan_running = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "52-week reversal scan started"})
+
+@app.route("/api/scan/52w/results", methods=["GET"])
+def scan_52w_results():
+    results = app.config.get("LAST_52W_RESULTS")
+    if results is None:
+        results = load_last_scan(FIFTY_TWO_WEEK_RESULTS_FILE)
+        if results:
+            app.config["LAST_52W_RESULTS"] = results
     if results is None:
         return jsonify({"ok": False, "error": "No scan results available"}), 404
     return jsonify(results)

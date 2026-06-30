@@ -32,7 +32,14 @@ function fmtEta(seconds) {
 
 function updateModeDesc() {
   const desc = document.getElementById("modeDesc");
-  desc.textContent = "Scans full market list for 15m regular hour Close piercing Daily 3-Sigma Bollinger Bands";
+  const subtitle = document.getElementById("headerSubtitle");
+  if (scanMode === "3sigma") {
+    desc.textContent = "Scans S&P 500, NASDAQ 100, and ETFs for 15m regular hour Close piercing Daily 3-Sigma Bollinger Bands";
+    if (subtitle) subtitle.textContent = "15m Close × Daily 3-Sigma Bollinger Bands";
+  } else if (scanMode === "52w") {
+    desc.textContent = "Scans S&P 500, NASDAQ 100, and ETFs for daily RSI divergence at 52-week Highs and Lows";
+    if (subtitle) subtitle.textContent = "Daily 52-Week High/Low × RSI Divergence";
+  }
 }
 
 async function loadLast3SigmaScan() {
@@ -57,11 +64,59 @@ async function loadLast3SigmaScan() {
     <div class="empty-state">
       <div class="empty-state__icon">🔔</div>
       <div class="empty-state__title">Ready to scan</div>
-      <div class="empty-state__text">Click above to scan the full market list for 15m Close crossing Daily 3-Sigma Bollinger Bands</div>
+      <div class="empty-state__text">Click above to scan S&P 500, NASDAQ 100, and ETFs for 15m Close crossing Daily 3-Sigma Bollinger Bands</div>
     </div>
   `;
   hideAuxUI();
   updateModeDesc();
+}
+
+async function loadLast52wScan() {
+  const scanBtn = document.getElementById("scanBtn");
+  scanBtn.querySelector(".scan-btn__text").textContent = "📈  Scan 52-Week Reversal";
+  try {
+    showSkeleton();
+    const res = await fetch("/api/scan/52w/results");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok && data.results) {
+        displayResults(data);
+        updateModeDesc();
+        return;
+      }
+    }
+  } catch (e) {
+    console.error("No saved 52w scan available yet");
+  }
+
+  document.getElementById("results").innerHTML = `
+    <div class="empty-state">
+      <div class="empty-state__icon">📈</div>
+      <div class="empty-state__title">Ready to scan</div>
+      <div class="empty-state__text">Click above to scan for stocks at 52-week High/Low showing daily RSI divergence</div>
+    </div>
+  `;
+  hideAuxUI();
+  updateModeDesc();
+}
+
+async function switchTab(mode) {
+  if (scanMode === mode) return;
+  scanMode = mode;
+  
+  document.querySelectorAll(".mode-tab").forEach(tab => {
+    tab.classList.remove("mode-tab--active");
+  });
+  
+  if (mode === "3sigma") {
+    document.getElementById("tab3Sigma").classList.add("mode-tab--active");
+    document.getElementById("extHoursWrap")?.classList.remove("hidden");
+    await loadLast3SigmaScan();
+  } else if (mode === "52w") {
+    document.getElementById("tab52w").classList.add("mode-tab--active");
+    document.getElementById("extHoursWrap")?.classList.add("hidden");
+    await loadLast52wScan();
+  }
 }
 
 function hideAuxUI() {
@@ -652,8 +707,14 @@ async function runScan() {
 
   const extHours = document.getElementById("extHoursToggle")?.checked || false;
 
-  const endpoint = "/api/scan/3sigma";
-  const resultsEndpoint = "/api/scan/3sigma/results";
+  let endpoint, resultsEndpoint;
+  if (scanMode === "3sigma") {
+    endpoint = "/api/scan/3sigma";
+    resultsEndpoint = "/api/scan/3sigma/results";
+  } else if (scanMode === "52w") {
+    endpoint = "/api/scan/52w";
+    resultsEndpoint = "/api/scan/52w/results";
+  }
 
   // Retry logic for Render cold starts
   const maxRetries = 3;

@@ -25,8 +25,14 @@
     <header class="header">
       <span class="header__icon">🔔</span>
       <h1 class="header__title">3-Sigma Bot Scanner</h1>
-      <p class="header__subtitle">15m Close × Daily 3-Sigma Bollinger Bands</p>
+      <p class="header__subtitle" id="headerSubtitle">15m Close × Daily 3-Sigma Bollinger Bands</p>
     </header>
+
+    <!-- Mode tabs -->
+    <div class="mode-tabs">
+      <button class="mode-tab mode-tab--active" id="tab3Sigma" onclick="switchTab('3sigma')">🔔 3-Sigma Bands</button>
+      <button class="mode-tab" id="tab52w" onclick="switchTab('52w')">📈 52-Week Reversal</button>
+    </div>
 
     <!-- Scanner description -->
     <div class="mode-info">

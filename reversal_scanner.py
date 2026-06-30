@@ -2070,6 +2070,205 @@ def three_sigma_full_market_scan(extended_hours=False):
     return pd.DataFrame(results).sort_values(by="Score", ascending=False).head(15)
 
 
+def fifty_two_week_reversal_scan(extended_hours=False):
+    """Scan all US tickers for 52-week high/low with daily RSI divergence."""
+    _reset_progress()
+    scan_progress["status"] = "running"
+    start_time = time.time()
+
+    tickers = get_us_tickers()
+    is_market_bullish = check_spy_regime()
+
+    results = []
+    total = len(tickers)
+
+    # 1. Fetch daily candles (365 days)
+    def _on_daily_progress(i, tot, sym):
+        pct = int((i / tot) * 85)
+        _update_progress("downloading", f"Downloading daily candles... ({i}/{tot})", i, tot, ticker=sym, found=len(results), pct=pct)
+
+    _update_progress("downloading", "Initiating daily candle download...", 0, total, pct=0)
+    
+    # 365 days of 1d bars
+    daily_data = fetch_batch_concurrent(
+        tickers, days=365, max_workers=6,
+        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
+    )
+
+    # 2. Analyze daily candles for 52w high/low and RSI divergence
+    for i, (sym, df_daily) in enumerate(daily_data.items()):
+        pct = 85 + int((i / len(daily_data)) * 15) if len(daily_data) else 100
+        _update_progress("analyzing", f"Analyzing 52-week reversals for {sym}...", i, len(daily_data), ticker=sym, found=len(results), pct=pct)
+        try:
+            if df_daily is None or len(df_daily) < 50:
+                continue
+
+            curr = df_daily.iloc[-1]
+            last_price = float(curr['Close'])
+            
+            # Retrieve 52-week High and Low
+            fiftyTwoWeekHigh = float(df_daily['High'].max())
+            fiftyTwoWeekLow = float(df_daily['Low'].min())
+            
+            # Check near 52w high/low (within 3% tolerance)
+            at_52w_low = last_price <= fiftyTwoWeekLow * 1.03
+            at_52w_high = last_price >= fiftyTwoWeekHigh * 0.97
+            
+            if not at_52w_low and not at_52w_high:
+                continue
+
+            # Compute RSI
+            rsi_series = compute_rsi(df_daily['Close'], 14)
+            if len(rsi_series) < 22:
+                continue
+            rsi_val = float(rsi_series.iloc[-1])
+            
+            # RSI Divergence detection
+            bull_div, bear_div = detect_rsi_divergence(df_daily['Close'], rsi_series, lookback=20)
+            
+            is_bullish = at_52w_low and bull_div
+            is_bearish = at_52w_high and bear_div
+            
+            if not is_bullish and not is_bearish:
+                continue
+
+            # Confirmations score & tags
+            score = 10
+            reasons_list = []
+            
+            if is_bullish:
+                reasons_list.append("52w Low Bull Div")
+                if rsi_val <= 30:
+                    score += 2
+                    reasons_list.append(f"RSI Oversold ({rsi_val:.1f})")
+            else:
+                reasons_list.append("52w High Bear Div")
+                if rsi_val >= 70:
+                    score += 2
+                    reasons_list.append(f"RSI Overbought ({rsi_val:.1f})")
+
+            # Technical indicators
+            rvol = compute_rvol(df_daily)
+            if rvol is not None and rvol > 1.5:
+                score += 2
+                reasons_list.append(f"High RVOL ({rvol:.1f}x)")
+                
+            try:
+                squeeze_on, _, _ = detect_squeeze(df_daily)
+            except Exception:
+                squeeze_on = False
+            if squeeze_on:
+                score += 1
+                reasons_list.append("Squeeze Active")
+                
+            adr_pct = compute_adr_pct(df_daily, 14)
+            
+            # EMA/SMA distances
+            ema20_series = compute_ema(df_daily['Close'], 20)
+            ema20 = float(ema20_series.iloc[-1]) if len(ema20_series) > 0 else None
+            sma50_series = compute_sma(df_daily['Close'], 50)
+            sma50 = float(sma50_series.iloc[-1]) if len(sma50_series) > 0 and not np.isnan(sma50_series.iloc[-1]) else None
+            sma200_series = compute_sma(df_daily['Close'], 200)
+            sma200 = float(sma200_series.iloc[-1]) if len(sma200_series) > 0 and not np.isnan(sma200_series.iloc[-1]) else None
+            
+            ema20_dist = ((last_price - ema20) / ema20) * 100 if ema20 else 0.0
+            sma50_dist = ((last_price - sma50) / sma50) * 100 if sma50 else 0.0
+            sma200_dist = ((last_price - sma200) / sma200) * 100 if sma200 else 0.0
+
+            # Bollinger Bands %B
+            middle = df_daily['Close'].rolling(window=20).mean()
+            std = df_daily['Close'].rolling(window=20).std()
+            upper = middle + 2.0 * std
+            lower = middle - 2.0 * std
+            upper_val = float(upper.iloc[-1])
+            lower_val = float(lower.iloc[-1])
+            bb_pct_b = ((last_price - lower_val) / (upper_val - lower_val)) * 100 if (upper_val - lower_val) != 0 else 50.0
+
+            # Dynamic patterns
+            patterns_list = detect_patterns(df_daily)
+            patterns_str = " | ".join(patterns_list) if patterns_list else "—"
+
+            reasons = " | ".join(reasons_list)
+
+            # Options suggestion
+            opt_str = "—"
+            try:
+                opt_setup = find_best_option(sym, "bullish" if is_bullish else "bearish", last_price)
+                if opt_setup:
+                    opt_str = f"{opt_setup['symbol']} (${opt_setup['mid_price']:.2f})"
+            except Exception:
+                pass
+
+            # News Catalyst
+            news_details = None
+            try:
+                has_news, tag, details = detect_news_catalyst(sym)
+                if has_news and details:
+                    news_details = details
+                    headline_pill = f"News: {details['title'][:35]}..."
+                    reasons += f" | {headline_pill}"
+                    score += 2
+            except Exception:
+                pass
+
+            # ATR and Trade Levels
+            atr_series = compute_atr(df_daily, 14)
+            atr_val = float(atr_series.iloc[-1]) if len(atr_series) > 0 else 0.05 * last_price
+            
+            entry = last_price
+            if is_bullish:
+                sl = last_price - 2.0 * atr_val
+                pt = last_price + 4.0 * atr_val
+            else:
+                sl = last_price + 2.0 * atr_val
+                pt = last_price - 4.0 * atr_val
+
+            grade = "A+" if score >= 12 else "A"
+
+            results.append({
+                "Ticker": sym,
+                "Last Price": round(last_price, 2),
+                "Volume": int(curr['Volume']),
+                "RSI": round(rsi_val, 1),
+                "Score": score,
+                "Grade": grade,
+                "Bullish Signals": reasons if is_bullish else "—",
+                "Bearish Signals": reasons if is_bearish else "—",
+                "Suggested Option": opt_str,
+                "News Details": news_details,
+                "RVOL": round(rvol, 2) if rvol is not None else 0.0,
+                "ADR": round(adr_pct, 2) if adr_pct is not None else 0.0,
+                "EMA20_Dist": round(ema20_dist, 2),
+                "SMA50_Dist": round(sma50_dist, 2),
+                "SMA200_Dist": round(sma200_dist, 2),
+                "Squeeze": bool(squeeze_on),
+                "BB_Pct": round(bb_pct_b, 1),
+                "Patterns": patterns_str,
+                "Entry": round(entry, 2),
+                "Stop Loss": round(sl, 2),
+                "Profit Target": round(pt, 2)
+            })
+
+        except Exception as e:
+            print(f"Error processing 52w reversal for {sym}: {e}")
+            continue
+
+    total_time = time.time() - start_time
+    scan_progress.update({
+        "status": "done", "phase": "complete",
+        "phase_label": f"Done — {len(results)} 52w reversals found",
+        "current": total, "total": total,
+        "found": len(results), "pct": 100, "eta_seconds": 0,
+    })
+
+    print(f"[Done] 52-week reversal full market scan: {len(results)} signals in {total_time:.0f}s")
+    if not results:
+        return pd.DataFrame()
+    return pd.DataFrame(results).sort_values(by="Score", ascending=False).head(20)
+
+
+
+
 # =====================================================================
 # CLI entry point
 # =====================================================================
