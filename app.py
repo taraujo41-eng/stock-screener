@@ -94,6 +94,16 @@ def scan_full_progress():
 
 # ── API: 3-Sigma Scans (async) ──────────────────────────────────────
 
+def _scan_conflict_response():
+    running_mode = scan_progress.get("mode")
+    mode_names = {
+        "3sigma": "3-Sigma Bands",
+        "2sigma": "2-Sigma Bands",
+        "52w": "52-Week Reversal"
+    }
+    friendly_name = mode_names.get(running_mode, "another tab")
+    return jsonify({"ok": False, "error": f"A scan is already running on the {friendly_name} tab"}), 409
+
 @app.route("/api/scan/3sigma", methods=["POST"])
 def scan_3sigma():
     """Start a full market 3-sigma scan in the background."""
@@ -101,7 +111,7 @@ def scan_3sigma():
 
     with _scan_lock:
         if _scan_running:
-            return jsonify({"ok": False, "error": "A scan is already running"}), 409
+            return _scan_conflict_response()
         _scan_running = True
         _reset_progress(status="running", mode="3sigma")
         scan_progress["phase_label"] = "Initiating scan..."
@@ -158,7 +168,7 @@ def scan_2sigma():
 
     with _scan_lock:
         if _scan_running:
-            return jsonify({"ok": False, "error": "A scan is already running"}), 409
+            return _scan_conflict_response()
         _scan_running = True
         _reset_progress(status="running", mode="2sigma")
         scan_progress["phase_label"] = "Initiating scan..."
@@ -214,7 +224,7 @@ def scan_52w():
 
     with _scan_lock:
         if _scan_running:
-            return jsonify({"ok": False, "error": "A scan is already running"}), 409
+            return _scan_conflict_response()
         _scan_running = True
         _reset_progress(status="running", mode="52w")
         scan_progress["phase_label"] = "Initiating scan..."

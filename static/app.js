@@ -916,8 +916,11 @@ async function checkActiveScan() {
     if (!res.ok) return false;
     const p = await res.json();
     if (p.status === "running") {
-      startProgressPolling();
-      return true;
+      if (p.mode === scanMode) {
+        startProgressPolling();
+        return true;
+      }
+      return false;
     }
   } catch (e) {
     console.error("Error checking active scan:", e);
