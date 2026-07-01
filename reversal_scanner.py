@@ -1286,8 +1286,9 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
         score = bull_score if is_bullish else bear_score
         tags = bull_tags if is_bullish else bear_tags
 
-        # Confidence grade
-        if score >= 7:
+        # Confidence grade - require RSI divergence for A+ grade
+        has_div = (is_bullish and bull_div) or (is_bearish and bear_div)
+        if score >= 7 and has_div:
             grade = "A+"
         elif score >= 5:
             grade = "A"
@@ -1886,6 +1887,7 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
         rsi_val = float(rsi_series.iloc[-1])
         rvol = compute_rvol(df_15m)
         adr_pct = compute_adr_pct(df_15m, 14)
+        bull_div, bear_div = detect_rsi_divergence(df_15m['Close'], rsi_series, lookback=20)
         
         try:
             squeeze_on, _, _ = detect_squeeze(df_15m)
@@ -1916,6 +1918,9 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
         
         if is_bullish:
             reasons_list.append(f"Pierced Daily Lower {int(std_dev_mult)}SD BB" if std_dev_mult.is_integer() else f"Pierced Daily Lower {std_dev_mult}SD BB")
+            if bull_div:
+                score += 4
+                reasons_list.append("RSI Divergence")
             if rsi_val <= 30:
                 score += 2
                 reasons_list.append(f"RSI Oversold ({rsi_val:.1f})")
@@ -1930,6 +1935,9 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
                 reasons_list.append("EMA Extension")
         else:
             reasons_list.append(f"Pierced Daily Upper {int(std_dev_mult)}SD BB" if std_dev_mult.is_integer() else f"Pierced Daily Upper {std_dev_mult}SD BB")
+            if bear_div:
+                score += 4
+                reasons_list.append("RSI Divergence")
             if rsi_val >= 70:
                 score += 2
                 reasons_list.append(f"RSI Overbought ({rsi_val:.1f})")
@@ -1943,8 +1951,9 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
                 score += 1
                 reasons_list.append("EMA Extension")
 
-        # Grade assignment
-        grade = "A+" if score >= 12 else "A"
+        # Grade assignment - require RSI divergence for A+ grade
+        has_div = (is_bullish and bull_div) or (is_bearish and bear_div)
+        grade = "A+" if (score >= 12 and has_div) else "A"
         reasons = " | ".join(reasons_list)
 
         # 5. Options setups
@@ -2320,7 +2329,8 @@ def fifty_two_week_reversal_scan(extended_hours=False):
                 sl = last_price + 2.0 * atr_val
                 pt = last_price - 4.0 * atr_val
 
-            grade = "A+" if score >= 12 else "A"
+            has_div = (is_bullish and bull_div) or (is_bearish and bear_div)
+            grade = "A+" if (score >= 12 and has_div) else "A"
 
             results.append({
                 "Ticker": sym,
