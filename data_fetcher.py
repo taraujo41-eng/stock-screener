@@ -415,6 +415,49 @@ def _fetch_webull_openapi_one(ticker, days=180, interval="1d", includePrePost="f
         return None
 
 
+
+# ── Webull Ticker Lookup Helper (Bypasses Webull SDK crypto bugs) ───────
+
+def get_stock_ticker_id(wb_un, ticker):
+    """
+    Look up Webull's ticker ID for a stock/ETF, strictly ignoring cryptos.
+    This fixes the issue where symbols like AMP/DASH get mapped to crypto instead of the stock.
+    """
+    try:
+        headers = wb_un.build_req_headers()
+        url = wb_un._urls.stock_id(ticker, wb_un._region_code)
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            result = resp.json()
+            data = result.get('data', [])
+            if data:
+                # 1. Look for a stock or ETF template that matches the ticker exactly
+                for item in data:
+                    template = item.get("template", "").lower()
+                    if template in ("stock", "etf"):
+                        if item.get("symbol") == ticker or item.get("disSymbol") == ticker:
+                            return item["tickerId"]
+                # 2. Fallback to any non-crypto template that matches exactly
+                for item in data:
+                    template = item.get("template", "").lower()
+                    if template != "crypto":
+                        if item.get("symbol") == ticker or item.get("disSymbol") == ticker:
+                            return item["tickerId"]
+                # 3. Fallback to the first non-crypto item
+                for item in data:
+                    if item.get("template", "").lower() != "crypto":
+                        return item["tickerId"]
+                # 4. Final fallback to get_ticker standard method
+                return wb_un.get_ticker(ticker)
+    except Exception:
+        pass
+    # Standard Webull fallback
+    try:
+        return wb_un.get_ticker(ticker)
+    except Exception:
+        return 0
+
+
 # ── Webull Unofficial Fetcher (Option B) ────────────────────────────────
 
 def _fetch_webull_unofficial_one(ticker, days=180, interval="1d", includePrePost="false"):
@@ -443,7 +486,7 @@ def _fetch_webull_unofficial_one(ticker, days=180, interval="1d", includePrePost
         except ImportError:
             from backports.zoneinfo import ZoneInfo as _ZI
         
-        tId = wb_un.get_ticker(ticker)
+        tId = get_stock_ticker_id(wb_un, ticker)
         timeStamp = int(time.time())
         params = {'extendTrading': extend}
         headers = wb_un.build_req_headers()
@@ -698,7 +741,7 @@ def fetch_options_chain(ticker):
             print(f"[Webull Unofficial] Fetching options chain for {ticker}...")
             
             headers = wb_un.build_req_headers()
-            data = {'count': -1, 'direction': 'all', 'tickerId': wb_un.get_ticker(ticker)}
+            data = {'count': -1, 'direction': 'all', 'tickerId': get_stock_ticker_id(wb_un, ticker)}
             res = requests.post(wb_un._urls.options_exp_dat_new(), json=data, headers=headers, timeout=wb_un.timeout)
             
             if res.status_code == 200:
@@ -977,7 +1020,7 @@ def check_optionable_batch(tickers, max_workers=10):
         try:
             import requests as _req
             headers = wb_un.build_req_headers()
-            ticker_id = wb_un.get_ticker(ticker)
+            ticker_id = get_stock_ticker_id(wb_un, ticker)
             if not ticker_id:
                 return ticker, False
             data = {'count': -1, 'direction': 'all', 'tickerId': ticker_id}
