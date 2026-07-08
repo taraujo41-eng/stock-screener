@@ -918,6 +918,91 @@ def fetch_batch_concurrent(tickers, days=180, max_workers=8,
     return data
 
 
+# ── Batch Quote Fetcher (for pre-filtering) ──────────────────────────
+
+def fetch_quotes_batch(tickers, max_workers=10, on_progress=None):
+    """
+    Fetch live Webull quote data for many tickers concurrently.
+    Returns dict of {ticker: quote_dict} where quote_dict has keys like:
+      avgVol10Day, close, volume, name, totalShares, etc.
+    Only returns entries where the quote was successfully fetched.
+    """
+    wb_un = get_unofficial_client()
+    if not wb_un:
+        print("  [fetch_quotes_batch] No Webull client — cannot pre-filter")
+        return {}
+
+    quotes = {}
+    completed = 0
+    total = len(tickers)
+
+    def _fetch_quote(ticker):
+        try:
+            q = wb_un.get_quote(stock=ticker)
+            if q:
+                return ticker, q
+        except Exception:
+            pass
+        return ticker, None
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_fetch_quote, t): t for t in tickers}
+        for future in as_completed(futures):
+            completed += 1
+            try:
+                ticker, q = future.result(timeout=10)
+                if q:
+                    quotes[ticker] = q
+                if on_progress:
+                    on_progress(completed, total, ticker)
+            except Exception:
+                pass
+
+    return quotes
+
+
+def check_optionable_batch(tickers, max_workers=10):
+    """
+    Check which tickers have options chains available via Webull.
+    Returns a set of tickers that are optionable.
+    """
+    wb_un = get_unofficial_client()
+    if not wb_un:
+        print("  [check_optionable_batch] No Webull client — cannot check optionability")
+        return set(tickers)  # Assume all are optionable if we can't check
+
+    optionable = set()
+
+    def _check_options(ticker):
+        try:
+            import requests as _req
+            headers = wb_un.build_req_headers()
+            ticker_id = wb_un.get_ticker(ticker)
+            if not ticker_id:
+                return ticker, False
+            data = {'count': -1, 'direction': 'all', 'tickerId': ticker_id}
+            res = _req.post(wb_un._urls.options_exp_dat_new(), json=data, headers=headers, timeout=5)
+            if res.status_code == 200:
+                res_json = res.json()
+                exp_list = res_json.get('expireDateList', [])
+                return ticker, len(exp_list) > 0
+        except Exception:
+            pass
+        return ticker, False
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_check_options, t): t for t in tickers}
+        for future in as_completed(futures):
+            try:
+                ticker, has_options = future.result(timeout=10)
+                if has_options:
+                    optionable.add(ticker)
+            except Exception:
+                pass
+
+    return optionable
+
+
 # ── Connectivity test ────────────────────────────────────────────────
 
 def test_connection(ticker="AAPL"):

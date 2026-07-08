@@ -22,7 +22,8 @@ import os
 import warnings
 from data_fetcher import (
     fetch_batch, fetch_batch_concurrent, test_connection,
-    fetch_options_chain, fetch_options_for_expiration, fetch_news
+    fetch_options_chain, fetch_options_for_expiration, fetch_news,
+    fetch_quotes_batch, check_optionable_batch
 )
 
 warnings.filterwarnings("ignore")
@@ -229,6 +230,117 @@ def get_us_tickers():
 
     print(f"  Final Ticker Count: {len(tickers)}")
     return sorted(tickers)
+
+
+# =====================================================================
+# Pre-filter: High Liquidity + Optionable Only
+# =====================================================================
+
+MIN_AVG_VOLUME = 500_000   # Minimum average daily volume (shares)
+MIN_PRICE = 20.0           # Minimum stock price ($)
+
+def prefilter_liquid_optionable(tickers):
+    """
+    Pre-filter tickers to only include high-liquidity, optionable stocks.
+    Uses Webull live quote data to check:
+      1. Average daily volume >= 500K shares
+      2. Last price >= $20
+      3. Has an options chain (at least 1 expiration on Webull)
+    Returns the filtered (sorted) ticker list.
+    """
+    print(f"\n{'='*60}")
+    print(f"  🔍  PRE-FILTER: Liquidity + Optionable Check")
+    print(f"{'='*60}")
+    print(f"  Input tickers: {len(tickers)}")
+    print(f"  Criteria: AvgVol >= {MIN_AVG_VOLUME:,} | Price >= ${MIN_PRICE:.0f} | Optionable")
+
+    start_time = time.time()
+
+    # Phase 1: Fetch live quotes for all tickers
+    print(f"  Phase 1: Fetching live quotes from Webull...")
+    _update_progress("prefilter", "Fetching live quotes for pre-filter...", 0, len(tickers), pct=0)
+
+    def _on_quote_progress(i, tot, sym):
+        pct = int((i / tot) * 50) if tot else 0
+        _update_progress("prefilter", f"Pre-filter: fetching quotes ({i}/{tot})...", i, tot, ticker=sym, pct=pct)
+
+    quotes = fetch_quotes_batch(tickers, max_workers=10, on_progress=_on_quote_progress)
+    print(f"  Quotes fetched: {len(quotes)} / {len(tickers)}")
+
+    # Phase 2: Apply volume + price filters
+    volume_price_passed = []
+    removed_low_vol = 0
+    removed_low_price = 0
+    removed_no_quote = 0
+
+    for sym in tickers:
+        q = quotes.get(sym)
+        if not q:
+            removed_no_quote += 1
+            continue
+
+        # Extract average volume — Webull uses various field names
+        avg_vol = None
+        for key in ("avgVol10Day", "avgVolume", "avgVol", "avgVol30Day"):
+            val = q.get(key)
+            if val is not None:
+                try:
+                    avg_vol = float(val)
+                    break
+                except (ValueError, TypeError):
+                    continue
+
+        # If no avgVol field, estimate from totalVolume if available
+        if avg_vol is None:
+            vol = q.get("volume") or q.get("totalVolume")
+            if vol:
+                try:
+                    avg_vol = float(vol)  # Use today's volume as rough proxy
+                except (ValueError, TypeError):
+                    pass
+
+        # Extract price
+        price = None
+        for key in ("close", "price", "lastPrice", "tradePrice"):
+            val = q.get(key)
+            if val is not None:
+                try:
+                    price = float(val)
+                    break
+                except (ValueError, TypeError):
+                    continue
+
+        # Apply filters
+        if price is not None and price < MIN_PRICE:
+            removed_low_price += 1
+            continue
+
+        if avg_vol is not None and avg_vol < MIN_AVG_VOLUME:
+            removed_low_vol += 1
+            continue
+
+        volume_price_passed.append(sym)
+
+    print(f"  Phase 2 results: {len(volume_price_passed)} passed volume/price filter")
+    print(f"    Removed — low volume: {removed_low_vol}, low price: {removed_low_price}, no quote: {removed_no_quote}")
+
+    # Phase 3: Check optionability on the remaining tickers
+    print(f"  Phase 3: Checking optionability for {len(volume_price_passed)} tickers...")
+    _update_progress("prefilter", f"Checking optionability ({len(volume_price_passed)} tickers)...", 0, len(volume_price_passed), pct=55)
+
+    optionable_set = check_optionable_batch(volume_price_passed, max_workers=10)
+    filtered = sorted([sym for sym in volume_price_passed if sym in optionable_set])
+
+    removed_not_optionable = len(volume_price_passed) - len(filtered)
+
+    elapsed = time.time() - start_time
+    print(f"  Phase 3 results: {len(filtered)} are optionable (removed {removed_not_optionable} non-optionable)")
+    print(f"  ✅ Pre-filter complete: {len(tickers)} → {len(filtered)} tickers in {elapsed:.1f}s")
+    print(f"{'='*60}\n")
+
+    _update_progress("prefilter", f"Pre-filter done: {len(filtered)} liquid optionable tickers", len(filtered), len(filtered), pct=100)
+
+    return filtered
 
 
 def check_spy_regime():
@@ -2024,6 +2136,7 @@ def three_sigma_full_market_scan(extended_hours=False):
     start_time = time.time()
 
     tickers = get_us_tickers()
+    tickers = prefilter_liquid_optionable(tickers)
     is_market_bullish = check_spy_regime()
 
     results = []
@@ -2085,6 +2198,7 @@ def two_sigma_full_market_scan(extended_hours=False):
     start_time = time.time()
 
     tickers = get_us_tickers()
+    tickers = prefilter_liquid_optionable(tickers)
     is_market_bullish = check_spy_regime()
 
     results = []
@@ -2147,6 +2261,7 @@ def fifty_two_week_reversal_scan(extended_hours=False):
     start_time = time.time()
 
     tickers = get_us_tickers()
+    tickers = prefilter_liquid_optionable(tickers)
     is_market_bullish = check_spy_regime()
 
     results = []
