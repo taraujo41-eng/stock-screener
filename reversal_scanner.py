@@ -236,23 +236,25 @@ def get_us_tickers():
 # Pre-filter: High Liquidity + Optionable Only
 # =====================================================================
 
-MIN_AVG_VOLUME = 500_000   # Minimum average daily volume (shares)
-MIN_PRICE = 20.0           # Minimum stock price ($)
+MIN_AVG_VOLUME = 500_000           # Minimum average daily volume (shares)
+MIN_PRICE = 20.0                   # Minimum stock price ($)
+MIN_MARKET_CAP = 10_000_000_000    # Minimum market cap ($10B)
 
 def prefilter_liquid_optionable(tickers):
     """
     Pre-filter tickers to only include high-liquidity, optionable stocks.
     Uses Webull live quote data to check:
-      1. Average daily volume >= 500K shares
-      2. Last price >= $20
-      3. Has an options chain (at least 1 expiration on Webull)
+      1. Market cap >= $10B
+      2. Average daily volume >= 500K shares
+      3. Last price >= $20
+      4. Has an options chain (at least 1 expiration on Webull)
     Returns the filtered (sorted) ticker list.
     """
     print(f"\n{'='*60}")
     print(f"  🔍  PRE-FILTER: Liquidity + Optionable Check")
     print(f"{'='*60}")
     print(f"  Input tickers: {len(tickers)}")
-    print(f"  Criteria: AvgVol >= {MIN_AVG_VOLUME:,} | Price >= ${MIN_PRICE:.0f} | Optionable")
+    print(f"  Criteria: MktCap >= $10B | AvgVol >= {MIN_AVG_VOLUME:,} | Price >= ${MIN_PRICE:.0f} | Optionable")
 
     start_time = time.time()
 
@@ -267,10 +269,11 @@ def prefilter_liquid_optionable(tickers):
     quotes = fetch_quotes_batch(tickers, max_workers=10, on_progress=_on_quote_progress)
     print(f"  Quotes fetched: {len(quotes)} / {len(tickers)}")
 
-    # Phase 2: Apply volume + price filters
+    # Phase 2: Apply market cap + volume + price filters
     volume_price_passed = []
     removed_low_vol = 0
     removed_low_price = 0
+    removed_low_mktcap = 0
     removed_no_quote = 0
 
     for sym in tickers:
@@ -279,7 +282,53 @@ def prefilter_liquid_optionable(tickers):
             removed_no_quote += 1
             continue
 
-        # Extract average volume — Webull uses various field names
+        # Extract price
+        price = None
+        for key in ("close", "price", "lastPrice", "tradePrice"):
+            val = q.get(key)
+            if val is not None:
+                try:
+                    price = float(val)
+                    break
+                except (ValueError, TypeError):
+                    continue
+
+        # Price filter
+        if price is not None and price < MIN_PRICE:
+            removed_low_price += 1
+            continue
+
+        # Market cap filter — calculate from totalShares * price
+        market_cap = None
+        total_shares = None
+        for key in ("totalShares", "outstandingShares", "sharesOutstanding"):
+            val = q.get(key)
+            if val is not None:
+                try:
+                    total_shares = float(val)
+                    break
+                except (ValueError, TypeError):
+                    continue
+
+        # Also check if Webull directly provides marketCap
+        for key in ("marketCap", "marketValue", "mktCap"):
+            val = q.get(key)
+            if val is not None:
+                try:
+                    market_cap = float(val)
+                    break
+                except (ValueError, TypeError):
+                    continue
+
+        # Calculate market cap from shares * price if not directly available
+        if market_cap is None and total_shares is not None and price is not None:
+            market_cap = total_shares * price
+
+        if market_cap is not None and market_cap < MIN_MARKET_CAP:
+            removed_low_mktcap += 1
+            continue
+
+        # Extract average volume
         avg_vol = None
         for key in ("avgVol10Day", "avgVolume", "avgVol", "avgVol30Day"):
             val = q.get(key)
@@ -299,30 +348,15 @@ def prefilter_liquid_optionable(tickers):
                 except (ValueError, TypeError):
                     pass
 
-        # Extract price
-        price = None
-        for key in ("close", "price", "lastPrice", "tradePrice"):
-            val = q.get(key)
-            if val is not None:
-                try:
-                    price = float(val)
-                    break
-                except (ValueError, TypeError):
-                    continue
-
-        # Apply filters
-        if price is not None and price < MIN_PRICE:
-            removed_low_price += 1
-            continue
-
+        # Volume filter
         if avg_vol is not None and avg_vol < MIN_AVG_VOLUME:
             removed_low_vol += 1
             continue
 
         volume_price_passed.append(sym)
 
-    print(f"  Phase 2 results: {len(volume_price_passed)} passed volume/price filter")
-    print(f"    Removed — low volume: {removed_low_vol}, low price: {removed_low_price}, no quote: {removed_no_quote}")
+    print(f"  Phase 2 results: {len(volume_price_passed)} passed market cap/volume/price filter")
+    print(f"    Removed — low mkt cap: {removed_low_mktcap}, low volume: {removed_low_vol}, low price: {removed_low_price}, no quote: {removed_no_quote}")
 
     # Phase 3: Check optionability on the remaining tickers
     print(f"  Phase 3: Checking optionability for {len(volume_price_passed)} tickers...")
