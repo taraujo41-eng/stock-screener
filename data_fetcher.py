@@ -33,7 +33,7 @@ warnings.filterwarnings("ignore")
 
 _webull_unofficial_failures = 0
 _webull_openapi_failures = 0
-_WEBULL_MAX_FAILURES = 2  # After this many consecutive failures, skip for the rest of the scan
+_WEBULL_MAX_FAILURES = 5  # After this many consecutive failures, skip for the rest of the scan
 
 _yahoo_failures = 0
 _YAHOO_MAX_FAILURES = 10  # After this many consecutive failures, skip Yahoo Finance
@@ -679,7 +679,18 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webu
                 if _webull_openapi_failures >= _WEBULL_MAX_FAILURES:
                     print(f"[Circuit Breaker] Webull OpenAPI failed {_WEBULL_MAX_FAILURES}x consecutively — skipping for rest of scan")
 
-    # 3. Fallback to Yahoo Finance disabled (strictly use Webull data)
+    # 3. Fallback to Yahoo Finance
+    global _yahoo_failures
+    if _yahoo_failures < _YAHOO_MAX_FAILURES:
+        df = _fetch_yahoo_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
+        if df is not None:
+            _yahoo_failures = 0
+            return df
+        else:
+            _yahoo_failures += 1
+            if _yahoo_failures >= _YAHOO_MAX_FAILURES:
+                print(f"[Circuit Breaker] Yahoo Finance failed {_YAHOO_MAX_FAILURES}x consecutively — skipping for rest of scan")
+
     return None
 
 
@@ -811,7 +822,18 @@ def fetch_options_chain(ticker):
         except Exception as e:
             print(f"[Webull Unofficial] Error fetching option chain for {ticker}: {e}")
             
-    # Fallback to Yahoo disabled (strictly use Webull data)
+    # Fallback to Yahoo
+    global _yahoo_failures
+    if _yahoo_failures < _YAHOO_MAX_FAILURES:
+        res = _fetch_yahoo_options_chain(ticker)
+        if res is not None:
+            _yahoo_failures = 0
+            return res
+        else:
+            _yahoo_failures += 1
+            if _yahoo_failures >= _YAHOO_MAX_FAILURES:
+                print(f"[Circuit Breaker] Yahoo Finance failed {_YAHOO_MAX_FAILURES}x consecutively — skipping for rest of scan")
+
     return None
 
 
@@ -881,7 +903,18 @@ def fetch_options_for_expiration(ticker, expiration_ts):
         except Exception as e:
             print(f"[Webull Unofficial] Error fetching options at expiration timestamp {expiration_ts}: {e}")
             
-    # Fallback to Yahoo disabled (strictly use Webull data)
+    # Fallback to Yahoo
+    global _yahoo_failures
+    if _yahoo_failures < _YAHOO_MAX_FAILURES:
+        res = _fetch_yahoo_options_for_expiration(ticker, expiration_ts)
+        if res is not None:
+            _yahoo_failures = 0
+            return res
+        else:
+            _yahoo_failures += 1
+            if _yahoo_failures >= _YAHOO_MAX_FAILURES:
+                print(f"[Circuit Breaker] Yahoo Finance failed {_YAHOO_MAX_FAILURES}x consecutively — skipping for rest of scan")
+
     return None
 
 

@@ -222,6 +222,11 @@ def prefilter_liquid_optionable(tickers):
     quotes = fetch_quotes_batch(tickers, max_workers=10, on_progress=_on_quote_progress)
     print(f"  Quotes fetched: {len(quotes)} / {len(tickers)}")
 
+    if not quotes:
+        print("  ⚠️ WARNING: FAILED TO FETCH ANY QUOTES FROM WEBULL. BYPASSING LIQUIDITY PRE-FILTER TO PREVENT EMPTY SCAN.")
+        _update_progress("prefilter", "Pre-filter failed: Webull quotes unavailable, bypassing filter", len(tickers), len(tickers), pct=100)
+        return sorted(tickers)
+
     # Phase 2: Apply market cap + volume + price filters
     volume_price_passed = []
     removed_low_vol = 0
