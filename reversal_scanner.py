@@ -2247,7 +2247,7 @@ def three_sigma_full_market_scan(extended_hours=False):
 
     total_time = time.time() - start_time
     scan_progress.update({
-        "status": "finishing", "phase": "complete",
+        "status": "running", "phase": "complete",
         "phase_label": f"Done — {len(results)} 3-sigma signals found",
         "current": total, "total": total,
         "found": len(results), "pct": 100, "eta_seconds": 0,
@@ -2310,7 +2310,7 @@ def two_sigma_full_market_scan(extended_hours=False):
 
     total_time = time.time() - start_time
     scan_progress.update({
-        "status": "finishing", "phase": "complete",
+        "status": "running", "phase": "complete",
         "phase_label": f"Done — {len(results)} 2-sigma signals found",
         "current": total, "total": total,
         "found": len(results), "pct": 100, "eta_seconds": 0,
@@ -2544,7 +2544,7 @@ def fifty_two_week_reversal_scan(extended_hours=False):
 
     total_time = time.time() - start_time
     scan_progress.update({
-        "status": "finishing", "phase": "complete",
+        "status": "running", "phase": "complete",
         "phase_label": f"Done — {len(results)} 52w reversals found",
         "current": total, "total": total,
         "found": len(results), "pct": 100, "eta_seconds": 0,
