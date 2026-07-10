@@ -132,55 +132,128 @@ def detect_news_catalyst(ticker, lookback_hours=48):
 # =====================================================================
 
 def get_us_tickers():
-    """Fetch stock and ETF tickers from the user's Webull watchlists and local watchlist.json."""
+    """Fetch large-cap US stock tickers (S&P 500 + NASDAQ 100) + ETFs + Webull Watchlists."""
     from data_fetcher import get_unofficial_client
     wb = get_unofficial_client()
     tickers = set()
+    headers = {"User-Agent": "Mozilla/5.0"}
+    fallback_file = os.path.join(os.path.dirname(__file__), "sp500_nasdaq_fallback.json")
 
-    # 1. Load local watchlist.json first
+    # ── Source 1: S&P 500 ──
+    try:
+        html = requests.get("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", headers=headers, timeout=10).text
+        tables = pd.read_html(StringIO(html), attrs={"id": "constituents"})
+        sp = tables[0]
+        for sym in sp["Symbol"]:
+            clean = str(sym).strip().replace(".", "-")
+            if clean:
+                tickers.add(clean)
+        print(f"  Source 1 (S&P 500): fetched {len(sp)} tickers")
+    except Exception as e:
+        print(f"  Source 1 (S&P 500): failed ({e})")
+
+    # ── Source 2: NASDAQ 100 ──
+    try:
+        html = requests.get("https://en.wikipedia.org/wiki/Nasdaq-100", headers=headers, timeout=10).text
+        tables = pd.read_html(StringIO(html), attrs={"id": "constituents"})
+        ndx = tables[0]
+        added = 0
+        for sym in ndx["Ticker"]:
+            clean = str(sym).strip().replace(".", "-")
+            if clean and clean not in tickers:
+                tickers.add(clean)
+                added += 1
+        print(f"  Source 2 (NASDAQ 100): +{added} unique tickers")
+    except Exception as e:
+        print(f"  Source 2 (NASDAQ 100): failed ({e})")
+
+    # ── Local Fallback for Cloud Environments ──
+    if len(tickers) < 400:
+        if os.path.exists(fallback_file):
+            try:
+                with open(fallback_file, "r") as f:
+                    cached_list = json.load(f)
+                added_cached = 0
+                for sym in cached_list:
+                    if sym not in tickers:
+                        tickers.add(sym)
+                        added_cached += 1
+                print(f"  Loaded {added_cached} tickers from local fallback cache: {fallback_file}")
+            except Exception as e:
+                print(f"  Failed to load fallback tickers: {e}")
+        else:
+            print("  Warning: No local fallback cache file found.")
+    else:
+        # Save successfully fetched tickers to fallback cache
+        try:
+            with open(fallback_file, "w") as f:
+                json.dump(list(tickers), f, indent=2)
+            print(f"  Saved {len(tickers)} tickers to local fallback cache: {fallback_file}")
+        except Exception as e:
+            print(f"  Failed to save fallback tickers: {e}")
+
+    # ── Source 3: Major ETFs ──
+    etfs = {
+        "SPY", "QQQ", "IWM", "DIA", "VTI", "VEU", "VWO", "GLD", "SLV", "USO",
+        "XLF", "XLK", "XLE", "XLI", "XLV", "XLP", "XLU", "XLB", "XLY", "XLRE",
+        "XBI", "SMH", "KRE", "KBE", "GDX", "GDXJ", "TLT", "IEF", "LQD", "HYG",
+        "ARKK", "ARKG", "ARKF", "EEM", "EFA", "EWJ", "FXI", "VGK", "TQQQ", "SQQQ",
+        "SOXL", "SOXS", "LABU", "LABD", "UVXY", "VIXY", "UNG", "BOIL", "KOLD"
+    }
+    added_etfs = 0
+    for sym in etfs:
+        if sym not in tickers:
+            tickers.add(sym)
+            added_etfs += 1
+    print(f"  Source 3 (Major ETFs): added {added_etfs} unique ETFs")
+
+    # ── Source 4: Local Watchlist ──
     watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
     if os.path.exists(watchlist_file):
         try:
             with open(watchlist_file, "r") as f:
                 wl = json.load(f)
+            added_wl = 0
             for sym in wl:
                 clean = str(sym).strip().upper()
-                if clean:
+                if clean and clean not in tickers:
                     tickers.add(clean)
-            print(f"  Source (watchlist.json): loaded {len(wl)} tickers")
+                    added_wl += 1
+            print(f"  Source 4 (Watchlist): +{added_wl} unique tickers")
         except Exception as e:
-            print(f"  Source (watchlist.json): failed to load ({e})")
+            print(f"  Source 4 (Watchlist): failed ({e})")
 
-    # 2. Add tickers from Webull watchlists
+    # ── Source 5: Webull Watchlists ──
     if wb:
         try:
             watchlists = wb.get_watchlists()
             if watchlists:
+                added_wb = 0
                 for wl in watchlists:
                     wl_name = wl.get("name", "Unknown")
                     ticker_list = wl.get("tickerList", [])
-                    added_count = 0
                     for t in ticker_list:
                         template = t.get("template", "").lower()
-                        # Only keep stocks and ETFs
                         if template in ("stock", "etf"):
                             symbol = t.get("symbol")
                             if symbol:
-                                tickers.add(symbol.strip().upper())
-                                added_count += 1
-                    print(f"  Source (Webull Watchlist '{wl_name}'): fetched {added_count} stock/ETF tickers")
+                                clean = symbol.strip().upper()
+                                if clean not in tickers:
+                                    tickers.add(clean)
+                                    added_wb += 1
+                print(f"  Source 5 (Webull Watchlists): +{added_wb} unique tickers")
             else:
-                print("  Source (Webull Watchlists): None found")
+                print("  Source 5 (Webull Watchlists): None found")
         except Exception as e:
-            print(f"  Source (Webull Watchlists): failed ({e})")
+            print(f"  Source 5 (Webull Watchlists): failed ({e})")
     else:
-        print("  Source (Webull Watchlists): No Webull client")
+        print("  Source 5 (Webull Watchlists): No Webull client")
 
     # Remove known non-equity / test symbols
     exclude = {"TRUE", "NONE", "NULL", "CTEST", "NTEST", "ZTEST"}
     tickers -= exclude
 
-    print(f"  Final Ticker Count (watchlist.json + Webull watchlists): {len(tickers)}")
+    print(f"  Final Ticker Count (All Sources): {len(tickers)}")
     return sorted(tickers)
 
 

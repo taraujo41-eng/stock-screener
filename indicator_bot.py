@@ -40,6 +40,8 @@ if not logger.handlers:
 
 # Global map to store pre-calculated daily bands: {ticker: (upper_bb_daily, lower_bb_daily)}
 _daily_bands_map = {}
+# Track the date when daily bands were calculated to cache results
+_daily_bands_last_date = None
 # Global state to keep track of sent alerts: {ticker: last_alerted_candle_timestamp}
 _last_alerts_sent = {}
 # Global state to keep track of last self-ping timestamp (Render keep-alive)
@@ -181,28 +183,44 @@ def evaluate_ticker_process(ticker, df):
 def precalculate_daily_bands(tickers):
     """
     Fetches daily candles for all tickers in parallel and calculates their daily BB bands.
-    Stores results in the global _daily_bands_map.
+    Stores results in the global _daily_bands_map. Caches results for the day.
     """
-    global _daily_bands_map
-    _daily_bands_map.clear()
+    global _daily_bands_map, _daily_bands_last_date
     
+    ny_tz = get_ny_timezone()
+    today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
+    
+    # If we already have bands calculated today, only fetch missing ones (if any)
+    if _daily_bands_map and _daily_bands_last_date == today_str:
+        missing = [t for t in tickers if t not in _daily_bands_map]
+        if not missing:
+            logger.info(f"Using cached daily Bollinger Bands for all {len(tickers)} tickers (calculated today).")
+            return
+        else:
+            logger.info(f"Daily bands cache missing {len(missing)} tickers. Fetching only those...")
+            tickers_to_fetch = missing
+    else:
+        _daily_bands_map.clear()
+        _daily_bands_last_date = today_str
+        tickers_to_fetch = tickers
+
+    if not tickers_to_fetch:
+        return
+        
     bb_length = int(os.getenv("BB_LENGTH", "20"))
     bb_mult = float(os.getenv("BB_MULT", "3.0"))
     
-    logger.info(f"Pre-calculating daily Bollinger Bands for {len(tickers)} tickers...")
+    logger.info(f"Pre-calculating daily Bollinger Bands for {len(tickers_to_fetch)} tickers...")
     
     # Fetch 1d candles (45 days is enough for 20 BB)
     daily_dfs = fetch_batch_concurrent(
-        tickers=tickers,
+        tickers=tickers_to_fetch,
         days=45,
         max_workers=25,
         interval="1d",
         includePrePost="false",
         skip_webull=False
     )
-    
-    ny_tz = get_ny_timezone()
-    today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
     
     for ticker, df in daily_dfs.items():
         if df is None or len(df) < bb_length:
@@ -229,7 +247,7 @@ def precalculate_daily_bands(tickers):
         except Exception as e:
             logger.error(f"Error calculating daily bands for {ticker}: {e}")
             
-    logger.info(f"Successfully pre-calculated daily bands for {len(_daily_bands_map)} tickers.")
+    logger.info(f"Successfully calculated/cached daily bands for {len(_daily_bands_map)} total tickers.")
 
 def is_market_hours():
     """Returns True if current time is within regular market hours (9:30 AM to 4:15 PM EST, Mon-Fri)."""
