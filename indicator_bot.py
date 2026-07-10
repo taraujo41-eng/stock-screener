@@ -306,6 +306,13 @@ def bot_loop():
                     tickers_str = "AAPL,MSFT,NVDA,SPY,QQQ"
                 tickers = [t.strip().upper() for t in tickers_str.split(",") if t.strip()]
                 
+            # Apply liquidity and optionability filters (market cap >= 10B, volume >= 1M)
+            try:
+                from reversal_scanner import prefilter_liquid_optionable
+                tickers = prefilter_liquid_optionable(tickers)
+            except Exception as e:
+                logger.error(f"Failed to apply pre-filter: {e}")
+
             candle_interval = os.getenv("CANDLE_INTERVAL_3SIGMA", "15m")
             scan_interval = int(os.getenv("SCAN_INTERVAL_3SIGMA", "60"))
             

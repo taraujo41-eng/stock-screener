@@ -132,10 +132,26 @@ def detect_news_catalyst(ticker, lookback_hours=48):
 # =====================================================================
 
 def get_us_tickers():
-    """Fetch stock and ETF tickers from the user's Webull watchlists."""
+    """Fetch stock and ETF tickers from the user's Webull watchlists and local watchlist.json."""
     from data_fetcher import get_unofficial_client
     wb = get_unofficial_client()
     tickers = set()
+
+    # 1. Load local watchlist.json first
+    watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
+    if os.path.exists(watchlist_file):
+        try:
+            with open(watchlist_file, "r") as f:
+                wl = json.load(f)
+            for sym in wl:
+                clean = str(sym).strip().upper()
+                if clean:
+                    tickers.add(clean)
+            print(f"  Source (watchlist.json): loaded {len(wl)} tickers")
+        except Exception as e:
+            print(f"  Source (watchlist.json): failed to load ({e})")
+
+    # 2. Add tickers from Webull watchlists
     if wb:
         try:
             watchlists = wb.get_watchlists()
@@ -160,27 +176,13 @@ def get_us_tickers():
     else:
         print("  Source (Webull Watchlists): No Webull client")
 
-    # Fallback to local watchlist.json if no tickers could be fetched
-    if not tickers:
-        watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
-        if os.path.exists(watchlist_file):
-            try:
-                with open(watchlist_file, "r") as f:
-                    wl = json.load(f)
-                for sym in wl:
-                    clean = str(sym).strip().upper()
-                    if clean:
-                        tickers.add(clean)
-                print(f"  Fallback Source (watchlist.json): loaded {len(tickers)} tickers")
-            except Exception as e:
-                print(f"  Fallback Source (watchlist.json): failed ({e})")
-
     # Remove known non-equity / test symbols
     exclude = {"TRUE", "NONE", "NULL", "CTEST", "NTEST", "ZTEST"}
     tickers -= exclude
 
-    print(f"  Final Ticker Count: {len(tickers)}")
+    print(f"  Final Ticker Count (watchlist.json + Webull watchlists): {len(tickers)}")
     return sorted(tickers)
+
 
 
 
@@ -189,9 +191,9 @@ def get_us_tickers():
 # Pre-filter: High Liquidity + Optionable Only
 # =====================================================================
 
-MIN_AVG_VOLUME = 500_000           # Minimum average daily volume (shares)
-MIN_PRICE = 20.0                   # Minimum stock price ($)
-MIN_MARKET_CAP = 10_000_000_000    # Minimum market cap ($10B)
+MIN_AVG_VOLUME = float(os.getenv("MIN_AVG_VOLUME", "1000000"))  # Minimum average daily volume (shares)
+MIN_PRICE = float(os.getenv("MIN_PRICE", "20.0"))               # Minimum stock price ($)
+MIN_MARKET_CAP = float(os.getenv("MIN_MARKET_CAP", "10000000000"))  # Minimum market cap ($10B)
 
 def prefilter_liquid_optionable(tickers):
     """
