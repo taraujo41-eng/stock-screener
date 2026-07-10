@@ -308,6 +308,19 @@ def test_api():
             "traceback": traceback.format_exc()
         }), 500
 
+@app.route("/api/logs", methods=["GET"])
+def get_logs():
+    """Endpoint to fetch the last 200 lines of the bot log."""
+    log_file = os.path.join(os.path.dirname(__file__), "3sigma_bot.log")
+    if os.path.exists(log_file):
+        try:
+            with open(log_file, "r") as f:
+                lines = f.readlines()
+            return "".join(lines[-200:]), 200, {"Content-Type": "text/plain"}
+        except Exception as e:
+            return f"Error reading log: {e}", 500
+    return "Log file not found", 404
+
 # ── Start ────────────────────────────────────────────────────────────
 
 def get_local_ip():
