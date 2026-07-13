@@ -43,6 +43,9 @@ function updateModeDesc() {
   } else if (scanMode === "52w") {
     desc.textContent = "Scans S&P 500, NASDAQ 100, and ETFs for daily RSI divergence at 52-week Highs and Lows";
     if (subtitle) subtitle.textContent = "Daily 52-Week High/Low × RSI Divergence";
+  } else if (scanMode === "rsidiv") {
+    desc.textContent = "Scans S&P 500, NASDAQ 100, and ETFs for daily RSI divergence (bullish or bearish)";
+    if (subtitle) subtitle.textContent = "Daily RSI Divergence Scanner";
   }
 }
 
@@ -133,6 +136,35 @@ async function loadLast52wScan() {
   updateModeDesc();
 }
 
+async function loadLastRsiDivScan() {
+  const scanBtn = document.getElementById("scanBtn");
+  scanBtn.querySelector(".scan-btn__text").textContent = "📊  Scan RSI Divergence";
+  try {
+    showSkeleton();
+    const res = await fetch("/api/scan/rsidiv/results");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok && data.results) {
+        displayResults(data);
+        updateModeDesc();
+        return;
+      }
+    }
+  } catch (e) {
+    console.error("No saved RSI divergence scan available yet");
+  }
+
+  document.getElementById("results").innerHTML = `
+    <div class="empty-state">
+      <div class="empty-state__icon">📊</div>
+      <div class="empty-state__title">Ready to scan</div>
+      <div class="empty-state__text">Click above to scan for stocks showing daily RSI divergence</div>
+    </div>
+  `;
+  hideAuxUI();
+  updateModeDesc();
+}
+
 async function switchTab(mode) {
   if (scanMode === mode) return;
   scanMode = mode;
@@ -162,6 +194,10 @@ async function switchTab(mode) {
     if (btnText) btnText.textContent = "📈  Scan 52-Week Reversal";
     document.getElementById("tab52w").classList.add("mode-tab--active");
     document.getElementById("extHoursWrap")?.classList.add("hidden");
+  } else if (mode === "rsidiv") {
+    if (btnText) btnText.textContent = "📊  Scan RSI Divergence";
+    document.getElementById("tabRsiDiv").classList.add("mode-tab--active");
+    document.getElementById("extHoursWrap")?.classList.add("hidden");
   }
   updateModeDesc();
 
@@ -175,6 +211,8 @@ async function switchTab(mode) {
       await loadLast2SigmaScan();
     } else if (mode === "52w") {
       await loadLast52wScan();
+    } else if (mode === "rsidiv") {
+      await loadLastRsiDivScan();
     }
   }
 }
@@ -635,6 +673,9 @@ function displayResults(data) {
   } else if (data.mode === "52w") {
     badge.textContent = `52-Week Reversal scan`;
     badge.classList.remove("hidden");
+  } else if (data.mode === "rsidiv") {
+    badge.textContent = `RSI Divergence scan`;
+    badge.classList.remove("hidden");
   } else {
     badge.classList.add("hidden");
   }
@@ -734,6 +775,8 @@ function startProgressPolling() {
             targetResultsEndpoint = "/api/scan/2sigma/results";
           } else if (p.mode === "52w") {
             targetResultsEndpoint = "/api/scan/52w/results";
+          } else if (p.mode === "rsidiv") {
+            targetResultsEndpoint = "/api/scan/rsidiv/results";
           }
 
           // Only display results if user is on the tab of the finished scan
@@ -817,6 +860,9 @@ async function runScan() {
   } else if (scanMode === "52w") {
     endpoint = "/api/scan/52w";
     resultsEndpoint = "/api/scan/52w/results";
+  } else if (scanMode === "rsidiv") {
+    endpoint = "/api/scan/rsidiv";
+    resultsEndpoint = "/api/scan/rsidiv/results";
   }
 
   // Retry logic for Render cold starts
