@@ -379,12 +379,34 @@ function buildCard(item, index) {
           </div>
         </div>
       ` : ""}
-      ${item["Suggested Option"] && item["Suggested Option"] !== "—" ? `
+      ${item["Option Play"] && typeof item["Option Play"] === "object" ? `
+        <div class="card__option">
+          <div class="option-tag">SUGGESTED OPTION PLAY</div>
+          <div class="option-card-layout">
+            <div class="option-card-header">
+              <span class="option-card-type option-card-type--${(item["Option Play"].type || 'CALL').toLowerCase()}">${item["Option Play"].type || 'CALL'}</span>
+              <span class="option-card-strike">$${item["Option Play"].strike || '—'} Strike</span>
+              <span class="option-card-exp">${item["Option Play"].exp || '—'} (${item["Option Play"].dte || '0'}d DTE)</span>
+            </div>
+            <div class="option-card-body">
+              <div class="option-card-metric">
+                <span class="option-metric-label">Premium:</span>
+                <span class="option-metric-value">${item["Option Play"].mid !== undefined ? '@$' + item["Option Play"].mid.toFixed(2) : '—'}</span>
+              </div>
+              <div class="option-card-metric">
+                <span class="option-metric-label">IV:</span>
+                <span class="option-metric-value option-metric-value--iv">${item["Option Play"].iv !== undefined ? item["Option Play"].iv + '%' : '—'}</span>
+              </div>
+              <div class="option-card-symbol">${item["Option Play"].symbol || ''}</div>
+            </div>
+          </div>
+        </div>
+      ` : (item["Suggested Option"] && item["Suggested Option"] !== "—" ? `
         <div class="card__option">
           <div class="option-tag">TRADE IDEA</div>
           <div class="option-val">${item["Suggested Option"]}</div>
         </div>
-      ` : ""}
+      ` : "")}
     </div>
   `;
 }

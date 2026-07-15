@@ -957,8 +957,8 @@ def find_best_option(ticker, signal_type, last_price):
     Find the ideal contract:
     - 30-60 DTE
     - Delta 0.40-0.70 (Approx by ITM/ATM strikes)
-    - High Volume & OI (>500)
-    - Tight Spread (<10%)
+    - High Volume & OI (>50) (Adjusted for after hours Yahoo fallback)
+    - Tight Spread (<12%)
     """
     try:
         chain_meta = fetch_options_chain(ticker)
@@ -967,7 +967,7 @@ def find_best_option(ticker, signal_type, last_price):
         now = time.time()
         # 1. Filter for 30-60 DTE
         valid_exps = []
-        for exp in chain_meta["expirations"]:
+        for exp in chain_meta.get("expirations", []):
             dte = (exp - now) / 86400
             if 25 <= dte <= 65: # Allow slight buffer around 30-60
                 valid_exps.append(exp)
@@ -979,20 +979,47 @@ def find_best_option(ticker, signal_type, last_price):
         
         for exp_ts in valid_exps:
             chain = fetch_options_for_expiration(ticker, exp_ts)
+            
+            # Check if Webull chain has valid bid/ask pricing
+            has_data = False
+            if chain:
+                for c in chain.get("calls", [])[:10]:
+                    if c.get("bid") is not None or c.get("ask") is not None:
+                        has_data = True
+                        break
+            
+            # If empty/missing, fall back to Yahoo Finance
+            if not chain or not has_data:
+                from data_fetcher import _fetch_yahoo_options_chain, _fetch_yahoo_options_for_expiration
+                if "yahoo_meta" not in chain_meta:
+                    chain_meta["yahoo_meta"] = _fetch_yahoo_options_chain(ticker)
+                
+                yahoo_meta = chain_meta.get("yahoo_meta")
+                if yahoo_meta:
+                    closest_yahoo_exp = None
+                    min_diff = 999999
+                    for y_exp in yahoo_meta.get("expirations", []):
+                        diff = abs(y_exp - exp_ts)
+                        if diff < min_diff:
+                            min_diff = diff
+                            closest_yahoo_exp = y_exp
+                    if closest_yahoo_exp and min_diff < 86400 * 4: # within 4 days
+                        chain = _fetch_yahoo_options_for_expiration(ticker, closest_yahoo_exp)
+            
             if not chain: continue
             
             contracts = chain.get("calls" if signal_type == "bullish" else "puts", [])
             
             for c in contracts:
                 strike = c.get("strike")
-                vol = c.get("volume", 0)
-                oi = c.get("openInterest", 0)
-                bid = c.get("bid", 0)
-                ask = c.get("ask", 0)
-                iv = c.get("impliedVolatility", 0)
+                vol = c.get("volume") or 0
+                oi = c.get("openInterest") or 0
+                bid = c.get("bid") or 0
+                ask = c.get("ask") or 0
+                iv = c.get("impliedVolatility") or 0
                 
                 # Liquidity Filter
-                if vol < 300 or oi < 300: continue # Adjusted slightly lower for scan
+                if vol < 50 or oi < 100: continue # Lowered threshold to match options scan and allow Yahoo data
                 
                 mid = (bid + ask) / 2
                 if mid <= 0: continue
@@ -1000,16 +1027,13 @@ def find_best_option(ticker, signal_type, last_price):
                 if spread_pct > 12: continue # Tight spread rule
                 
                 # Delta Approximation (0.40-0.70)
-                # For Calls: 0.70 delta is ~3% ITM, 0.40 delta is ~2% OTM
-                # For Puts: Inverse
+                # For Calls: 0.70 delta is ~5% ITM, 0.40 delta is ~1% OTM
                 dist_pct = (strike - last_price) / last_price
                 
                 is_valid_strike = False
                 if signal_type == "bullish":
-                    # Call: Strike should be between -4% (ITM) and +1% (ATM/OTM)
                     if -0.05 <= dist_pct <= 0.01: is_valid_strike = True
                 else:
-                    # Put: Strike should be between -1% (OTM/ATM) and +5% (ITM)
                     if -0.01 <= dist_pct <= 0.05: is_valid_strike = True
                 
                 if not is_valid_strike: continue
@@ -1506,6 +1530,7 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
             "Bullish Signals": reasons if is_bullish else "—",
             "Bearish Signals": reasons if is_bearish else "—",
             "Suggested Option": opt_str,
+            "Option Play": opt,
             "News Details": news_details,
             "RVOL": round(rvol, 2) if rvol is not None else 0.0,
             "ADR": round(adr_pct, 2) if adr_pct is not None else 0.0,
@@ -2137,10 +2162,11 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
 
         # 5. Options setups
         opt_str = "—"
+        opt_setup = None
         try:
             opt_setup = find_best_option(sym, "bullish" if is_bullish else "bearish", last_price)
             if opt_setup:
-                opt_str = f"{opt_setup['symbol']} (${opt_setup['mid_price']:.2f})"
+                opt_str = f"{opt_setup['exp']} ${opt_setup['strike']} {opt_setup['type']} (@${opt_setup['mid']:.2f})"
         except Exception:
             pass
 
@@ -2179,6 +2205,7 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
             "Bullish Signals": reasons if is_bullish else "—",
             "Bearish Signals": reasons if is_bearish else "—",
             "Suggested Option": opt_str,
+            "Option Play": opt_setup,
             "News Details": news_details,
             "RVOL": round(rvol, 2) if rvol is not None else 0.0,
             "ADR": round(adr_pct, 2) if adr_pct is not None else 0.0,
@@ -2480,10 +2507,11 @@ def fifty_two_week_reversal_scan(extended_hours=False):
 
             # Options suggestion
             opt_str = "—"
+            opt_setup = None
             try:
                 opt_setup = find_best_option(sym, "bullish" if is_bullish else "bearish", last_price)
                 if opt_setup:
-                    opt_str = f"{opt_setup['symbol']} (${opt_setup['mid_price']:.2f})"
+                    opt_str = f"{opt_setup['exp']} ${opt_setup['strike']} {opt_setup['type']} (@${opt_setup['mid']:.2f})"
             except Exception:
                 pass
 
@@ -2524,6 +2552,7 @@ def fifty_two_week_reversal_scan(extended_hours=False):
                 "Bullish Signals": reasons if is_bullish else "—",
                 "Bearish Signals": reasons if is_bearish else "—",
                 "Suggested Option": opt_str,
+                "Option Play": opt_setup,
                 "News Details": news_details,
                 "RVOL": round(rvol, 2) if rvol is not None else 0.0,
                 "ADR": round(adr_pct, 2) if adr_pct is not None else 0.0,
@@ -2710,10 +2739,11 @@ def rsi_divergence_full_market_scan(extended_hours=False):
 
             # Options suggestion
             opt_str = "—"
+            opt_setup = None
             try:
                 opt_setup = find_best_option(sym, "bullish" if is_bullish else "bearish", last_price)
                 if opt_setup:
-                    opt_str = f"{opt_setup['symbol']} (${opt_setup['mid_price']:.2f})"
+                    opt_str = f"{opt_setup['exp']} ${opt_setup['strike']} {opt_setup['type']} (@${opt_setup['mid']:.2f})"
             except Exception:
                 pass
 
@@ -2753,6 +2783,7 @@ def rsi_divergence_full_market_scan(extended_hours=False):
                 "Bullish Signals": reasons if is_bullish else "—",
                 "Bearish Signals": reasons if is_bearish else "—",
                 "Suggested Option": opt_str,
+                "Option Play": opt_setup,
                 "News Details": news_details,
                 "RVOL": round(rvol, 2) if rvol is not None else 0.0,
                 "ADR": round(adr_pct, 2) if adr_pct is not None else 0.0,
