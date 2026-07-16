@@ -369,25 +369,160 @@ def test_api():
 
 @app.route("/api/test-options", methods=["GET"])
 def test_options_api():
-    """Diagnostic endpoint to test find_best_option on the server."""
+    """Diagnostic endpoint to test find_best_option on the server with verbose logging."""
+    logs = []
     try:
-        from reversal_scanner import find_best_option
+        from data_fetcher import fetch_options_chain, fetch_options_for_expiration
+        import time
+        from datetime import datetime
+        import numpy as np
+
         ticker = request.args.get("ticker", "AAPL")
         signal_type = request.args.get("type", "bullish")
         price = float(request.args.get("price", 327.0))
         
-        opt = find_best_option(ticker, signal_type, price)
+        logs.append(f"Starting test for {ticker} | Type: {signal_type} | Price: {price}")
+        
+        # 1. Fetch options chain
+        try:
+            chain_meta = fetch_options_chain(ticker)
+            logs.append(f"fetch_options_chain returned keys: {list(chain_meta.keys()) if chain_meta else 'None'}")
+        except Exception as e:
+            logs.append(f"fetch_options_chain failed: {e}")
+            chain_meta = None
+            
+        if not chain_meta:
+            return jsonify({"ok": True, "logs": logs, "result": None})
+            
+        now = time.time()
+        valid_exps = []
+        for exp in chain_meta.get("expirations", []):
+            dte = (exp - now) / 86400
+            logs.append(f"Exp: {datetime.fromtimestamp(exp).strftime('%Y-%m-%d')} | DTE: {dte:.1f}")
+            if 25 <= dte <= 65:
+                valid_exps.append(exp)
+                
+        logs.append(f"Valid expirations in range: {[datetime.fromtimestamp(e).strftime('%Y-%m-%d') for e in valid_exps]}")
+        if not valid_exps:
+            return jsonify({"ok": True, "logs": logs, "result": None})
+            
+        best_contract = None
+        for exp_ts in valid_exps:
+            exp_str = datetime.fromtimestamp(exp_ts).strftime('%Y-%m-%d')
+            logs.append(f"Checking exp: {exp_str}")
+            
+            try:
+                chain = fetch_options_for_expiration(ticker, exp_ts)
+                logs.append(f"fetch_options_for_expiration returned: {'dict' if isinstance(chain, dict) else 'None'}")
+            except Exception as e:
+                logs.append(f"fetch_options_for_expiration failed: {e}")
+                chain = None
+                
+            has_data = False
+            if chain:
+                calls = chain.get("calls", [])
+                logs.append(f"Webull calls count: {len(calls)}")
+                for c in calls[:5]:
+                    logs.append(f"  Sample call: strike={c.get('strike')}, bid={c.get('bid')}, ask={c.get('ask')}")
+                for c in calls[:10]:
+                    if c.get("bid") is not None or c.get("ask") is not None:
+                        has_data = True
+                        break
+                        
+            if not chain or not has_data:
+                logs.append("Webull chain empty/missing. Falling back to Yahoo Finance...")
+                try:
+                    from data_fetcher import _fetch_yahoo_options_chain, _fetch_yahoo_options_for_expiration
+                    if "yahoo_meta" not in chain_meta:
+                        logs.append("Fetching Yahoo options chain meta...")
+                        chain_meta["yahoo_meta"] = _fetch_yahoo_options_chain(ticker)
+                        logs.append(f"Yahoo options chain meta keys: {list(chain_meta['yahoo_meta'].keys()) if chain_meta['yahoo_meta'] else 'None'}")
+                        
+                    yahoo_meta = chain_meta.get("yahoo_meta")
+                    if yahoo_meta:
+                        closest_yahoo_exp = None
+                        min_diff = 999999
+                        for y_exp in yahoo_meta.get("expirations", []):
+                            diff = abs(y_exp - exp_ts)
+                            if diff < min_diff:
+                                min_diff = diff
+                                closest_yahoo_exp = y_exp
+                        logs.append(f"Closest Yahoo exp: {datetime.fromtimestamp(closest_yahoo_exp).strftime('%Y-%m-%d') if closest_yahoo_exp else 'None'} | diff: {min_diff}")
+                        if closest_yahoo_exp and min_diff < 86400 * 4:
+                            logs.append("Fetching Yahoo options for expiration...")
+                            chain = _fetch_yahoo_options_for_expiration(ticker, closest_yahoo_exp)
+                            logs.append(f"Yahoo options fetched: {'dict' if isinstance(chain, dict) else 'None'}")
+                except Exception as ye:
+                    logs.append(f"Yahoo fallback failed: {ye}")
+                    
+            if not chain:
+                logs.append("No chain data found (even from Yahoo)")
+                continue
+                
+            contracts = chain.get("calls" if signal_type == "bullish" else "puts", [])
+            logs.append(f"Contracts count to analyze: {len(contracts)}")
+            
+            for c in contracts:
+                strike = c.get("strike")
+                vol = c.get("volume") or 0
+                oi = c.get("openInterest") or 0
+                bid = c.get("bid") or 0
+                ask = c.get("ask") or 0
+                iv = c.get("impliedVolatility") or 0
+                
+                mid = (bid + ask) / 2
+                spread_pct = ((ask - bid) / mid) * 100 if mid > 0 else 999
+                dist_pct = (strike - price) / price
+                
+                is_valid_strike = False
+                if signal_type == "bullish":
+                    if -0.05 <= dist_pct <= 0.01:
+                        is_valid_strike = True
+                else:
+                    if -0.01 <= dist_pct <= 0.05:
+                        is_valid_strike = True
+                        
+                # Log a couple of strikes near the spot price
+                if abs(dist_pct) < 0.03:
+                    logs.append(f"  Contract: strike={strike} | vol={vol} | oi={oi} | bid={bid} | ask={ask} | mid={mid} | spread={spread_pct:.1f}% | dist={dist_pct*100:.1f}% | valid_strike={is_valid_strike}")
+                    
+                if vol < 50 or oi < 100:
+                    continue
+                if mid <= 0:
+                    continue
+                if spread_pct > 12:
+                    continue
+                if not is_valid_strike:
+                    continue
+                    
+                score = vol + oi
+                if not best_contract or score > best_contract["score"]:
+                    dte_days = int((exp_ts - now) / 86400)
+                    best_contract = {
+                        "symbol": c.get("contractSymbol"),
+                        "strike": strike,
+                        "type": "CALL" if signal_type == "bullish" else "PUT",
+                        "exp": datetime.fromtimestamp(exp_ts).strftime("%b %d"),
+                        "dte": dte_days,
+                        "mid": round(mid, 2),
+                        "iv": round(iv * 100, 1),
+                        "score": score
+                    }
+                    logs.append(f"  *** NEW BEST: {best_contract['symbol']} at strike {strike}")
+                    
+            if best_contract:
+                break
+                
         return jsonify({
             "ok": True,
-            "ticker": ticker,
-            "signal_type": signal_type,
-            "price": price,
-            "result": opt
+            "logs": logs,
+            "result": best_contract
         })
     except Exception as e:
         import traceback
         return jsonify({
             "ok": False,
+            "logs": logs,
             "error": str(e),
             "traceback": traceback.format_exc()
         }), 500
