@@ -878,6 +878,7 @@ def fetch_options_for_expiration(ticker, expiration_ts):
                     calls.append({
                         "contractSymbol": c_data.get("symbol"),
                         "strike": strike,
+                        "tickerId": c_data.get("tickerId"),
                         "bid": float(c_data.get("bid", 0)) if c_data.get("bid") else None,
                         "ask": float(c_data.get("ask", 0)) if c_data.get("ask") else None,
                         "volume": int(float(c_data.get("volume", 0))) if c_data.get("volume") else None,
@@ -889,6 +890,7 @@ def fetch_options_for_expiration(ticker, expiration_ts):
                     puts.append({
                         "contractSymbol": p_data.get("symbol"),
                         "strike": strike,
+                        "tickerId": p_data.get("tickerId"),
                         "bid": float(p_data.get("bid", 0)) if p_data.get("bid") else None,
                         "ask": float(p_data.get("ask", 0)) if p_data.get("ask") else None,
                         "volume": int(float(p_data.get("volume", 0))) if p_data.get("volume") else None,

@@ -1012,19 +1012,6 @@ def find_best_option(ticker, signal_type, last_price):
             
             for c in contracts:
                 strike = c.get("strike")
-                vol = c.get("volume") or 0
-                oi = c.get("openInterest") or 0
-                bid = c.get("bid") or 0
-                ask = c.get("ask") or 0
-                iv = c.get("impliedVolatility") or 0
-                
-                # Liquidity Filter
-                if vol < 50 or oi < 100: continue # Lowered threshold to match options scan and allow Yahoo data
-                
-                mid = (bid + ask) / 2
-                if mid <= 0: continue
-                spread_pct = ((ask - bid) / mid) * 100
-                if spread_pct > 12: continue # Tight spread rule
                 
                 # Delta Approximation (0.40-0.70)
                 # For Calls: 0.70 delta is ~5% ITM, 0.40 delta is ~1% OTM
@@ -1037,6 +1024,45 @@ def find_best_option(ticker, signal_type, last_price):
                     if -0.01 <= dist_pct <= 0.05: is_valid_strike = True
                 
                 if not is_valid_strike: continue
+                
+                vol = c.get("volume") or 0
+                oi = c.get("openInterest") or 0
+                
+                # Liquidity Filter (using volume and OI which Webull returns after hours)
+                if vol < 50 or oi < 100: continue
+                
+                bid = c.get("bid")
+                ask = c.get("ask")
+                iv = c.get("impliedVolatility") or 0
+                
+                # Fallback to get_option_quote for bid/ask after-hours if empty
+                if (bid is None or ask is None) and c.get("tickerId"):
+                    try:
+                        wb_un = get_unofficial_client()
+                        if wb_un:
+                            opt_quote = wb_un.get_option_quote(stock=ticker, optionId=c["tickerId"])
+                            data_list = opt_quote.get("data", [])
+                            if data_list:
+                                q_data = data_list[0]
+                                bid_list = q_data.get("bidList", [])
+                                ask_list = q_data.get("askList", [])
+                                if bid_list:
+                                    bid = float(bid_list[0].get("price", 0))
+                                if ask_list:
+                                    ask = float(ask_list[0].get("price", 0))
+                                if q_data.get("impVol"):
+                                    iv = float(q_data.get("impVol", 0))
+                    except Exception as eq:
+                        print(f"Error fetching real-time option quote for {c.get('contractSymbol')}: {eq}")
+                
+                if bid is None or ask is None:
+                    continue
+                    
+                mid = (bid + ask) / 2
+                if mid <= 0: continue
+                
+                spread_pct = ((ask - bid) / mid) * 100
+                if spread_pct > 12: continue # Tight spread rule
                 
                 # Pick the contract with the highest Volume + OI (Liquidity King)
                 score = vol + oi
