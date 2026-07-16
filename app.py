@@ -367,6 +367,31 @@ def test_api():
             "traceback": traceback.format_exc()
         }), 500
 
+@app.route("/api/test-options", methods=["GET"])
+def test_options_api():
+    """Diagnostic endpoint to test find_best_option on the server."""
+    try:
+        from reversal_scanner import find_best_option
+        ticker = request.args.get("ticker", "AAPL")
+        signal_type = request.args.get("type", "bullish")
+        price = float(request.args.get("price", 327.0))
+        
+        opt = find_best_option(ticker, signal_type, price)
+        return jsonify({
+            "ok": True,
+            "ticker": ticker,
+            "signal_type": signal_type,
+            "price": price,
+            "result": opt
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({
+            "ok": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+
 @app.route("/api/logs", methods=["GET"])
 def get_logs():
     """Endpoint to fetch the last 200 lines of the bot log."""
