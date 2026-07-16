@@ -2045,13 +2045,38 @@ def _analyze_options_setup(sym, df, iv_history):
 # 3-Sigma scanners (Manual Web-app trigger modes)
 # =====================================================================
 
-def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev_mult=3.0):
+def is_market_hours():
     """
-    Evaluates 15m regular-hours Close against Daily Bollinger Bands (20 SMA, std_dev_mult std dev).
-    Matches when the last 15m Close pierces the Daily Bollinger Bands.
+    Checks if Eastern Time is currently regular market hours:
+    Monday to Friday, 9:30 AM to 4:00 PM.
     """
     try:
-        if len(df_15m) < 20 or len(df_daily) < 20:
+        from zoneinfo import ZoneInfo
+        ny_tz = ZoneInfo("America/New_York")
+    except Exception:
+        import pytz
+        ny_tz = pytz.timezone("America/New_York")
+    
+    now = datetime.now(ny_tz)
+    # Weekday check (Monday=0, Sunday=6)
+    if now.weekday() >= 5:
+        return False
+        
+    # Time check (9:30 AM to 4:00 PM)
+    market_start = now.replace(hour=9, minute=30, second=0, microsecond=0)
+    market_end = now.replace(hour=16, minute=0, second=0, microsecond=0)
+    return market_start <= now <= market_end
+
+def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev_mult=3.0):
+    """
+    Evaluates Close (15m during market hours, Daily after hours) against Daily Bollinger Bands.
+    """
+    try:
+        is_reg_hours = is_market_hours()
+        
+        if len(df_daily) < 20:
+            return None
+        if is_reg_hours and (df_15m is None or len(df_15m) < 20):
             return None
 
         try:
@@ -2067,18 +2092,29 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
         upper_series = middle_series + std_dev_mult * std_series
         lower_series = middle_series - std_dev_mult * std_series
         
-        last_daily_date_str = df_daily.index[-1].strftime("%Y-%m-%d")
-        if last_daily_date_str == today_str and len(df_daily) > 1:
-            daily_upper = float(upper_series.iloc[-2])
-            daily_lower = float(lower_series.iloc[-2])
+        # 2. Determine timeframe & target price
+        if is_reg_hours:
+            # During market hours: check if last 15m Close pierced the daily bands
+            # Daily bands are computed as of the last closed daily candle (iloc[-2] if last row is today)
+            last_daily_date_str = df_daily.index[-1].strftime("%Y-%m-%d")
+            if last_daily_date_str == today_str and len(df_daily) > 1:
+                daily_upper = float(upper_series.iloc[-2])
+                daily_lower = float(lower_series.iloc[-2])
+            else:
+                daily_upper = float(upper_series.iloc[-1])
+                daily_lower = float(lower_series.iloc[-1])
+                
+            curr = df_15m.iloc[-1]
+            last_price = float(curr['Close'])
+            df_eval = df_15m
         else:
+            # After hours: check if last Daily Close pierced its own daily bands
             daily_upper = float(upper_series.iloc[-1])
             daily_lower = float(lower_series.iloc[-1])
+            curr = df_daily.iloc[-1]
+            last_price = float(curr['Close'])
+            df_eval = df_daily
 
-        # 2. Get last 15m row
-        curr = df_15m.iloc[-1]
-        last_price = float(curr['Close'])
-        
         # 3. Check for touches/piercing
         is_bullish = last_price <= daily_lower
         is_bearish = last_price >= daily_upper
@@ -2086,26 +2122,26 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
         if not is_bullish and not is_bearish:
             return None
 
-        # 4. Standard indicators on 15m close
-        rsi_series = compute_rsi(df_15m['Close'], 14)
+        # 4. Standard indicators on evaluation dataframe
+        rsi_series = compute_rsi(df_eval['Close'], 14)
         rsi_val = float(rsi_series.iloc[-1])
-        rvol = compute_rvol(df_15m)
-        adr_pct = compute_adr_pct(df_15m, 14)
-        bull_div, bear_div = detect_rsi_divergence(df_15m['Close'], rsi_series, lookback=20)
+        rvol = compute_rvol(df_eval)
+        adr_pct = compute_adr_pct(df_eval, 14)
+        bull_div, bear_div = detect_rsi_divergence(df_eval['Close'], rsi_series, lookback=20)
         
         try:
-            squeeze_on, _, _ = detect_squeeze(df_15m)
+            squeeze_on, _, _ = detect_squeeze(df_eval)
         except Exception:
             squeeze_on = False
 
-        # Moving Averages distance on 15m
-        ema20_series = compute_ema(df_15m['Close'], 20)
+        # Moving Averages distance on evaluation dataframe
+        ema20_series = compute_ema(df_eval['Close'], 20)
         ema20 = float(ema20_series.iloc[-1]) if len(ema20_series) > 0 else None
         
-        sma50_series = compute_sma(df_15m['Close'], 50)
+        sma50_series = compute_sma(df_eval['Close'], 50)
         sma50 = float(sma50_series.iloc[-1]) if len(sma50_series) > 0 and not np.isnan(sma50_series.iloc[-1]) else None
         
-        sma200_series = compute_sma(df_15m['Close'], 200)
+        sma200_series = compute_sma(df_eval['Close'], 200)
         sma200 = float(sma200_series.iloc[-1]) if len(sma200_series) > 0 and not np.isnan(sma200_series.iloc[-1]) else None
         
         ema20_dist = ((last_price - ema20) / ema20) * 100 if ema20 else 0.0
@@ -2225,7 +2261,7 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
 
 
 def three_sigma_full_market_scan(extended_hours=False):
-    """Scan all US tickers for 3-Sigma Daily Bands + 15m regular hours crossings."""
+    """Scan all US tickers for 3-Sigma Daily Bands + 15m regular hours crossings (Daily Close crossings after hours)."""
     _reset_progress(status="running", mode="3sigma")
     start_time = time.time()
 
@@ -2235,9 +2271,12 @@ def three_sigma_full_market_scan(extended_hours=False):
 
     results = []
     total = len(tickers)
-    # Daily progress callback (0% - 40%)
+    is_reg_hours = is_market_hours()
+
+    # Daily progress callback
     def _on_daily_progress(i, tot, sym):
-        pct = int((i / tot) * 40)
+        max_pct = 40 if is_reg_hours else 80
+        pct = int((i / tot) * max_pct)
         _update_progress("downloading", f"Downloading daily candles... ({i}/{tot})", i, tot, ticker=sym, pct=pct)
 
     _update_progress("downloading", "Initiating daily candle download...", 0, total, pct=0)
@@ -2246,23 +2285,35 @@ def three_sigma_full_market_scan(extended_hours=False):
         on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
     )
 
-    # 15m progress callback (40% - 85%)
-    def _on_15m_progress(i, tot, sym):
-        pct = 40 + int((i / tot) * 45)
-        _update_progress("downloading", f"Downloading 15m bars... ({i}/{tot})", i, tot, ticker=sym, found=len(results), pct=pct)
+    if is_reg_hours:
+        # 15m progress callback (40% - 85%)
+        def _on_15m_progress(i, tot, sym):
+            pct = 40 + int((i / tot) * 45)
+            _update_progress("downloading", f"Downloading 15m bars... ({i}/{tot})", i, tot, ticker=sym, found=len(results), pct=pct)
 
-    _update_progress("downloading", "Initiating 15m bar download...", 0, total, pct=40)
-    stock_data = fetch_batch_concurrent(
-        tickers, days=15, max_workers=6,
-        on_progress=_on_15m_progress, delay=0.05, interval="15m", includePrePost="true" if extended_hours else "false"
-    )
+        _update_progress("downloading", "Initiating 15m bar download...", 0, total, pct=40)
+        stock_data = fetch_batch_concurrent(
+            tickers, days=15, max_workers=6,
+            on_progress=_on_15m_progress, delay=0.05, interval="15m", includePrePost="true" if extended_hours else "false"
+        )
+        eval_dict = stock_data
+    else:
+        # After hours: no 15m download needed
+        eval_dict = daily_data
 
-    for i, (sym, df_15m) in enumerate(stock_data.items()):
-        pct = 85 + int((i / len(stock_data)) * 15) if len(stock_data) else 100
-        _update_progress("analyzing", f"Analyzing 3-Sigma for {sym}...", i, len(stock_data), ticker=sym, found=len(results), pct=pct)
+    for i, sym in enumerate(tickers):
+        start_pct = 85 if is_reg_hours else 80
+        rem_pct = 15 if is_reg_hours else 20
+        pct = start_pct + int((i / total) * rem_pct) if total else 100
+        _update_progress("analyzing", f"Analyzing 3-Sigma for {sym}...", i, total, ticker=sym, found=len(results), pct=pct)
         try:
             df_daily = daily_data.get(sym)
-            if df_15m is None or df_daily is None or len(df_15m) < 20 or len(df_daily) < 20:
+            df_15m = eval_dict.get(sym) if is_reg_hours else None
+            
+            # Pre-check data row length
+            if df_daily is None or len(df_daily) < 20:
+                continue
+            if is_reg_hours and (df_15m is None or len(df_15m) < 20):
                 continue
 
             result = _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=is_market_bullish)
@@ -2287,7 +2338,7 @@ def three_sigma_full_market_scan(extended_hours=False):
 
 
 def two_sigma_full_market_scan(extended_hours=False):
-    """Scan all US tickers for 2-Sigma Daily Bands + 15m regular hours crossings."""
+    """Scan all US tickers for 2-Sigma Daily Bands + 15m regular hours crossings (Daily Close crossings after hours)."""
     _reset_progress(status="running", mode="2sigma")
     start_time = time.time()
 
@@ -2297,10 +2348,12 @@ def two_sigma_full_market_scan(extended_hours=False):
 
     results = []
     total = len(tickers)
+    is_reg_hours = is_market_hours()
 
-    # Daily progress callback (0% - 40%)
+    # Daily progress callback
     def _on_daily_progress(i, tot, sym):
-        pct = int((i / tot) * 40)
+        max_pct = 40 if is_reg_hours else 80
+        pct = int((i / tot) * max_pct)
         _update_progress("downloading", f"Downloading daily candles... ({i}/{tot})", i, tot, ticker=sym, pct=pct)
 
     _update_progress("downloading", "Initiating daily candle download...", 0, total, pct=0)
@@ -2309,23 +2362,35 @@ def two_sigma_full_market_scan(extended_hours=False):
         on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
     )
 
-    # 15m progress callback (40% - 85%)
-    def _on_15m_progress(i, tot, sym):
-        pct = 40 + int((i / tot) * 45)
-        _update_progress("downloading", f"Downloading 15m bars... ({i}/{tot})", i, tot, ticker=sym, found=len(results), pct=pct)
+    if is_reg_hours:
+        # 15m progress callback (40% - 85%)
+        def _on_15m_progress(i, tot, sym):
+            pct = 40 + int((i / tot) * 45)
+            _update_progress("downloading", f"Downloading 15m bars... ({i}/{tot})", i, tot, ticker=sym, found=len(results), pct=pct)
 
-    _update_progress("downloading", "Initiating 15m bar download...", 0, total, pct=40)
-    stock_data = fetch_batch_concurrent(
-        tickers, days=15, max_workers=6,
-        on_progress=_on_15m_progress, delay=0.05, interval="15m", includePrePost="true" if extended_hours else "false"
-    )
+        _update_progress("downloading", "Initiating 15m bar download...", 0, total, pct=40)
+        stock_data = fetch_batch_concurrent(
+            tickers, days=15, max_workers=6,
+            on_progress=_on_15m_progress, delay=0.05, interval="15m", includePrePost="true" if extended_hours else "false"
+        )
+        eval_dict = stock_data
+    else:
+        # After hours: no 15m download needed
+        eval_dict = daily_data
 
-    for i, (sym, df_15m) in enumerate(stock_data.items()):
-        pct = 85 + int((i / len(stock_data)) * 15) if len(stock_data) else 100
-        _update_progress("analyzing", f"Analyzing 2-Sigma for {sym}...", i, len(stock_data), ticker=sym, found=len(results), pct=pct)
+    for i, sym in enumerate(tickers):
+        start_pct = 85 if is_reg_hours else 80
+        rem_pct = 15 if is_reg_hours else 20
+        pct = start_pct + int((i / total) * rem_pct) if total else 100
+        _update_progress("analyzing", f"Analyzing 2-Sigma for {sym}...", i, total, ticker=sym, found=len(results), pct=pct)
         try:
             df_daily = daily_data.get(sym)
-            if df_15m is None or df_daily is None or len(df_15m) < 20 or len(df_daily) < 20:
+            df_15m = eval_dict.get(sym) if is_reg_hours else None
+            
+            # Pre-check data row length
+            if df_daily is None or len(df_daily) < 20:
+                continue
+            if is_reg_hours and (df_15m is None or len(df_15m) < 20):
                 continue
 
             result = _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=is_market_bullish, std_dev_mult=2.0)
