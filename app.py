@@ -386,6 +386,7 @@ def test_options_api():
         # Test Yahoo Session directly
         logs.append("Testing Yahoo Finance cookie/crumb setup directly on server...")
         try:
+            import requests
             test_sess = requests.Session()
             test_sess.headers.update({
                 "User-Agent": (
