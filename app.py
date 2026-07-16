@@ -383,6 +383,36 @@ def test_options_api():
         
         logs.append(f"Starting test for {ticker} | Type: {signal_type} | Price: {price}")
         
+        # Test Yahoo Session directly
+        logs.append("Testing Yahoo Finance cookie/crumb setup directly on server...")
+        try:
+            test_sess = requests.Session()
+            test_sess.headers.update({
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+            })
+            
+            # Step 1: fc.yahoo.com
+            try:
+                r1 = test_sess.get("https://fc.yahoo.com", timeout=3)
+                logs.append(f"  fc.yahoo.com returned status: {r1.status_code}")
+                logs.append(f"  fc.yahoo.com cookies: {test_sess.cookies.get_dict()}")
+            except Exception as e1:
+                logs.append(f"  fc.yahoo.com failed: {e1}")
+                
+            # Step 2: getcrumb
+            try:
+                r2 = test_sess.get("https://query2.finance.yahoo.com/v1/test/getcrumb", timeout=3)
+                logs.append(f"  getcrumb returned status: {r2.status_code}")
+                logs.append(f"  getcrumb text: {r2.text.strip()}")
+            except Exception as e2:
+                logs.append(f"  getcrumb failed: {e2}")
+        except Exception as e:
+            logs.append(f"Yahoo diagnostic block failed: {e}")
+        
         # 1. Fetch options chain
         try:
             chain_meta = fetch_options_chain(ticker)
