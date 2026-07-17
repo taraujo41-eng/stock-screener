@@ -2096,6 +2096,7 @@ def is_market_hours():
 def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev_mult=3.0):
     """
     Evaluates Close (15m during market hours, Daily after hours) against Daily Bollinger Bands.
+    For 3-sigma scans, also detects stocks within proximity of the band (near-miss setups).
     """
     try:
         is_reg_hours = is_market_hours()
@@ -2141,12 +2142,23 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
             last_price = float(curr['Close'])
             df_eval = df_daily
 
-        # 3. Check for touches/piercing
-        is_bullish = last_price <= daily_lower
-        is_bearish = last_price >= daily_upper
+        # 3. Check for touches/piercing + proximity detection
+        is_bullish_pierced = last_price <= daily_lower
+        is_bearish_pierced = last_price >= daily_upper
+        
+        # Proximity detection: within 1.5% of the band (for 3-sigma, this catches approaching setups)
+        PROXIMITY_PCT = 0.015
+        is_bullish_near = (not is_bullish_pierced) and (last_price <= daily_lower * (1 + PROXIMITY_PCT))
+        is_bearish_near = (not is_bearish_pierced) and (last_price >= daily_upper * (1 - PROXIMITY_PCT))
+        
+        is_bullish = is_bullish_pierced or is_bullish_near
+        is_bearish = is_bearish_pierced or is_bearish_near
         
         if not is_bullish and not is_bearish:
             return None
+
+        # Track whether this is a full pierce or a near-miss
+        is_pierced = is_bullish_pierced or is_bearish_pierced
 
         # 4. Standard indicators on evaluation dataframe
         rsi_series = compute_rsi(df_eval['Close'], 14)
@@ -2179,11 +2191,18 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
             bb_pct_b = ((last_price - daily_lower) / (daily_upper - daily_lower)) * 100
 
         # Constructing dynamic score & tags
-        score = 10
+        # Pierced signals start at 10, near-miss signals start at 7
+        score = 10 if is_pierced else 7
         reasons_list = []
         
+        sd_label = f"{int(std_dev_mult)}SD" if std_dev_mult.is_integer() else f"{std_dev_mult}SD"
+        
         if is_bullish:
-            reasons_list.append(f"Pierced Daily Lower {int(std_dev_mult)}SD BB" if std_dev_mult.is_integer() else f"Pierced Daily Lower {std_dev_mult}SD BB")
+            if is_bullish_pierced:
+                reasons_list.append(f"Pierced Daily Lower {sd_label} BB")
+            else:
+                dist_pct = ((daily_lower - last_price) / daily_lower) * -100
+                reasons_list.append(f"Near Daily Lower {sd_label} BB ({dist_pct:.1f}% away)")
             if bull_div:
                 score += 4
                 reasons_list.append("RSI Divergence")
@@ -2200,7 +2219,11 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
                 score += 1
                 reasons_list.append("EMA Extension")
         else:
-            reasons_list.append(f"Pierced Daily Upper {int(std_dev_mult)}SD BB" if std_dev_mult.is_integer() else f"Pierced Daily Upper {std_dev_mult}SD BB")
+            if is_bearish_pierced:
+                reasons_list.append(f"Pierced Daily Upper {sd_label} BB")
+            else:
+                dist_pct = ((last_price - daily_upper) / daily_upper) * -100
+                reasons_list.append(f"Near Daily Upper {sd_label} BB ({dist_pct:.1f}% away)")
             if bear_div:
                 score += 4
                 reasons_list.append("RSI Divergence")
@@ -2217,9 +2240,13 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
                 score += 1
                 reasons_list.append("EMA Extension")
 
-        # Grade assignment - require RSI divergence for A+ grade
+        # Grade assignment
+        # Pierced + divergence = A+, Pierced = A, Near-miss + divergence = B+, Near-miss = B
         has_div = (is_bullish and bull_div) or (is_bearish and bear_div)
-        grade = "A+" if (score >= 12 and has_div) else "A"
+        if is_pierced:
+            grade = "A+" if (score >= 12 and has_div) else "A"
+        else:
+            grade = "B+" if has_div else "B"
         reasons = " | ".join(reasons_list)
 
         # 5. Options setups
@@ -2245,8 +2272,8 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
         except Exception:
             pass
 
-        # Calculate Stop Loss & Profit Target
-        atr_series = compute_atr(df_15m, 14)
+        # Calculate Stop Loss & Profit Target (use df_eval which is valid in both modes)
+        atr_series = compute_atr(df_eval, 14)
         atr_val = float(atr_series.iloc[-1]) if len(atr_series) > 0 else 0.05 * last_price
         
         entry = last_price
@@ -2284,6 +2311,7 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
     except Exception as e:
         print(f"  Error analyzing 3-sigma for {sym}: {e}")
     return None
+
 
 
 def three_sigma_full_market_scan(extended_hours=False):
