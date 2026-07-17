@@ -1,0 +1,28 @@
+name: Keep Render Alive
+
+on:
+  schedule:
+    # Runs every 5 minutes, Mon-Fri
+    # GitHub Actions uses UTC — ET market hours (9:25 AM - 4:20 PM ET) = 13:25 - 20:20 UTC
+    # During EDT (Mar-Nov): 9:25 AM ET = 13:25 UTC
+    # During EST (Nov-Mar): 9:25 AM ET = 14:25 UTC
+    # We cover both by running 13:00 - 21:00 UTC, Mon-Fri
+    - cron: '*/5 13-20 * * 1-5'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render to keep service alive
+        run: |
+          echo "Pinging Render service at $(date -u)..."
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 30 \
+            "https://stock-screener-has6.onrender.com/api/ping")
+          echo "Response status: $HTTP_STATUS"
+          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 400 ]; then
+            echo "✅ Service is alive"
+          else
+            echo "⚠️ Service returned $HTTP_STATUS — may be spinning up"
+          fi
