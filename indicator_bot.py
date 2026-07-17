@@ -270,6 +270,40 @@ def is_market_hours():
         logger.error(f"Error checking market hours: {e}")
         return True  # Default to True on exception to ensure we don't block bot permanently
 
+def _do_self_ping(label="self-ping"):
+    """Send an HTTP request to our own /api/ping to keep Render alive."""
+    global _last_self_ping_time
+    self_url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("SELF_PING_URL")
+    if not self_url:
+        return
+    try:
+        import requests
+        ping_url = f"{self_url.rstrip('/')}/api/ping"
+        requests.get(ping_url, timeout=10)
+        _last_self_ping_time = time.time()
+        logger.info(f"Keep-alive {label} sent: {ping_url}")
+    except Exception as e:
+        logger.warning(f"Keep-alive {label} failed: {e}")
+
+def _keep_alive_loop():
+    """
+    Independent keep-alive thread that pings every 4 minutes during market hours
+    and every 12 minutes during off-hours. This runs separately from the bot loop
+    so even if the bot loop is busy scanning, pings still fire on schedule.
+    """
+    logger.info("Keep-alive thread started.")
+    while True:
+        try:
+            if is_market_hours():
+                _do_self_ping(label="market-hours")
+                time.sleep(240)   # 4 minutes — well under Render's 15-min spin-down
+            else:
+                _do_self_ping(label="off-hours")
+                time.sleep(720)   # 12 minutes — keeps container warm for morning
+        except Exception as e:
+            logger.warning(f"Keep-alive loop error: {e}")
+            time.sleep(60)
+
 def bot_loop():
     logger.info("Starting background 3-Sigma alert bot loop...")
     
@@ -279,21 +313,6 @@ def bot_loop():
                 logger.info("Market is closed (weekends or outside 9:30 AM - 4:15 PM EST). Bot sleeping for 5 minutes...")
                 time.sleep(300)
                 continue
-                
-            # Perform self-ping to keep Render container awake during market hours
-            global _last_self_ping_time
-            now_ts = time.time()
-            if now_ts - _last_self_ping_time >= 600:  # 10 minutes
-                _last_self_ping_time = now_ts
-                self_url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("SELF_PING_URL")
-                if self_url:
-                    try:
-                        import requests
-                        ping_url = f"{self_url.rstrip('/')}/api/ping"
-                        requests.get(ping_url, timeout=5)
-                        logger.info(f"Self-ping sent to keep Render container awake: {ping_url}")
-                    except Exception as e:
-                        logger.warning(f"Self-ping failed: {e}")
                 
             logger.info("--- Starting 3-Sigma Reversal Bot Cycle ---")
             
@@ -380,7 +399,14 @@ def bot_loop():
             time.sleep(60)
 
 def start_bot_thread():
-    """Starts the bot loop in a daemon background thread."""
+    """Starts the bot loop and keep-alive pinger in daemon background threads."""
+    # Keep-alive thread — ensures Render doesn't spin down
+    ka = threading.Thread(target=_keep_alive_loop, daemon=True)
+    ka.start()
+    logger.info("Keep-alive background thread spawned.")
+    
+    # Main bot loop thread — runs scans during market hours
     t = threading.Thread(target=bot_loop, daemon=True)
     t.start()
     logger.info("3-Sigma background alert bot thread spawned.")
+
