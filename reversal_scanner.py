@@ -605,6 +605,56 @@ def detect_rsi_divergence(price_series, rsi_series, lookback=20):
     
     return bull_div, bear_div
 
+def detect_bb_pct_b_divergence(price_series, bb_pct_b_series, lookback=20):
+    """
+    Check for Bollinger Bands %B Divergence in the last `lookback` periods.
+    Returns (bull_div, bear_div)
+    """
+    if len(price_series) < lookback + 2:
+        return False, False
+        
+    curr_price = float(price_series.iloc[-1])
+    curr_pct_b = float(bb_pct_b_series.iloc[-1])
+    
+    # The lookback window (excluding last 2 candles for distinct swing)
+    window_price = price_series.iloc[-(lookback+2):-2]
+    window_pct_b = bb_pct_b_series.iloc[-(lookback+2):-2]
+    
+    # Find the index position of the swing low/high
+    lowest_idx = window_price.values.argmin()
+    highest_idx = window_price.values.argmax()
+    
+    bars_from_low = len(window_price) - lowest_idx
+    bars_from_high = len(window_price) - highest_idx
+    
+    lowest_price_in_window = float(window_price.iloc[lowest_idx])
+    highest_price_in_window = float(window_price.iloc[highest_idx])
+    
+    pct_b_at_low = float(window_pct_b.iloc[lowest_idx])
+    pct_b_at_high = float(window_pct_b.iloc[highest_idx])
+
+    # Bullish Divergence: Price lower low + %B higher low
+    pct_b_bull_magnitude = curr_pct_b - pct_b_at_low
+    bull_div = (
+        (curr_price < lowest_price_in_window) and
+        (curr_pct_b > pct_b_at_low) and
+        (pct_b_bull_magnitude >= 5) and  # at least 5% divergence
+        (curr_pct_b <= 35) and            # must be in lower region
+        (bars_from_low >= 5)
+    )
+    
+    # Bearish Divergence: Price higher high + %B lower high
+    pct_b_bear_magnitude = pct_b_at_high - curr_pct_b
+    bear_div = (
+        (curr_price > highest_price_in_window) and
+        (curr_pct_b < pct_b_at_high) and
+        (pct_b_bear_magnitude >= 5) and  # at least 5% divergence
+        (curr_pct_b >= 65) and            # must be in upper region
+        (bars_from_high >= 5)
+    )
+    
+    return bull_div, bear_div
+
 # =====================================================================
 # Breakout / Squeeze Indicators
 # =====================================================================
@@ -2142,14 +2192,19 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
             last_price = float(curr['Close'])
             df_eval = df_daily
 
+        # Bollinger Bands %B
+        bb_pct_b = 50.0
+        if (daily_upper - daily_lower) != 0:
+            bb_pct_b = ((last_price - daily_lower) / (daily_upper - daily_lower)) * 100
+
         # 3. Check for touches/piercing + proximity detection
-        is_bullish_pierced = last_price <= daily_lower
-        is_bearish_pierced = last_price >= daily_upper
+        is_bullish_pierced = last_price <= daily_lower or bb_pct_b <= 0
+        is_bearish_pierced = last_price >= daily_upper or bb_pct_b >= 100
         
-        # Proximity detection: within 1.5% of the band (for 3-sigma, this catches approaching setups)
+        # Proximity detection: either price within 1.5% of the band, or %B within bottom 15% / top 15% of the channel
         PROXIMITY_PCT = 0.015
-        is_bullish_near = (not is_bullish_pierced) and (last_price <= daily_lower * (1 + PROXIMITY_PCT))
-        is_bearish_near = (not is_bearish_pierced) and (last_price >= daily_upper * (1 - PROXIMITY_PCT))
+        is_bullish_near = (not is_bullish_pierced) and (last_price <= daily_lower * (1 + PROXIMITY_PCT) or bb_pct_b <= 15)
+        is_bearish_near = (not is_bearish_pierced) and (last_price >= daily_upper * (1 - PROXIMITY_PCT) or bb_pct_b >= 85)
         
         is_bullish = is_bullish_pierced or is_bullish_near
         is_bearish = is_bearish_pierced or is_bearish_near
@@ -2166,6 +2221,16 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
         rvol = compute_rvol(df_eval)
         adr_pct = compute_adr_pct(df_eval, 14)
         bull_div, bear_div = detect_rsi_divergence(df_eval['Close'], rsi_series, lookback=20)
+        
+        # Compute rolling %B on evaluation dataframe to check for %B divergence
+        middle_eval = df_eval['Close'].rolling(window=20).mean()
+        std_eval = df_eval['Close'].rolling(window=20).std()
+        upper_eval = middle_eval + std_dev_mult * std_eval
+        lower_eval = middle_eval - std_dev_mult * std_eval
+        band_width_eval = upper_eval - lower_eval
+        bb_pct_b_series = ((df_eval['Close'] - lower_eval) / band_width_eval.replace(0, np.nan)) * 100
+        bb_pct_b_series = bb_pct_b_series.fillna(50.0)
+        bb_div_bull, bb_div_bear = detect_bb_pct_b_divergence(df_eval['Close'], bb_pct_b_series, lookback=20)
         
         try:
             squeeze_on, _, _ = detect_squeeze(df_eval)
@@ -2186,10 +2251,6 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
         sma50_dist = ((last_price - sma50) / sma50) * 100 if sma50 else 0.0
         sma200_dist = ((last_price - sma200) / sma200) * 100 if sma200 else 0.0
 
-        bb_pct_b = 50.0
-        if (daily_upper - daily_lower) != 0:
-            bb_pct_b = ((last_price - daily_lower) / (daily_upper - daily_lower)) * 100
-
         # Constructing dynamic score & tags
         # Pierced signals start at 10, near-miss signals start at 7
         score = 10 if is_pierced else 7
@@ -2206,6 +2267,9 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
             if bull_div:
                 score += 4
                 reasons_list.append("RSI Divergence")
+            if bb_div_bull:
+                score += 3
+                reasons_list.append("%B Divergence")
             if rsi_val <= 30:
                 score += 2
                 reasons_list.append(f"RSI Oversold ({rsi_val:.1f})")
@@ -2227,6 +2291,9 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
             if bear_div:
                 score += 4
                 reasons_list.append("RSI Divergence")
+            if bb_div_bear:
+                score += 3
+                reasons_list.append("%B Divergence")
             if rsi_val >= 70:
                 score += 2
                 reasons_list.append(f"RSI Overbought ({rsi_val:.1f})")
@@ -2242,7 +2309,7 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
 
         # Grade assignment
         # Pierced + divergence = A+, Pierced = A, Near-miss + divergence = B+, Near-miss = B
-        has_div = (is_bullish and bull_div) or (is_bearish and bear_div)
+        has_div = (is_bullish and (bull_div or bb_div_bull)) or (is_bearish and (bear_div or bb_div_bear))
         if is_pierced:
             grade = "A+" if (score >= 12 and has_div) else "A"
         else:

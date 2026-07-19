@@ -38,6 +38,56 @@ def pandas_valuewhen(condition, source, occurrence=1):
     shifted = source_true.shift(occurrence).reindex(condition.index)
     return shifted.ffill()
 
+def detect_bb_pct_b_divergence(price_series, bb_pct_b_series, lookback=20):
+    """
+    Check for Bollinger Bands %B Divergence in the last `lookback` periods.
+    Returns (bull_div, bear_div)
+    """
+    if len(price_series) < lookback + 2:
+        return False, False
+        
+    curr_price = float(price_series.iloc[-1])
+    curr_pct_b = float(bb_pct_b_series.iloc[-1])
+    
+    # The lookback window (excluding last 2 candles for distinct swing)
+    window_price = price_series.iloc[-(lookback+2):-2]
+    window_pct_b = bb_pct_b_series.iloc[-(lookback+2):-2]
+    
+    # Find the index position of the swing low/high
+    lowest_idx = window_price.values.argmin()
+    highest_idx = window_price.values.argmax()
+    
+    bars_from_low = len(window_price) - lowest_idx
+    bars_from_high = len(window_price) - highest_idx
+    
+    lowest_price_in_window = float(window_price.iloc[lowest_idx])
+    highest_price_in_window = float(window_price.iloc[highest_idx])
+    
+    pct_b_at_low = float(window_pct_b.iloc[lowest_idx])
+    pct_b_at_high = float(window_pct_b.iloc[highest_idx])
+
+    # Bullish Divergence: Price lower low + %B higher low
+    pct_b_bull_magnitude = curr_pct_b - pct_b_at_low
+    bull_div = (
+        (curr_price < lowest_price_in_window) and
+        (curr_pct_b > pct_b_at_low) and
+        (pct_b_bull_magnitude >= 5) and  # at least 5% divergence
+        (curr_pct_b <= 35) and            # must be in lower region
+        (bars_from_low >= 5)
+    )
+    
+    # Bearish Divergence: Price higher high + %B lower high
+    pct_b_bear_magnitude = pct_b_at_high - curr_pct_b
+    bear_div = (
+        (curr_price > highest_price_in_window) and
+        (curr_pct_b < pct_b_at_high) and
+        (pct_b_bear_magnitude >= 5) and  # at least 5% divergence
+        (curr_pct_b >= 65) and            # must be in upper region
+        (bars_from_high >= 5)
+    )
+    
+    return bull_div, bear_div
+
 def calculate_3_sigma_divergence(df, bb_length=20, bb_mult=3.0, rsi_length=14, lookback=15, daily_upper_bb=None, daily_lower_bb=None):
     """
     Executes Mind In Money Reversal Pro indicator logic on the input DataFrame.
@@ -105,10 +155,36 @@ def calculate_3_sigma_divergence(df, bb_length=20, bb_mult=3.0, rsi_length=14, l
         (close_0 < close_1)
     )
     
-    df_res['long_trigger'] = (close_0 <= lower_bb)
-    df_res['short_trigger'] = (close_0 >= upper_bb)
+    # Compute %B Bollinger Bands
+    band_width = upper_bb - lower_bb
+    if isinstance(band_width, pd.Series):
+        bb_pct_b = ((df_res['Close'] - lower_bb) / band_width.replace(0, np.nan)) * 100
+        bb_pct_b = bb_pct_b.fillna(50.0)
+    else:
+        if band_width != 0:
+            bb_pct_b = ((df_res['Close'] - lower_bb) / band_width) * 100
+        else:
+            bb_pct_b = 50.0
+
+    # Calculate rolling %B on the active series itself to check for %B divergence
+    middle_rolling = df_res['Close'].rolling(window=bb_length).mean()
+    std_rolling = df_res['Close'].rolling(window=bb_length).std()
+    upper_rolling = middle_rolling + bb_mult * std_rolling
+    lower_rolling = middle_rolling - bb_mult * std_rolling
+    band_width_rolling = upper_rolling - lower_rolling
+    bb_pct_b_rolling = ((df_res['Close'] - lower_rolling) / band_width_rolling.replace(0, np.nan)) * 100
+    bb_pct_b_rolling = bb_pct_b_rolling.fillna(50.0)
+    bb_div_bull, bb_div_bear = detect_bb_pct_b_divergence(df_res['Close'], bb_pct_b_rolling, lookback=lookback)
+
+    df_res['long_trigger'] = (close_0 <= lower_bb) | (bb_pct_b <= 10)
+    df_res['short_trigger'] = (close_0 >= upper_bb) | (bb_pct_b >= 90)
     
     df_res['long_trigger'] = df_res['long_trigger'].fillna(False).astype(bool)
     df_res['short_trigger'] = df_res['short_trigger'].fillna(False).astype(bool)
+
+    if bb_div_bull:
+        df_res.loc[df_res.index[-1], 'long_trigger'] = True
+    if bb_div_bear:
+        df_res.loc[df_res.index[-1], 'short_trigger'] = True
     
     return df_res
