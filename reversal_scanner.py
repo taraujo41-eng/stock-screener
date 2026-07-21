@@ -1801,6 +1801,9 @@ def _analyze_options_setup(sym, df, iv_history):
         if bull_catalyst < 3 and bear_catalyst < 3:
             return None
 
+        has_bull_pattern = patterns['hammer'] or patterns['bull_engulf'] or patterns['bottoming_tail']
+        has_bear_pattern = patterns['star'] or patterns['bear_engulf'] or patterns['topping_tail']
+
         needs_news_check = (
             (bull_catalyst >= 4 or (bull_catalyst >= 3 and has_bull_pattern)) or
             (bear_catalyst >= 4 or (bear_catalyst >= 3 and has_bear_pattern))
