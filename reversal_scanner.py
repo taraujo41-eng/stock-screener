@@ -286,20 +286,46 @@ def prefilter_liquid_optionable(tickers):
 
     start_time = time.time()
 
-    # Phase 1: Fetch live quotes for all tickers
-    print(f"  Phase 1: Fetching live quotes from Webull...")
-    _update_progress("prefilter", "Fetching live quotes for pre-filter...", 0, len(tickers), pct=0)
+    # Phase 1: Quick smoke test — can we reach Webull at all?
+    print(f"  Phase 1: Testing Webull connectivity...")
+    _update_progress("prefilter", "Testing Webull connectivity...", 0, len(tickers), pct=1)
+    
+    from data_fetcher import get_unofficial_client
+    wb_test = get_unofficial_client()
+    webull_available = False
+    if wb_test:
+        try:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as test_pool:
+                future = test_pool.submit(lambda: wb_test.get_quote(stock="AAPL"))
+                test_quote = future.result(timeout=5)
+                if test_quote and isinstance(test_quote, dict):
+                    webull_available = True
+                    print(f"  Webull connectivity: OK (AAPL quote received)")
+        except Exception as e:
+            print(f"  Webull connectivity: FAILED ({e})")
+    else:
+        print(f"  Webull connectivity: No client available")
+
+    if not webull_available:
+        print(f"  ⚠️ Webull API unreachable — BYPASSING pre-filter to prevent scan hang")
+        _update_progress("prefilter", "Webull unavailable — bypassing pre-filter", len(tickers), len(tickers), pct=20)
+        return sorted(tickers)
+
+    # Phase 2: Fetch live quotes for all tickers (Webull confirmed working)
+    print(f"  Phase 2: Fetching live quotes from Webull...")
+    _update_progress("prefilter", "Fetching live quotes for pre-filter...", 0, len(tickers), pct=2)
 
     def _on_quote_progress(i, tot, sym):
-        pct = int((i / tot) * 20) if tot else 0
+        pct = 2 + int((i / tot) * 18) if tot else 2
         _update_progress("prefilter", f"Pre-filtering universe ({i}/{tot})...", i, tot, ticker=sym, pct=pct)
 
-    quotes = fetch_quotes_batch(tickers, max_workers=10, on_progress=_on_quote_progress)
+    quotes = fetch_quotes_batch(tickers, max_workers=10, on_progress=_on_quote_progress, global_timeout=30)
     print(f"  Quotes fetched: {len(quotes)} / {len(tickers)}")
 
     if not quotes:
         print("  ⚠️ WARNING: FAILED TO FETCH ANY QUOTES FROM WEBULL. BYPASSING LIQUIDITY PRE-FILTER TO PREVENT EMPTY SCAN.")
-        _update_progress("prefilter", "Pre-filter failed: Webull quotes unavailable, bypassing filter", len(tickers), len(tickers), pct=100)
+        _update_progress("prefilter", "Pre-filter failed: Webull quotes unavailable, bypassing filter", len(tickers), len(tickers), pct=20)
         return sorted(tickers)
 
     # Phase 2: Apply market cap + volume + price filters
