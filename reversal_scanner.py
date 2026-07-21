@@ -270,35 +270,15 @@ def prefilter_liquid_optionable(tickers):
     print(f"  Input tickers: {len(tickers)}")
     print(f"  Criteria: MktCap >= $10B | AvgVol >= {MIN_AVG_VOLUME:,} | Price >= ${MIN_PRICE:.0f} | Optionable")
 
-    start_time = time.time()
-
-    # Phase 1: Quick smoke test — can we reach Webull at all?
-    print(f"  Phase 1: Testing Webull connectivity...")
-    _update_progress("prefilter", "Testing Webull connectivity...", 0, len(tickers), pct=1)
-    
-    from data_fetcher import get_unofficial_client
-    wb_test = get_unofficial_client()
-    webull_available = False
-    if wb_test:
-        try:
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as test_pool:
-                future = test_pool.submit(lambda: wb_test.get_quote(stock="AAPL"))
-                test_quote = future.result(timeout=5)
-                if test_quote and isinstance(test_quote, dict):
-                    webull_available = True
-                    print(f"  Webull connectivity: OK (AAPL quote received)")
-        except Exception as e:
-            print(f"  Webull connectivity: FAILED ({e})")
-    else:
-        print(f"  Webull connectivity: No client available")
-
-    if not webull_available:
-        print(f"  ⚠️ Webull API unreachable — BYPASSING pre-filter to prevent scan hang")
-        _update_progress("prefilter", "Webull unavailable — bypassing pre-filter", len(tickers), len(tickers), pct=20)
+    # In cloud environments (Render), bypass quote pre-filter immediately to avoid quote socket hangs
+    if os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID"):
+        print("  [Pre-filter] Cloud environment (Render) — bypassing pre-filter for instant scan execution.")
+        _update_progress("prefilter", "Cloud environment — bypassing pre-filter...", len(tickers), len(tickers), pct=20)
         return sorted(tickers)
 
-    # Phase 2: Fetch live quotes for all tickers (Webull confirmed working)
+    start_time = time.time()
+
+    # Phase 2: Fetch live quotes for all tickers
     print(f"  Phase 2: Fetching live quotes from Webull...")
     _update_progress("prefilter", "Fetching live quotes for pre-filter...", 0, len(tickers), pct=2)
 
