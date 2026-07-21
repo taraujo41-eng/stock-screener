@@ -3018,9 +3018,25 @@ def options_full_market_scan(extended_hours=False):
     from concurrent.futures import ThreadPoolExecutor
     start_time = time.time()
     _reset_progress("running", mode="options")
-    
-    tickers = get_us_tickers()
-    optionable_tickers = prefilter_liquid_optionable(tickers)
+
+    # ── Phase 0: Build ticker universe ──
+    _update_progress("prefilter", "Building ticker universe from S&P 500, NASDAQ 100...", 0, 1, pct=1)
+    try:
+        tickers = get_us_tickers()
+    except Exception as e:
+        print(f"ERROR in get_us_tickers(): {e}")
+        _update_progress("prefilter", f"Error building ticker list: {e}", 0, 1, pct=0)
+        scan_progress["status"] = "error"
+        scan_progress["phase_label"] = f"Failed to build ticker universe: {e}"
+        return pd.DataFrame()
+
+    _update_progress("prefilter", f"Pre-filtering {len(tickers)} tickers for liquidity...", 0, len(tickers), pct=2)
+    try:
+        optionable_tickers = prefilter_liquid_optionable(tickers)
+    except Exception as e:
+        print(f"ERROR in prefilter_liquid_optionable(): {e}")
+        # Fall back to using all tickers if prefilter fails
+        optionable_tickers = sorted(tickers)
     total = len(optionable_tickers)
 
     def _on_daily_progress(i, tot, sym):
