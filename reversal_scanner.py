@@ -3066,7 +3066,7 @@ def options_full_market_scan(extended_hours=False):
 
     total_time = time.time() - start_time
     scan_progress.update({
-        "status": "running", "phase": "complete",
+        "status": "done", "phase": "complete",
         "phase_label": f"Done — {len(results)} A+ options plays found",
         "current": total, "total": total,
         "found": len(results), "pct": 100, "eta_seconds": 0,
@@ -3129,7 +3129,7 @@ def options_watchlist_scan(watchlist=None, extended_hours=False):
 
     total_time = time.time() - start_time
     scan_progress.update({
-        "status": "running", "phase": "complete",
+        "status": "done", "phase": "complete",
         "phase_label": f"Done — {len(results)} A+ options plays found",
         "current": total, "total": total,
         "found": len(results), "pct": 100, "eta_seconds": 0,
