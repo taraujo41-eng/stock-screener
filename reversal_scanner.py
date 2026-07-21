@@ -291,8 +291,8 @@ def prefilter_liquid_optionable(tickers):
     _update_progress("prefilter", "Fetching live quotes for pre-filter...", 0, len(tickers), pct=0)
 
     def _on_quote_progress(i, tot, sym):
-        pct = int((i / tot) * 50) if tot else 0
-        _update_progress("prefilter", f"Pre-filter: fetching quotes ({i}/{tot})...", i, tot, ticker=sym, pct=pct)
+        pct = int((i / tot) * 20) if tot else 0
+        _update_progress("prefilter", f"Pre-filtering universe ({i}/{tot})...", i, tot, ticker=sym, pct=pct)
 
     quotes = fetch_quotes_batch(tickers, max_workers=10, on_progress=_on_quote_progress)
     print(f"  Quotes fetched: {len(quotes)} / {len(tickers)}")
@@ -3024,10 +3024,10 @@ def options_full_market_scan(extended_hours=False):
     total = len(optionable_tickers)
 
     def _on_daily_progress(i, tot, sym):
-        pct = int((i / tot) * 30)
+        pct = 20 + int((i / tot) * 30) if tot else 20
         _update_progress("downloading", f"Downloading daily bars for optionable universe... ({i}/{tot})", i, tot, ticker=sym, found=0, pct=pct)
 
-    _update_progress("downloading", "Initiating daily bar download...", 0, total, pct=0)
+    _update_progress("downloading", "Initiating daily bar download...", 0, total, pct=20)
 
     daily_data = fetch_batch_concurrent(
         optionable_tickers, days=150, max_workers=8,
@@ -3039,13 +3039,13 @@ def options_full_market_scan(extended_hours=False):
     processed_count = 0
     results = []
 
-    _update_progress("analyzing", f"Analyzing options setups for {tot_data} tickers...", 0, tot_data, pct=30)
+    _update_progress("analyzing", f"Analyzing options setups for {tot_data} tickers...", 0, tot_data, pct=50)
 
     def _process_ticker(item):
         nonlocal processed_count
         sym, df_daily = item
         processed_count += 1
-        pct = 30 + int((processed_count / tot_data) * 70) if tot_data else 100
+        pct = 50 + int((processed_count / tot_data) * 50) if tot_data else 100
         
         try:
             if df_daily is None or len(df_daily) < 20:

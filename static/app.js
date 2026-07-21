@@ -874,7 +874,9 @@ function startProgressPolling() {
       document.getElementById("progressEta").textContent = fmtEta(p.eta_seconds);
 
       const fill = document.getElementById("progressFill");
-      if (p.phase === "downloading") {
+      if (p.phase === "prefilter") {
+        fill.style.background = "linear-gradient(90deg, #a855f7, #6366f1)";
+      } else if (p.phase === "downloading") {
         fill.style.background = "linear-gradient(90deg, #6366f1, #818cf8)";
       } else if (p.phase === "analyzing") {
         fill.style.background = "linear-gradient(90deg, #22c55e, #4ade80)";
