@@ -1797,10 +1797,10 @@ def _analyze_options_setup(sym, df, iv_history):
             bear_catalyst += 1; bear_reasons.append("Downtrend")
 
         news_details = None
-        # --- NEWS CATALYST ---
-        has_bull_pattern = patterns['hammer'] or patterns['bull_engulf'] or patterns['bottoming_tail']
-        has_bear_pattern = patterns['star'] or patterns['bear_engulf'] or patterns['topping_tail']
-        
+        # Early exit if technical catalyst score is too low on both sides
+        if bull_catalyst < 3 and bear_catalyst < 3:
+            return None
+
         needs_news_check = (
             (bull_catalyst >= 4 or (bull_catalyst >= 3 and has_bull_pattern)) or
             (bear_catalyst >= 4 or (bear_catalyst >= 3 and has_bear_pattern))
@@ -3010,47 +3010,54 @@ def options_full_market_scan(extended_hours=False):
     """
     Full market scan for A+ options setups (Directional Calls & Puts).
     Performs 2-phase analysis: Technical Catalyst prescreen + Options Chain Liquidity & Greeks filter.
+    Uses multi-threading to complete full market scan fast (~30-50s).
     """
+    from concurrent.futures import ThreadPoolExecutor
     start_time = time.time()
     _reset_progress("running", mode="options")
     
     tickers = get_us_tickers()
     optionable_tickers = prefilter_liquid_optionable(tickers)
     total = len(optionable_tickers)
-    results = []
 
     def _on_daily_progress(i, tot, sym):
-        pct = int((i / tot) * 40)
+        pct = int((i / tot) * 30)
         _update_progress("downloading", f"Downloading daily bars for optionable universe... ({i}/{tot})", i, tot, ticker=sym, found=0, pct=pct)
 
     _update_progress("downloading", "Initiating daily bar download...", 0, total, pct=0)
 
     daily_data = fetch_batch_concurrent(
-        optionable_tickers, days=150, max_workers=6,
+        optionable_tickers, days=150, max_workers=8,
         on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
     )
 
     iv_history = _load_iv_history()
     tot_data = len(daily_data)
+    processed_count = 0
+    results = []
 
-    for i, (sym, df_daily) in enumerate(daily_data.items()):
-        pct = 40 + int((i / tot_data) * 60) if tot_data else 100
-        elapsed = time.time() - start_time
-        rate = (i + 1) / elapsed if elapsed > 0 else 1
-        eta = int((tot_data - (i + 1)) / rate) if rate > 0 else 0
+    _update_progress("analyzing", f"Analyzing options setups for {tot_data} tickers...", 0, tot_data, pct=30)
+
+    def _process_ticker(item):
+        nonlocal processed_count
+        sym, df_daily = item
+        processed_count += 1
+        pct = 30 + int((processed_count / tot_data) * 70) if tot_data else 100
         
-        _update_progress("analyzing", f"Analyzing options setups for {sym}...", i + 1, tot_data, ticker=sym, found=len(results), pct=pct)
-
         try:
             if df_daily is None or len(df_daily) < 20:
-                continue
-
+                return None
             res = _analyze_options_setup(sym, df_daily, iv_history)
             if res:
                 results.append(res)
+            _update_progress("analyzing", f"Analyzing options for {sym} ({processed_count}/{tot_data})", processed_count, tot_data, ticker=sym, found=len(results), pct=pct)
+            return res
         except Exception as e:
             print(f"Error scanning options for {sym}: {e}")
-            continue
+            return None
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        list(executor.map(_process_ticker, daily_data.items()))
 
     _save_iv_history(iv_history)
 
@@ -3070,15 +3077,15 @@ def options_full_market_scan(extended_hours=False):
 
 def options_watchlist_scan(watchlist=None, extended_hours=False):
     """
-    Scans a specific watchlist for A+ options setups.
+    Scans a specific watchlist for A+ options setups using multi-threading.
     """
+    from concurrent.futures import ThreadPoolExecutor
     if not watchlist:
         watchlist = get_us_tickers()[:20]
     
     start_time = time.time()
     _reset_progress("running", mode="options")
     total = len(watchlist)
-    results = []
 
     def _on_daily_progress(i, tot, sym):
         pct = int((i / tot) * 30)
@@ -3091,21 +3098,29 @@ def options_watchlist_scan(watchlist=None, extended_hours=False):
 
     iv_history = _load_iv_history()
     tot_data = len(daily_data)
+    processed_count = 0
+    results = []
 
-    for i, (sym, df_daily) in enumerate(daily_data.items()):
-        pct = 30 + int((i / tot_data) * 70) if tot_data else 100
-        _update_progress("analyzing", f"Analyzing options for {sym}...", i + 1, tot_data, ticker=sym, found=len(results), pct=pct)
+    def _process_ticker(item):
+        nonlocal processed_count
+        sym, df_daily = item
+        processed_count += 1
+        pct = 30 + int((processed_count / tot_data) * 70) if tot_data else 100
 
         try:
             if df_daily is None or len(df_daily) < 20:
-                continue
-
+                return None
             res = _analyze_options_setup(sym, df_daily, iv_history)
             if res:
                 results.append(res)
+            _update_progress("analyzing", f"Analyzing options for {sym} ({processed_count}/{tot_data})", processed_count, tot_data, ticker=sym, found=len(results), pct=pct)
+            return res
         except Exception as e:
             print(f"Error scanning options for {sym}: {e}")
-            continue
+            return None
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        list(executor.map(_process_ticker, daily_data.items()))
 
     _save_iv_history(iv_history)
 
