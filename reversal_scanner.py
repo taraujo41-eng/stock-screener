@@ -264,9 +264,9 @@ def get_us_tickers():
 # Pre-filter: High Liquidity + Optionable Only
 # =====================================================================
 
-MIN_AVG_VOLUME = float(os.getenv("MIN_AVG_VOLUME", "1000000"))  # Minimum average daily volume (shares)
-MIN_PRICE = float(os.getenv("MIN_PRICE", "20.0"))               # Minimum stock price ($)
-MIN_MARKET_CAP = float(os.getenv("MIN_MARKET_CAP", "10000000000"))  # Minimum market cap ($10B)
+MIN_AVG_VOLUME = float(os.getenv("MIN_AVG_VOLUME", "500000"))   # Minimum average daily volume (500k shares)
+MIN_PRICE = float(os.getenv("MIN_PRICE", "10.0"))               # Minimum stock price ($10)
+MIN_MARKET_CAP = float(os.getenv("MIN_MARKET_CAP", "2000000000")) # Minimum market cap ($2B)
 
 def prefilter_liquid_optionable(tickers):
     """
@@ -1819,10 +1819,10 @@ def _analyze_options_setup(sym, df, iv_history):
                     bear_catalyst += 2
                     bear_reasons.append(f"{news_tag} (+2)")
 
-        # Need at least score 5 on one side to proceed (raised from 4 to filter for top-tier candidates)
+        # Need at least score 4 on one side to proceed to Phase B (Options chain selection)
         max_catalyst = max(bull_catalyst, bear_catalyst)
         print(f"  {sym}: Bull={bull_catalyst} Bear={bear_catalyst} RSI={rsi_val:.1f} Chg={day_chg_pct:.1f}%")
-        if max_catalyst < 5:
+        if max_catalyst < 4:
             return None
 
         # Determine dominant direction
