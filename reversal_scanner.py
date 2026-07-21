@@ -3002,6 +3002,127 @@ def rsi_divergence_full_market_scan(extended_hours=False):
     return pd.DataFrame(results).sort_values(by="Score", ascending=False).head(20)
 
 
+# =====================================================================
+# Full Market & Watchlist Options Scanner
+# =====================================================================
+
+def options_full_market_scan(extended_hours=False):
+    """
+    Full market scan for A+ options setups (Directional Calls & Puts).
+    Performs 2-phase analysis: Technical Catalyst prescreen + Options Chain Liquidity & Greeks filter.
+    """
+    start_time = time.time()
+    _reset_progress("running", mode="options")
+    
+    tickers = get_us_tickers()
+    optionable_tickers = prefilter_liquid_optionable(tickers)
+    total = len(optionable_tickers)
+    results = []
+
+    def _on_daily_progress(i, tot, sym):
+        pct = int((i / tot) * 40)
+        _update_progress("downloading", f"Downloading daily bars for optionable universe... ({i}/{tot})", i, tot, ticker=sym, found=0, pct=pct)
+
+    _update_progress("downloading", "Initiating daily bar download...", 0, total, pct=0)
+
+    daily_data = fetch_batch_concurrent(
+        optionable_tickers, days=150, max_workers=6,
+        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
+    )
+
+    iv_history = _load_iv_history()
+    tot_data = len(daily_data)
+
+    for i, (sym, df_daily) in enumerate(daily_data.items()):
+        pct = 40 + int((i / tot_data) * 60) if tot_data else 100
+        elapsed = time.time() - start_time
+        rate = (i + 1) / elapsed if elapsed > 0 else 1
+        eta = int((tot_data - (i + 1)) / rate) if rate > 0 else 0
+        
+        _update_progress("analyzing", f"Analyzing options setups for {sym}...", i + 1, tot_data, ticker=sym, found=len(results), pct=pct)
+
+        try:
+            if df_daily is None or len(df_daily) < 20:
+                continue
+
+            res = _analyze_options_setup(sym, df_daily, iv_history)
+            if res:
+                results.append(res)
+        except Exception as e:
+            print(f"Error scanning options for {sym}: {e}")
+            continue
+
+    _save_iv_history(iv_history)
+
+    total_time = time.time() - start_time
+    scan_progress.update({
+        "status": "running", "phase": "complete",
+        "phase_label": f"Done — {len(results)} A+ options plays found",
+        "current": total, "total": total,
+        "found": len(results), "pct": 100, "eta_seconds": 0,
+    })
+
+    print(f"[Done] Options full market scan: {len(results)} signals in {total_time:.0f}s")
+    if not results:
+        return pd.DataFrame()
+    return pd.DataFrame(results).sort_values(by="Catalyst Score", ascending=False)
+
+
+def options_watchlist_scan(watchlist=None, extended_hours=False):
+    """
+    Scans a specific watchlist for A+ options setups.
+    """
+    if not watchlist:
+        watchlist = get_us_tickers()[:20]
+    
+    start_time = time.time()
+    _reset_progress("running", mode="options")
+    total = len(watchlist)
+    results = []
+
+    def _on_daily_progress(i, tot, sym):
+        pct = int((i / tot) * 30)
+        _update_progress("downloading", f"Downloading daily bars... ({i}/{tot})", i, tot, ticker=sym, found=0, pct=pct)
+
+    daily_data = fetch_batch_concurrent(
+        watchlist, days=150, max_workers=6,
+        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
+    )
+
+    iv_history = _load_iv_history()
+    tot_data = len(daily_data)
+
+    for i, (sym, df_daily) in enumerate(daily_data.items()):
+        pct = 30 + int((i / tot_data) * 70) if tot_data else 100
+        _update_progress("analyzing", f"Analyzing options for {sym}...", i + 1, tot_data, ticker=sym, found=len(results), pct=pct)
+
+        try:
+            if df_daily is None or len(df_daily) < 20:
+                continue
+
+            res = _analyze_options_setup(sym, df_daily, iv_history)
+            if res:
+                results.append(res)
+        except Exception as e:
+            print(f"Error scanning options for {sym}: {e}")
+            continue
+
+    _save_iv_history(iv_history)
+
+    total_time = time.time() - start_time
+    scan_progress.update({
+        "status": "running", "phase": "complete",
+        "phase_label": f"Done — {len(results)} A+ options plays found",
+        "current": total, "total": total,
+        "found": len(results), "pct": 100, "eta_seconds": 0,
+    })
+
+    if not results:
+        return pd.DataFrame()
+    return pd.DataFrame(results).sort_values(by="Catalyst Score", ascending=False)
+
+
+
 
 
 # =====================================================================

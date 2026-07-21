@@ -11,6 +11,7 @@ from reversal_scanner import (
     two_sigma_full_market_scan,
     fifty_two_week_reversal_scan,
     rsi_divergence_full_market_scan,
+    options_full_market_scan,
     scan_progress, _reset_progress
 )
 from datetime import datetime, timedelta
@@ -54,6 +55,7 @@ THREE_SIGMA_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_3sigma_
 TWO_SIGMA_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_2sigma_scan.json")
 FIFTY_TWO_WEEK_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_52w_scan.json")
 RSIDIV_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_rsidiv_scan.json")
+OPTIONS_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_options_scan.json")
 
 def load_last_scan(filepath=THREE_SIGMA_RESULTS_FILE):
     """Load the last scan results from file."""
@@ -102,7 +104,8 @@ def _scan_conflict_response():
         "3sigma": "3-Sigma Bands",
         "2sigma": "2-Sigma Bands",
         "52w": "52-Week Reversal",
-        "rsidiv": "RSI Divergence"
+        "rsidiv": "RSI Divergence",
+        "options": "A+ Options Plays"
     }
     friendly_name = mode_names.get(running_mode, "another tab")
     return jsonify({"ok": False, "error": f"A scan is already running on the {friendly_name} tab"}), 409
@@ -326,6 +329,62 @@ def scan_rsidiv_results():
         results = load_last_scan(RSIDIV_RESULTS_FILE)
         if results:
             app.config["LAST_RSIDIV_RESULTS"] = results
+    if results is None:
+        return jsonify({"ok": False, "error": "No scan results available"}), 404
+    return jsonify(results)
+
+# ── API: A+ Options Plays Scans (async) ──────────────────────────────
+
+@app.route("/api/scan/options", methods=["POST"])
+def scan_options():
+    """Start a full market A+ options plays scan in the background."""
+    global _scan_running
+
+    with _scan_lock:
+        if _scan_running:
+            return _scan_conflict_response()
+        _scan_running = True
+        _reset_progress(status="running", mode="options")
+        scan_progress["phase_label"] = "Initiating options scan..."
+
+    req_data = request.get_json(silent=True) or {}
+    extended_hours = req_data.get("extended_hours", False)
+
+    def _run():
+        global _scan_running
+        try:
+            et_tz = get_ny_timezone()
+            df = options_full_market_scan(extended_hours=extended_hours)
+            results_data = {
+                "ok": True,
+                "mode": "options",
+                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
+                "count": len(df) if not df.empty else 0,
+                "results": df.to_dict(orient="records") if not df.empty else [],
+            }
+            app.config["LAST_OPTIONS_RESULTS"] = results_data
+            save_last_scan(results_data, OPTIONS_RESULTS_FILE)
+            scan_progress["status"] = "done"
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            app.config["LAST_OPTIONS_RESULTS"] = {"ok": False, "error": str(e), "traceback": traceback.format_exc()}
+            scan_progress["status"] = "error"
+            scan_progress["phase_label"] = traceback.format_exc()
+        finally:
+            with _scan_lock:
+                _scan_running = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "message": "Options plays scan started"})
+
+@app.route("/api/scan/options/results", methods=["GET"])
+def scan_options_results():
+    results = app.config.get("LAST_OPTIONS_RESULTS")
+    if results is None:
+        results = load_last_scan(OPTIONS_RESULTS_FILE)
+        if results:
+            app.config["LAST_OPTIONS_RESULTS"] = results
     if results is None:
         return jsonify({"ok": False, "error": "No scan results available"}), 404
     return jsonify(results)

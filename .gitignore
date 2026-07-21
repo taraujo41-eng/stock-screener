@@ -14,3 +14,8 @@ last_orb_scan.json
 conf/
 3sigma_bot.log
 last_bollinger_scan.json
+last_3sigma_scan.json
+last_2sigma_scan.json
+last_52w_scan.json
+last_rsidiv_scan.json
+scratch/
