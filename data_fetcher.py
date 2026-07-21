@@ -998,12 +998,13 @@ def fetch_batch_concurrent(tickers, days=180, max_workers=8,
 
 # ── Batch Quote Fetcher (for pre-filtering) ──────────────────────────
 
-def fetch_quotes_batch(tickers, max_workers=10, on_progress=None):
+def fetch_quotes_batch(tickers, max_workers=10, on_progress=None, global_timeout=30):
     """
     Fetch live Webull quote data for many tickers concurrently.
     Returns dict of {ticker: quote_dict} where quote_dict has keys like:
       avgVol10Day, close, volume, name, totalShares, etc.
     Only returns entries where the quote was successfully fetched.
+    Has a global_timeout (default 30s) to prevent hanging forever.
     """
     wb_un = get_unofficial_client()
     if not wb_un:
@@ -1013,6 +1014,7 @@ def fetch_quotes_batch(tickers, max_workers=10, on_progress=None):
     quotes = {}
     completed = 0
     total = len(tickers)
+    deadline = time.time() + global_timeout
 
     def _fetch_quote(ticker):
         try:
@@ -1028,13 +1030,23 @@ def fetch_quotes_batch(tickers, max_workers=10, on_progress=None):
         for future in as_completed(futures):
             completed += 1
             try:
-                ticker, q = future.result(timeout=10)
+                remaining = max(0.5, deadline - time.time())
+                ticker, q = future.result(timeout=remaining)
                 if q:
                     quotes[ticker] = q
                 if on_progress:
                     on_progress(completed, total, ticker)
             except Exception:
-                pass
+                if on_progress:
+                    on_progress(completed, total, futures.get(future, "?"))
+
+            # Check global timeout
+            if time.time() >= deadline:
+                print(f"  [fetch_quotes_batch] Global timeout ({global_timeout}s) reached after {completed}/{total} tickers. Returning {len(quotes)} quotes.")
+                # Cancel remaining futures
+                for f in futures:
+                    f.cancel()
+                break
 
     return quotes
 
