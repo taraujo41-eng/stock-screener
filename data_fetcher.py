@@ -54,11 +54,17 @@ _unofficial_initialized = False
 def get_unofficial_client():
     """Retrieve and initialize the unofficial Webull client using account credentials."""
     global _unofficial_client, _unofficial_initialized
-    if os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID"):
-        print("[Webull Unofficial] Cloud environment (Render) — skipping Webull client initialization to prevent token hangs.")
-        _unofficial_client = None
-        _unofficial_initialized = True
-        return None
+    if _unofficial_initialized:
+        return _unofficial_client
+
+    import sys
+    has_env_token = bool(os.getenv("WEBULL_ACCESS_TOKEN") and os.getenv("WEBULL_DID"))
+    if not has_env_token:
+        if os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID") or os.getenv("PORT") or not (sys.stdin and sys.stdin.isatty()):
+            print("[Webull Unofficial] Cloud environment without env tokens — skipping Webull client to prevent hangs.")
+            _unofficial_client = None
+            _unofficial_initialized = True
+            return None
         
     email = os.getenv("WEBULL_EMAIL")
 
