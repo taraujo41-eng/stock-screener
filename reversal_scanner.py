@@ -210,7 +210,7 @@ def get_us_tickers():
             print(f"  Source 4 (Watchlist): failed ({e})")
 
     # ── Source 5: Webull Watchlists ──
-    if wb:
+    if wb and not os.getenv("RENDER") and not os.getenv("RENDER_SERVICE_ID"):
         try:
             watchlists = wb.get_watchlists()
             if watchlists:
@@ -233,7 +233,7 @@ def get_us_tickers():
         except Exception as e:
             print(f"  Source 5 (Webull Watchlists): failed ({e})")
     else:
-        print("  Source 5 (Webull Watchlists): No Webull client")
+        print("  Source 5 (Webull Watchlists): Skipped in cloud environment")
 
     # Remove known non-equity / test symbols
     exclude = {"TRUE", "NONE", "NULL", "CTEST", "NTEST", "ZTEST"}
