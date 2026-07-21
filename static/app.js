@@ -837,6 +837,8 @@ function startProgressPolling() {
             targetResultsEndpoint = "/api/scan/52w/results";
           } else if (p.mode === "rsidiv") {
             targetResultsEndpoint = "/api/scan/rsidiv/results";
+          } else if (p.mode === "options") {
+            targetResultsEndpoint = "/api/scan/options/results";
           }
 
           // Only display results if user is on the tab of the finished scan
