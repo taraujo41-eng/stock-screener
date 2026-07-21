@@ -54,22 +54,11 @@ _unofficial_initialized = False
 def get_unofficial_client():
     """Retrieve and initialize the unofficial Webull client using account credentials."""
     global _unofficial_client, _unofficial_initialized
-    if _unofficial_initialized:
-        return _unofficial_client
-
-    # Bypass only if we would need to perform an interactive MFA login
-    token_path = os.path.dirname(__file__)
-    credentials_file = os.path.join(token_path, "webull_credentials.json")
-    has_env_token = bool(os.getenv("WEBULL_ACCESS_TOKEN") and os.getenv("WEBULL_DID"))
-    has_cached_file = os.path.exists(credentials_file)
-
-    import sys
-    if not (has_env_token or has_cached_file):
-        if os.getenv("RENDER") or not (sys.stdin and sys.stdin.isatty()):
-            print("[Webull Unofficial] Skipping Webull client in cloud/non-interactive environment to prevent hangs.")
-            _unofficial_client = None
-            _unofficial_initialized = True
-            return None
+    if os.getenv("RENDER") or os.getenv("RENDER_SERVICE_ID"):
+        print("[Webull Unofficial] Cloud environment (Render) — skipping Webull client initialization to prevent token hangs.")
+        _unofficial_client = None
+        _unofficial_initialized = True
+        return None
         
     email = os.getenv("WEBULL_EMAIL")
 
