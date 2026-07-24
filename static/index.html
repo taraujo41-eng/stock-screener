@@ -56,9 +56,12 @@
 
     <!-- Progress bar (full scan only) -->
     <div class="progress-wrap hidden" id="progressWrap">
-      <div class="progress-header">
+      <div class="progress-header" style="display: flex; justify-content: space-between; align-items: center;">
         <span class="progress-phase" id="progressPhase">Initializing...</span>
-        <span class="progress-pct" id="progressPct">0%</span>
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span class="progress-pct" id="progressPct">0%</span>
+          <button onclick="cancelScan()" class="cancel-scan-btn" id="cancelScanBtn" style="background: rgba(239,68,68,0.2); color: #fca5a5; border: 1px solid #ef4444; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; cursor: pointer; transition: 0.2s;">Cancel</button>
+        </div>
       </div>
       <div class="progress-bar">
         <div class="progress-bar__fill" id="progressFill" style="width: 0%"></div>
@@ -134,6 +137,6 @@
   </div>
 
 
-  <script src="/app.js?v=5.0"></script>
+  <script src="/app.js?v=6.0"></script>
 </body>
 </html>

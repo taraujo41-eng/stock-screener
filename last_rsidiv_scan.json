@@ -1,0 +1,75 @@
+{
+  "ok": true,
+  "mode": "rsidiv",
+  "timestamp": "Jul 21, 2026  10:45 PM",
+  "count": 2,
+  "results": [
+    {
+      "Ticker": "MMM",
+      "Last Price": 170.76,
+      "Volume": 11003517,
+      "RSI": 68.5,
+      "Score": 20,
+      "Grade": "A+",
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "RSI Divergence | Near 52w High | High RVOL (3.1x) | News: 3M (MMM) Stock Faces Margin Compres...",
+      "Suggested Option": "Sep 18 $170.0 PUT (@$6.93)",
+      "Option Play": {
+        "symbol": "MMM260918P00170000",
+        "strike": 170.0,
+        "type": "PUT",
+        "exp": "Sep 18",
+        "dte": 58,
+        "mid": 6.93,
+        "iv": 27.7,
+        "score": 587
+      },
+      "News Details": {
+        "title": "3M (MMM) Stock Faces Margin Compression As 11.9% Profitability Undercuts Bullish Narratives",
+        "publisher": "Simply Wall St",
+        "publish_time": "Jul 21, 2026 at 10:24 PM UTC",
+        "url": "https://news-static.webullfintech.com/us/news-html/20260721/15267636320281600.html"
+      },
+      "RVOL": 3.07,
+      "ADR": 2.25,
+      "EMA20_Dist": 6.68,
+      "SMA50_Dist": 9.53,
+      "SMA200_Dist": 8.65,
+      "Squeeze": false,
+      "BB_Pct": 111.5,
+      "Patterns": "hammer | star | bull_engulf | bear_engulf | bottoming_tail | topping_tail",
+      "Entry": 170.76,
+      "Stop Loss": 180.14,
+      "Profit Target": 152.0
+    },
+    {
+      "Ticker": "HST",
+      "Last Price": 24.44,
+      "Volume": 6366050,
+      "RSI": 65.5,
+      "Score": 19,
+      "Grade": "A+",
+      "Bullish Signals": "\u2014",
+      "Bearish Signals": "RSI Divergence | At 52w High | News: Host Hotels & Resorts Is Maintained...",
+      "Suggested Option": "\u2014",
+      "Option Play": null,
+      "News Details": {
+        "title": "Host Hotels & Resorts Is Maintained at Neutral by JP Morgan",
+        "publisher": "Dow Jones",
+        "publish_time": "Jul 21, 2026 at 03:25 PM UTC",
+        "url": "https://news-static.webullfintech.com/us/news-html/20260721/15265981069272064.html"
+      },
+      "RVOL": 0.69,
+      "ADR": 1.99,
+      "EMA20_Dist": 3.58,
+      "SMA50_Dist": 6.56,
+      "SMA200_Dist": 28.98,
+      "Squeeze": false,
+      "BB_Pct": 97.6,
+      "Patterns": "hammer | star | bull_engulf | bear_engulf | bottoming_tail | topping_tail",
+      "Entry": 24.44,
+      "Stop Loss": 25.45,
+      "Profit Target": 22.42
+    }
+  ]
+}
