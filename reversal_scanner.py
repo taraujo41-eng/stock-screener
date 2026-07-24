@@ -2281,8 +2281,11 @@ def three_sigma_full_market_scan(extended_hours=False):
     _reset_progress(status="running", mode="3sigma")
     start_time = time.time()
 
+    _update_progress("init", "Loading ticker universe...", 0, 0, pct=0)
     tickers = get_us_tickers()
+    _update_progress("init", f"Loaded {len(tickers)} tickers, applying liquidity filter...", 0, len(tickers), pct=2)
     tickers = prefilter_liquid_optionable(tickers)
+    _update_progress("init", f"Pre-filter done: {len(tickers)} liquid tickers. Checking market regime...", 0, len(tickers), pct=5)
     is_market_bullish = check_spy_regime()
 
     results = []
@@ -2625,8 +2628,11 @@ def rsi_divergence_full_market_scan(extended_hours=False):
     _reset_progress(status="running", mode="rsidiv")
     start_time = time.time()
 
+    _update_progress("init", "Loading ticker universe...", 0, 0, pct=0)
     tickers = get_us_tickers()
+    _update_progress("init", f"Loaded {len(tickers)} tickers, applying liquidity filter...", 0, len(tickers), pct=2)
     tickers = prefilter_liquid_optionable(tickers)
+    _update_progress("init", f"Pre-filter done: {len(tickers)} liquid tickers. Checking market regime...", 0, len(tickers), pct=5)
     is_market_bullish = check_spy_regime()
 
     results = []
@@ -2862,8 +2868,11 @@ def options_directional_exhaustion_scan():
     _reset_progress(status="running", mode="options")
     start_time = time.time()
 
+    _update_progress("init", "Loading ticker universe...", 0, 0, pct=0)
     tickers = get_us_tickers()
+    _update_progress("init", f"Loaded {len(tickers)} tickers, applying liquidity filter...", 0, len(tickers), pct=2)
     tickers = prefilter_liquid_optionable(tickers)
+    _update_progress("init", f"Pre-filter done: {len(tickers)} liquid tickers. Checking market regime...", 0, len(tickers), pct=5)
     is_market_bullish = check_spy_regime()
 
     results = []
