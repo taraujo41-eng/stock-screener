@@ -556,85 +556,64 @@ def _fetch_webull_unofficial_one(ticker, days=180, interval="1d", includePrePost
 # ── Yahoo Finance Fetcher ─────────────────────────────────────────────
 
 def _fetch_yahoo_one(ticker, days=180, interval="1d", includePrePost="false"):
-    """Fetch OHLCV data using direct Yahoo Finance chart API."""
+    """Fetch OHLCV data using yfinance."""
     global _yahoo_failures
-    session, crumb = _ensure_session()
-
-    end_ts = int(datetime.now().timestamp())
-    start_ts = int((datetime.now() - timedelta(days=days)).timestamp())
-
-    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
-    params = {
-        "period1": start_ts,
-        "period2": end_ts,
-        "interval": interval,
-        "includePrePost": includePrePost,
-    }
-    if crumb:
-        params["crumb"] = crumb
-
     try:
-        resp = session.get(url, params=params, timeout=5)
-
-        if resp.status_code in (401, 403):
-            session, crumb = _get_session(force_new=True)
-            if crumb:
-                params["crumb"] = crumb
-            resp = session.get(url, params=params, timeout=5)
-
-        if resp.status_code in (401, 403):
-            _yahoo_failures = _YAHOO_MAX_FAILURES
-            print(f"[Circuit Breaker] Yahoo Finance blocked (HTTP {resp.status_code}) — triggering circuit breaker")
+        import yfinance as yf
+        
+        # Map parameters
+        prepost = True if includePrePost.lower() == "true" else False
+        
+        # yfinance period format
+        if days <= 7:
+            period = f"{days}d"
+        elif days <= 60:
+            period = "1mo"
+        elif days <= 180:
+            period = "6mo"
+        elif days <= 365:
+            period = "1y"
+        else:
+            period = "2y"
+            
+        t = yf.Ticker(ticker)
+        df = t.history(period=period, interval=interval, prepost=prepost)
+        
+        if df.empty:
             return None
-
-        if resp.status_code != 200:
-            return None
-
-
-        data = resp.json()
-        chart = data.get("chart", {})
-        result = chart.get("result")
-
-        if not result:
-            return None
-
-        result = result[0]
-        timestamps = result.get("timestamp")
-        if not timestamps:
-            return None
-
-        meta = result.get("meta", {})
-        quote = result["indicators"]["quote"][0]
-
-        dt_index = pd.to_datetime(timestamps, unit="s", utc=True).tz_convert("America/New_York")
-        if interval == "1d":
-            dt_index = dt_index.normalize()
-
-        df = pd.DataFrame(
-            {
-                "Open": quote.get("open"),
-                "High": quote.get("high"),
-                "Low": quote.get("low"),
-                "Close": quote.get("close"),
-                "Volume": quote.get("volume"),
-            },
-            index=dt_index,
-        )
+            
+        # Standardize columns to match Webull
         df.index.name = "Date"
-        df = df.dropna(subset=["Close"])
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("America/New_York")
+        else:
+            df.index = df.index.tz_convert("America/New_York")
+            
+        # Ensure we just have Open, High, Low, Close, Volume
+        df = df[["Open", "High", "Low", "Close", "Volume"]].copy()
         df["Volume"] = df["Volume"].fillna(0).astype(np.int64)
+        
+        # Try to attach 52w info if possible
+        info = {}
+        try:
+            info = t.info
+        except Exception:
+            pass
+            
+        high_52w = info.get("fiftyTwoWeekHigh", df["High"].max())
+        low_52w = info.get("fiftyTwoWeekLow", df["Low"].min())
+        pre_close = info.get("previousClose", df["Close"].iloc[-2] if len(df) > 1 else df["Close"].iloc[0])
+        
+        df.attrs["fiftyTwoWeekHigh"] = high_52w
+        df.attrs["fiftyTwoWeekLow"] = low_52w
+        df.attrs["previousClose"] = pre_close
+        
+        return df
 
-        df.attrs["fiftyTwoWeekHigh"] = meta.get("fiftyTwoWeekHigh")
-        df.attrs["fiftyTwoWeekLow"] = meta.get("fiftyTwoWeekLow")
-        df.attrs["previousClose"] = meta.get("previousClose", meta.get("chartPreviousClose"))
-
-        return df if not df.empty else None
-
-    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-        _yahoo_failures = _YAHOO_MAX_FAILURES
-        print(f"[Circuit Breaker] Yahoo Finance timeout/connection error ({e}) — triggering circuit breaker")
-        return None
-    except Exception:
+    except Exception as e:
+        _yahoo_failures += 1
+        if _yahoo_failures >= _YAHOO_MAX_FAILURES:
+            print(f"[Circuit Breaker] Yahoo Finance failed {_YAHOO_MAX_FAILURES}x consecutively — skipping for rest of scan")
         return None
 
 
@@ -700,41 +679,41 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webu
 def _fetch_yahoo_options_chain(ticker):
     """Fetch option chain metadata using Yahoo Finance fallback."""
     global _yahoo_failures
-    session, crumb = _ensure_session()
-    
-    url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker}"
-    params = {}
-    if crumb: params["crumb"] = crumb
-
     try:
-        resp = session.get(url, params=params, timeout=5)
-        if resp.status_code in (401, 403):
-            _yahoo_failures = _YAHOO_MAX_FAILURES
-            print(f"[Circuit Breaker] Yahoo Finance options chain blocked (HTTP {resp.status_code}) — triggering circuit breaker")
-            return None
-
-        if resp.status_code != 200:
-            return None
+        import yfinance as yf
+        from datetime import datetime
         
-        data = resp.json()
-        result = data.get("optionChain", {}).get("result", [])
-        if not result:
+        t = yf.Ticker(ticker)
+        dates = t.options
+        if not dates:
             return None
-        
-        result = result[0]
-        expirations = result.get("expirationDates", [])
-        
+            
+        expirations = []
+        for d in dates:
+            try:
+                ts = int(datetime.strptime(d, "%Y-%m-%d").timestamp())
+                expirations.append(ts)
+            except Exception:
+                pass
+                
+        underlyingPrice = None
+        try:
+            underlyingPrice = t.info.get("regularMarketPrice")
+            if underlyingPrice is None:
+                underlyingPrice = float(t.history(period="1d")["Close"].iloc[-1])
+        except Exception:
+            pass
+            
         return {
             "ticker": ticker,
             "expirations": expirations,
-            "underlyingPrice": result.get("quote", {}).get("regularMarketPrice"),
-            "firstChain": result.get("options", [{}])[0]
+            "underlyingPrice": underlyingPrice,
+            "firstChain": None # Not strictly needed initially
         }
-    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-        _yahoo_failures = _YAHOO_MAX_FAILURES
-        print(f"[Circuit Breaker] Yahoo Finance options chain timeout/connection error ({e}) — triggering circuit breaker")
-        return None
-    except Exception:
+    except Exception as e:
+        _yahoo_failures += 1
+        if _yahoo_failures >= _YAHOO_MAX_FAILURES:
+            print(f"[Circuit Breaker] Yahoo Finance options chain failed {_YAHOO_MAX_FAILURES}x consecutively — skipping for rest of scan")
         return None
 
 
@@ -840,22 +819,27 @@ def fetch_options_chain(ticker):
 
 def _fetch_yahoo_options_for_expiration(ticker, expiration_ts):
     """Fetch the full option chain for a specific expiration date from Yahoo Finance."""
-    session, crumb = _ensure_session()
-    url = f"https://query2.finance.yahoo.com/v7/finance/options/{ticker}"
-    params = {"date": expiration_ts}
-    if crumb: params["crumb"] = crumb
-
     try:
-        resp = session.get(url, params=params, timeout=5)
-        if resp.status_code != 200: return None
-
+        import yfinance as yf
+        from datetime import datetime
         
-        data = resp.json()
-        result = data.get("optionChain", {}).get("result", [])
-        if not result: return None
+        date_str = datetime.fromtimestamp(expiration_ts).strftime("%Y-%m-%d")
+        t = yf.Ticker(ticker)
+        chain = t.option_chain(date_str)
         
-        return result[0].get("options", [{}])[0]
-    except Exception:
+        calls = chain.calls.to_dict(orient="records")
+        puts = chain.puts.to_dict(orient="records")
+        
+        # Convert NaN to None for JSON serialization
+        import math
+        for c in calls + puts:
+            for k, v in c.items():
+                if isinstance(v, float) and math.isnan(v):
+                    c[k] = None
+                    
+        return {"calls": calls, "puts": puts}
+    except Exception as e:
+        print(f"[Yahoo Fallback] Failed to fetch options for {ticker} at {expiration_ts}: {e}")
         return None
 
 
