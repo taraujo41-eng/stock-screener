@@ -95,6 +95,17 @@ def scan_full_progress():
     return jsonify(scan_progress)
 
 
+@app.route("/api/scan/cancel", methods=["POST"])
+def scan_cancel():
+    """Force-cancel any stuck/zombie scan and reset the lock."""
+    global _scan_running
+    with _scan_lock:
+        was_running = _scan_running
+        _scan_running = False
+    _reset_progress()
+    scan_progress["status"] = "idle"
+    return jsonify({"ok": True, "was_running": was_running, "message": "Scan cancelled and lock released"})
+
 
 # ── API: 3-Sigma Scans (async) ──────────────────────────────────────
 
