@@ -2860,6 +2860,154 @@ def rsi_divergence_full_market_scan(extended_hours=False):
     return pd.DataFrame(results).sort_values(by="Score", ascending=False).head(20)
 
 
+def options_directional_exhaustion_scan():
+    """
+    Directional Exhaustion Options Scan:
+    Scans liquid tickers for:
+      - Setup 1 (Calls): Close < Lower 3-Sigma Band (20, std=3) AND RSI(14) < 30 -> "Oversold Extreme (Calls)"
+      - Setup 2 (Puts): Close > Upper 3-Sigma Band (20, std=3) AND RSI(14) > 70 -> "Overbought Extreme (Puts)"
+    Includes option contracts (strike, expiration, mid price, greeks) for detected setups.
+    """
+    _reset_progress(status="running", mode="options")
+    start_time = time.time()
+
+    tickers = get_us_tickers()
+    tickers = prefilter_liquid_optionable(tickers)
+    is_market_bullish = check_spy_regime()
+
+    results = []
+    total = len(tickers)
+
+    def _on_daily_progress(i, tot, sym):
+        pct = int((i / tot) * 80)
+        _update_progress("downloading", f"Downloading daily candles... ({i}/{tot})", i, tot, ticker=sym, pct=pct)
+
+    _update_progress("downloading", "Initiating daily candle download...", 0, total, pct=0)
+    daily_data = fetch_batch_concurrent(
+        tickers, days=60, max_workers=6,
+        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
+    )
+
+    for i, sym in enumerate(tickers):
+        pct = 80 + int((i / total) * 20) if total else 100
+        _update_progress("analyzing", f"Analyzing Options Exhaustion for {sym}...", i, total, ticker=sym, found=len(results), pct=pct)
+        try:
+            df_daily = daily_data.get(sym)
+            if df_daily is None or len(df_daily) < 20:
+                continue
+
+            # Calculate 3-Sigma Bollinger Bands (20-period, std=3)
+            middle = df_daily['Close'].rolling(window=20).mean()
+            std = df_daily['Close'].rolling(window=20).std()
+            upper_3sigma = middle + 3.0 * std
+            lower_3sigma = middle - 3.0 * std
+
+            # Calculate RSI (14-period)
+            rsi_series = compute_rsi(df_daily['Close'], 14)
+            if len(rsi_series) < 1:
+                continue
+
+            curr = df_daily.iloc[-1]
+            last_price = float(curr['Close'])
+            upper_band = float(upper_3sigma.iloc[-1])
+            lower_band = float(lower_3sigma.iloc[-1])
+            rsi_val = float(rsi_series.iloc[-1])
+
+            is_oversold_call = (last_price < lower_band) and (rsi_val < 30)
+            is_overbought_put = (last_price > upper_band) and (rsi_val > 70)
+
+            if not is_oversold_call and not is_overbought_put:
+                continue
+
+            setup_type = "Oversold Extreme (Calls)" if is_oversold_call else "Overbought Extreme (Puts)"
+            side = "bullish" if is_oversold_call else "bearish"
+
+            # Score & Grade
+            score = 10
+            reasons_list = [setup_type, f"RSI: {rsi_val:.1f}"]
+            if is_oversold_call:
+                reasons_list.append("Price < 3-Sigma Lower Band")
+            else:
+                reasons_list.append("Price > 3-Sigma Upper Band")
+
+            rvol = compute_rvol(df_daily)
+            if rvol is not None and rvol > 1.5:
+                score += 2
+                reasons_list.append(f"High RVOL ({rvol:.1f}x)")
+
+            reasons = " | ".join(reasons_list)
+
+            # Option contract lookup
+            opt_str = "—"
+            opt_setup = None
+            try:
+                opt_setup = find_best_option(sym, side, last_price)
+                if opt_setup:
+                    opt_str = f"{opt_setup['exp']} ${opt_setup['strike']} {opt_setup['type']} (@${opt_setup['mid']:.2f})"
+            except Exception:
+                pass
+
+            # News Catalyst
+            news_details = None
+            try:
+                has_news, tag, details = detect_news_catalyst(sym)
+                if has_news and details:
+                    news_details = details
+                    reasons += f" | News: {details['title'][:35]}..."
+                    score += 2
+            except Exception:
+                pass
+
+            atr_series = compute_atr(df_daily, 14)
+            atr_val = float(atr_series.iloc[-1]) if len(atr_series) > 0 else 0.05 * last_price
+            entry = last_price
+            sl = (last_price - 2.0 * atr_val) if side == "bullish" else (last_price + 2.0 * atr_val)
+            pt = (last_price + 4.0 * atr_val) if side == "bullish" else (last_price - 4.0 * atr_val)
+
+            grade = "A+" if score >= 12 else "A"
+
+            results.append({
+                "Ticker": sym,
+                "Last Price": round(last_price, 2),
+                "Volume": int(curr['Volume']),
+                "RSI": round(rsi_val, 1),
+                "Score": score,
+                "Grade": grade,
+                "Bullish Signals": reasons if side == "bullish" else "—",
+                "Bearish Signals": reasons if side == "bearish" else "—",
+                "Suggested Option": opt_str,
+                "Option Play": opt_setup,
+                "News Details": news_details,
+                "RVOL": round(rvol, 2) if rvol is not None else 0.0,
+                "ADR": 0.0,
+                "EMA20_Dist": 0.0,
+                "SMA50_Dist": 0.0,
+                "SMA200_Dist": 0.0,
+                "Squeeze": False,
+                "BB_Pct": round(((last_price - lower_band) / (upper_band - lower_band)) * 100, 1) if (upper_band - lower_band) != 0 else 50.0,
+                "Patterns": "—",
+                "Entry": round(entry, 2),
+                "Stop Loss": round(sl, 2),
+                "Profit Target": round(pt, 2)
+            })
+        except Exception as e:
+            print(f"Error processing Options Extreme for {sym}: {e}")
+            continue
+
+    total_time = time.time() - start_time
+    scan_progress.update({
+        "status": "running", "phase": "complete",
+        "phase_label": f"Done — {len(results)} Options signals found",
+        "current": total, "total": total,
+        "found": len(results), "pct": 100, "eta_seconds": 0,
+    })
+
+    print(f"[Done] Options Exhaustion scan: {len(results)} signals in {total_time:.0f}s")
+    if not results:
+        return pd.DataFrame()
+    return pd.DataFrame(results).sort_values(by="Score", ascending=False).head(15)
+
+
 
 
 # =====================================================================
