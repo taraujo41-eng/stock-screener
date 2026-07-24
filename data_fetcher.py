@@ -1078,6 +1078,10 @@ def check_optionable_batch(tickers, max_workers=10):
             except Exception:
                 pass
 
+    if not optionable:
+        print("  [check_optionable_batch] Optionability check returned 0 matches — falling back to input ticker list")
+        return set(tickers)
+
     return optionable
 
 
