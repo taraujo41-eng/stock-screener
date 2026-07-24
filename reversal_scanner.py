@@ -391,21 +391,12 @@ def prefilter_liquid_optionable(tickers):
     print(f"  Phase 2 results: {len(volume_price_passed)} passed market cap/volume/price filter")
     print(f"    Removed — low mkt cap: {removed_low_mktcap}, low volume: {removed_low_vol}, low price: {removed_low_price}, no quote: {removed_no_quote}")
 
-    # Phase 3: Check optionability on the remaining tickers
-    print(f"  Phase 3: Checking optionability for {len(volume_price_passed)} tickers...")
-    _update_progress("prefilter", f"Checking optionability ({len(volume_price_passed)} tickers)...", 0, len(volume_price_passed), pct=55)
-
-    optionable_set = check_optionable_batch(volume_price_passed, max_workers=10)
-    filtered = sorted([sym for sym in volume_price_passed if sym in optionable_set])
-
-    removed_not_optionable = len(volume_price_passed) - len(filtered)
-
+    filtered = sorted(volume_price_passed)
     elapsed = time.time() - start_time
-    print(f"  Phase 3 results: {len(filtered)} are optionable (removed {removed_not_optionable} non-optionable)")
-    print(f"  ✅ Pre-filter complete: {len(tickers)} → {len(filtered)} tickers in {elapsed:.1f}s")
+    print(f"  ✅ Pre-filter complete: {len(tickers)} → {len(filtered)} liquid tickers in {elapsed:.1f}s")
     print(f"{'='*60}\n")
 
-    _update_progress("prefilter", f"Pre-filter done: {len(filtered)} liquid optionable tickers", len(filtered), len(filtered), pct=100)
+    _update_progress("prefilter", f"Pre-filter done: {len(filtered)} liquid tickers", len(filtered), len(filtered), pct=100)
 
     return filtered
 
