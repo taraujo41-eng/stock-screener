@@ -1013,8 +1013,14 @@ def fetch_quotes_batch(tickers, max_workers=10, on_progress=None):
     quotes = {}
     completed = 0
     total = len(tickers)
+    
+    consecutive_failures = 0
+    circuit_broken = False
+    wb_un.timeout = 3
 
     def _fetch_quote(ticker):
+        if circuit_broken:
+            return ticker, None
         try:
             q = wb_un.get_quote(stock=ticker)
             if q:
@@ -1026,15 +1032,30 @@ def fetch_quotes_batch(tickers, max_workers=10, on_progress=None):
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(_fetch_quote, t): t for t in tickers}
         for future in as_completed(futures):
+            if circuit_broken:
+                completed += 1
+                if on_progress:
+                    on_progress(completed, total, futures[future])
+                continue
             completed += 1
             try:
                 ticker, q = future.result(timeout=10)
                 if q:
                     quotes[ticker] = q
+                    consecutive_failures = 0
+                else:
+                    consecutive_failures += 1
+                    
+                if consecutive_failures > 15:
+                    print("  [fetch_quotes_batch] CIRCUIT BREAKER TRIPPED! Too many Webull fetch failures.")
+                    circuit_broken = True
+                    
                 if on_progress:
                     on_progress(completed, total, ticker)
             except Exception:
-                pass
+                consecutive_failures += 1
+                if consecutive_failures > 15:
+                    circuit_broken = True
 
     return quotes
 
@@ -1050,8 +1071,12 @@ def check_optionable_batch(tickers, max_workers=10):
         return set(tickers)  # Assume all are optionable if we can't check
 
     optionable = set()
+    consecutive_failures = 0
+    circuit_broken = False
 
     def _check_options(ticker):
+        if circuit_broken:
+            return ticker, False
         try:
             import requests as _req
             headers = wb_un.build_req_headers()
@@ -1059,7 +1084,7 @@ def check_optionable_batch(tickers, max_workers=10):
             if not ticker_id:
                 return ticker, False
             data = {'count': -1, 'direction': 'all', 'tickerId': ticker_id}
-            res = _req.post(wb_un._urls.options_exp_dat_new(), json=data, headers=headers, timeout=5)
+            res = _req.post(wb_un._urls.options_exp_dat_new(), json=data, headers=headers, timeout=3)
             if res.status_code == 200:
                 res_json = res.json()
                 exp_list = res_json.get('expireDateList', [])
@@ -1071,12 +1096,23 @@ def check_optionable_batch(tickers, max_workers=10):
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(_check_options, t): t for t in tickers}
         for future in as_completed(futures):
+            if circuit_broken:
+                continue
             try:
                 ticker, has_options = future.result(timeout=10)
                 if has_options:
                     optionable.add(ticker)
+                    consecutive_failures = 0
+                else:
+                    consecutive_failures += 1
+                    
+                if consecutive_failures > 15:
+                    print("  [check_optionable_batch] CIRCUIT BREAKER TRIPPED! Too many Webull optionability failures.")
+                    circuit_broken = True
             except Exception:
-                pass
+                consecutive_failures += 1
+                if consecutive_failures > 15:
+                    circuit_broken = True
 
     if not optionable:
         print("  [check_optionable_batch] Optionability check returned 0 matches — falling back to input ticker list")
