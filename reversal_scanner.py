@@ -139,33 +139,46 @@ def get_us_tickers():
     headers = {"User-Agent": "Mozilla/5.0"}
     fallback_file = os.path.join(os.path.dirname(__file__), "sp500_nasdaq_fallback.json")
 
-    # ── Source 1: S&P 500 ──
-    try:
-        html = requests.get("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", headers=headers, timeout=10).text
-        tables = pd.read_html(StringIO(html), attrs={"id": "constituents"})
-        sp = tables[0]
-        for sym in sp["Symbol"]:
-            clean = str(sym).strip().replace(".", "-")
-            if clean:
-                tickers.add(clean)
-        print(f"  Source 1 (S&P 500): fetched {len(sp)} tickers")
-    except Exception as e:
-        print(f"  Source 1 (S&P 500): failed ({e})")
+    # ── Try Local Fallback Cache First (instant 0.001s load for cloud/Render) ──
+    if os.path.exists(fallback_file):
+        try:
+            with open(fallback_file, "r") as f:
+                cached_list = json.load(f)
+            for sym in cached_list:
+                tickers.add(sym)
+            print(f"  Loaded {len(tickers)} tickers instantly from local fallback cache")
+        except Exception as e:
+            print(f"  Failed to load fallback tickers: {e}")
+
+    # ── Source 1: S&P 500 (if fallback not loaded or incomplete) ──
+    if len(tickers) < 400:
+        try:
+            html = requests.get("https://en.wikipedia.org/wiki/List_of_S%26P_500_companies", headers=headers, timeout=3).text
+            tables = pd.read_html(StringIO(html), attrs={"id": "constituents"})
+            sp = tables[0]
+            for sym in sp["Symbol"]:
+                clean = str(sym).strip().replace(".", "-")
+                if clean:
+                    tickers.add(clean)
+            print(f"  Source 1 (S&P 500): fetched {len(sp)} tickers")
+        except Exception as e:
+            print(f"  Source 1 (S&P 500): failed ({e})")
 
     # ── Source 2: NASDAQ 100 ──
-    try:
-        html = requests.get("https://en.wikipedia.org/wiki/Nasdaq-100", headers=headers, timeout=10).text
-        tables = pd.read_html(StringIO(html), attrs={"id": "constituents"})
-        ndx = tables[0]
-        added = 0
-        for sym in ndx["Ticker"]:
-            clean = str(sym).strip().replace(".", "-")
-            if clean and clean not in tickers:
-                tickers.add(clean)
-                added += 1
-        print(f"  Source 2 (NASDAQ 100): +{added} unique tickers")
-    except Exception as e:
-        print(f"  Source 2 (NASDAQ 100): failed ({e})")
+    if len(tickers) < 400:
+        try:
+            html = requests.get("https://en.wikipedia.org/wiki/Nasdaq-100", headers=headers, timeout=3).text
+            tables = pd.read_html(StringIO(html), attrs={"id": "constituents"})
+            ndx = tables[0]
+            added = 0
+            for sym in ndx["Ticker"]:
+                clean = str(sym).strip().replace(".", "-")
+                if clean and clean not in tickers:
+                    tickers.add(clean)
+                    added += 1
+            print(f"  Source 2 (NASDAQ 100): +{added} unique tickers")
+        except Exception as e:
+            print(f"  Source 2 (NASDAQ 100): failed ({e})")
 
     # ── Local Fallback for Cloud Environments ──
     if len(tickers) < 400:
@@ -299,9 +312,13 @@ def prefilter_liquid_optionable(tickers):
 
     if not quotes:
         print("  ⚠️ Webull quotes unavailable. Pre-filtering using Yahoo batch download...")
-        _update_progress("prefilter", "Pre-filter: fetching quotes via Yahoo batch...", 0, len(tickers), pct=25)
+        _update_progress("prefilter", "Pre-filter: downloading quotes via Yahoo batch...", 0, len(tickers), pct=25)
         try:
-            daily_map = _fetch_yahoo_batch(tickers, days=30, interval="1d")
+            def _on_yf_prefilter_progress(i, tot, sym):
+                pct = 25 + int((i / tot) * 50) if tot else 25
+                _update_progress("prefilter", f"Pre-filter: downloading quotes ({i}/{tot})...", i, tot, ticker=sym, pct=pct)
+
+            daily_map = _fetch_yahoo_batch(tickers, days=30, interval="1d", on_progress=_on_yf_prefilter_progress)
             passed = []
             for sym, df in daily_map.items():
                 if df is None or len(df) < 5:
