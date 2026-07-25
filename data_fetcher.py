@@ -668,55 +668,61 @@ def _fetch_yahoo_batch(tickers, days=180, interval="1d", on_progress=None, proce
     if on_progress:
         on_progress(0, len(tickers), "Initiating Yahoo batch download...")
 
-    try:
-        df_batch = yf.download(tickers, period=period, interval=interval, group_by="ticker", progress=False, threads=True)
-    except Exception as e:
-        print(f"[Yahoo Batch] Download error: {e}")
-        return {}
-
     data = {}
     total = len(tickers)
-    for i, t in enumerate(tickers):
+    chunk_size = 60
+    chunks = [tickers[i:i + chunk_size] for i in range(0, len(tickers), chunk_size)]
+    
+    processed_count = 0
+    for chunk in chunks:
         try:
-            if len(tickers) == 1:
-                t_df = df_batch.copy()
-            else:
-                if t not in df_batch.columns.levels[0]:
-                    continue
-                t_df = df_batch[t].copy()
+            df_batch = yf.download(chunk, period=period, interval=interval, group_by="ticker", progress=False, threads=False)
+        except Exception as e:
+            print(f"[Yahoo Batch] Chunk download error: {e}")
+            continue
             
-            t_df = t_df.dropna(subset=["Close"])
-            if len(t_df) >= 20:
-                t_df.index.name = "Date"
-                if t_df.index.tz is None:
-                    t_df.index = t_df.index.tz_localize("America/New_York")
+        for t in chunk:
+            processed_count += 1
+            try:
+                if len(chunk) == 1:
+                    t_df = df_batch.copy()
                 else:
-                    t_df.index = t_df.index.tz_convert("America/New_York")
+                    if t not in df_batch.columns.levels[0]:
+                        continue
+                    t_df = df_batch[t].copy()
                 
-                cols = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in t_df.columns]
-                t_df = t_df[cols].copy()
-                if "Volume" in t_df.columns:
-                    t_df["Volume"] = t_df["Volume"].fillna(0).astype(np.int64)
+                t_df = t_df.dropna(subset=["Close"])
+                if len(t_df) >= 20:
+                    t_df.index.name = "Date"
+                    if t_df.index.tz is None:
+                        t_df.index = t_df.index.tz_localize("America/New_York")
+                    else:
+                        t_df.index = t_df.index.tz_convert("America/New_York")
+                    
+                    cols = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in t_df.columns]
+                    t_df = t_df[cols].copy()
+                    if "Volume" in t_df.columns:
+                        t_df["Volume"] = t_df["Volume"].fillna(0).astype(np.int64)
+                    
+                    high_52w = float(t_df["High"].max()) if "High" in t_df.columns else float(t_df["Close"].max())
+                    low_52w = float(t_df["Low"].min()) if "Low" in t_df.columns else float(t_df["Close"].min())
+                    pre_close = float(t_df["Close"].iloc[-2]) if len(t_df) > 1 else float(t_df["Close"].iloc[0])
+                    
+                    t_df.attrs["fiftyTwoWeekHigh"] = high_52w
+                    t_df.attrs["fiftyTwoWeekLow"] = low_52w
+                    t_df.attrs["previousClose"] = pre_close
+                    
+                    if process_fn:
+                        res = process_fn(t, t_df)
+                        if res is not None:
+                            data[t] = res
+                    else:
+                        data[t] = t_df
+            except Exception:
+                continue
                 
-                high_52w = float(t_df["High"].max()) if "High" in t_df.columns else float(t_df["Close"].max())
-                low_52w = float(t_df["Low"].min()) if "Low" in t_df.columns else float(t_df["Close"].min())
-                pre_close = float(t_df["Close"].iloc[-2]) if len(t_df) > 1 else float(t_df["Close"].iloc[0])
-                
-                t_df.attrs["fiftyTwoWeekHigh"] = high_52w
-                t_df.attrs["fiftyTwoWeekLow"] = low_52w
-                t_df.attrs["previousClose"] = pre_close
-                
-                if process_fn:
-                    res = process_fn(t, t_df)
-                    if res is not None:
-                        data[t] = res
-                else:
-                    data[t] = t_df
-        except Exception:
-            pass
-
-        if on_progress and (i % 25 == 0 or i == total - 1):
-            on_progress(i + 1, total, t)
+        if on_progress:
+            on_progress(processed_count, total, f"Downloaded {processed_count}/{total} tickers...")
 
     print(f"[Yahoo Batch] Successfully fetched {len(data)} / {total} tickers")
     return data
