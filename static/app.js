@@ -785,8 +785,8 @@ function startProgressPolling() {
       const res = await fetch(`/api/scan/progress?t=${Date.now()}`);
       const p = await res.json();
 
-      // If scanner is idle or not running, stop polling
-      if (p.status !== "running") {
+      // Only stop polling when scan completes or encounters an error
+      if (p.status === "done" || p.status === "error") {
         stopProgressPolling();
 
         if (p.status === "done") {
