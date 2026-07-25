@@ -614,8 +614,7 @@ def _fetch_yahoo_one(ticker, days=180, interval="1d", includePrePost="false"):
         else:
             period = "2y"
             
-        session, crumb = _ensure_session()
-        t = yf.Ticker(ticker, session=session)
+        t = yf.Ticker(ticker)
         df = t.history(period=period, interval=interval, prepost=prepost)
         
         if df.empty:
@@ -689,8 +688,7 @@ def _fetch_yahoo_batch(tickers, days=180, interval="1d", on_progress=None, proce
     processed_count = 0
     for chunk in chunks:
         try:
-            session, crumb = _ensure_session()
-            df_batch = yf.download(chunk, period=period, interval=interval, group_by="ticker", progress=False, threads=False, session=session)
+            df_batch = yf.download(chunk, period=period, interval=interval, group_by="ticker", progress=False, threads=False)
         except Exception as e:
             print(f"[Yahoo Batch] Chunk download error: {e}")
             continue
@@ -808,8 +806,7 @@ def _fetch_yahoo_options_chain(ticker):
         import yfinance as yf
         from datetime import datetime
         
-        session, crumb = _ensure_session()
-        t = yf.Ticker(ticker, session=session)
+        t = yf.Ticker(ticker)
         dates = t.options
         if not dates:
             return None
@@ -950,8 +947,7 @@ def _fetch_yahoo_options_for_expiration(ticker, expiration_ts):
         from datetime import datetime
         
         date_str = datetime.fromtimestamp(expiration_ts).strftime("%Y-%m-%d")
-        session, crumb = _ensure_session()
-        t = yf.Ticker(ticker, session=session)
+        t = yf.Ticker(ticker)
         chain = t.option_chain(date_str)
         
         calls = chain.calls.to_dict(orient="records")
