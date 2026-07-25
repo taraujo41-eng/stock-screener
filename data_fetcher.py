@@ -127,9 +127,25 @@ def get_unofficial_client():
                     wb._token_expire = token_data.get("tokenExpireTime")
                     wb._uuid = token_data.get("uuid")
                     
-                    if wb.is_logged_in():
-                        wb._account_id = token_data.get("account_id") or wb.get_account_id()
-                        print("[Webull Unofficial] Successfully logged in using cached credentials.")
+                    # Load device ID from did.bin
+                    did_bin_file = os.path.join(token_path, "did.bin")
+                    if os.path.exists(did_bin_file):
+                        try:
+                            with open(did_bin_file, "rb") as f:
+                                wb._did = pickle.load(f)
+                        except Exception:
+                            pass
+                    
+                    # Trust cached tokens directly — skip is_logged_in() which
+                    # rejects expired tokens even though Webull's API still
+                    # accepts them. The circuit breaker in fetch_one will handle
+                    # truly dead tokens gracefully.
+                    if wb._access_token:
+                        try:
+                            wb._account_id = token_data.get("account_id") or wb.get_account_id()
+                        except Exception:
+                            wb._account_id = None  # Non-critical; data fetching still works
+                        print("[Webull Unofficial] Successfully loaded cached credentials.")
                         _unofficial_client = wb
                         _unofficial_initialized = True
                         return _unofficial_client
@@ -567,8 +583,10 @@ def _fetch_yahoo_one(ticker, days=180, interval="1d", includePrePost="false"):
         # yfinance period format
         if days <= 7:
             period = f"{days}d"
-        elif days <= 60:
+        elif days <= 30:
             period = "1mo"
+        elif days <= 90:
+            period = "3mo"
         elif days <= 180:
             period = "6mo"
         elif days <= 365:

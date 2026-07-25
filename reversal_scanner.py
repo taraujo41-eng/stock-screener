@@ -363,7 +363,7 @@ def prefilter_liquid_optionable(tickers):
 
         # Extract average volume
         avg_vol = None
-        for key in ("avgVol10Day", "avgVolume", "avgVol", "avgVol30Day"):
+        for key in ("avgVol10D", "avgVol10Day", "avgVol3M", "avgVolume", "avgVol", "avgVol30Day"):
             val = q.get(key)
             if val is not None:
                 try:
