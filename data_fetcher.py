@@ -116,8 +116,10 @@ def get_unofficial_client():
                 except Exception as e:
                     print(f"[Webull Unofficial] Environment token load failed: {e}")
             
-            # 2. Try to load cached token from local file
-            if os.path.exists(credentials_file):
+            # 2. Try to load cached token from local file (local only — not on Render/cloud
+            #    where Webull API calls fail from datacenter IPs)
+            is_cloud = bool(os.getenv("RENDER"))
+            if not is_cloud and os.path.exists(credentials_file):
                 try:
                     with open(credentials_file, "rb") as f:
                         token_data = pickle.load(f)
