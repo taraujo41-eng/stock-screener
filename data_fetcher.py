@@ -1282,6 +1282,15 @@ def test_connection(ticker="AAPL"):
         session, crumb = _ensure_session()
         diag["yahoo_has_crumb"] = crumb is not None
 
+        # Direct HTTP test to check if Yahoo is blocking the IP
+        try:
+            url = "https://query2.finance.yahoo.com/v8/finance/chart/AAPL?range=1mo&interval=1d"
+            resp = requests.get(url, headers=_HEADERS, timeout=5)
+            diag["direct_yahoo_status"] = resp.status_code
+            diag["direct_yahoo_text"] = resp.text[:200]
+        except Exception as ey:
+            diag["direct_yahoo_error"] = str(ey)
+
         df = _fetch_yahoo_one(ticker, days=30)
         if df is not None:
             diag["yahoo_ok"] = True
