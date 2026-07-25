@@ -415,6 +415,26 @@ def ping():
     """Lightweight health check endpoint to keep the server awake."""
     return jsonify({"ok": True, "status": "active", "timestamp": datetime.now().isoformat()})
 
+@app.route("/api/check-imports", methods=["GET"])
+def check_imports():
+    res = {}
+    try:
+        import curl_cffi
+        res["curl_cffi_ok"] = True
+        res["curl_cffi_version"] = getattr(curl_cffi, "__version__", "unknown")
+    except Exception as e:
+        res["curl_cffi_ok"] = False
+        res["curl_cffi_error"] = str(e)
+    try:
+        import yfinance as yf
+        res["yfinance_ok"] = True
+        res["yfinance_version"] = getattr(yf, "__version__", "unknown")
+    except Exception as e:
+        res["yfinance_ok"] = False
+        res["yfinance_error"] = str(e)
+    return jsonify(res)
+
+
 # ── API: Diagnostics ────────────────────────────────────────────────
 
 @app.route("/api/test", methods=["GET"])
