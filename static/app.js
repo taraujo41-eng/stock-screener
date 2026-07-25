@@ -46,6 +46,9 @@ function updateModeDesc() {
   } else if (scanMode === "rsidiv") {
     desc.textContent = "Scans S&P 500, NASDAQ 100, and ETFs for daily RSI divergence (bullish or bearish)";
     if (subtitle) subtitle.textContent = "Daily RSI Divergence Scanner";
+  } else if (scanMode === "options") {
+    desc.textContent = "Scans S&P 500, NASDAQ 100, and ETFs for Options Exhaustion: 3-Sigma Bands (std=3) × RSI (<30 Calls, >70 Puts)";
+    if (subtitle) subtitle.textContent = "Options Directional Exhaustion Scanner";
   }
 }
 
@@ -165,6 +168,38 @@ async function loadLastRsiDivScan() {
   updateModeDesc();
 }
 
+async function loadLastOptionsScan() {
+  const scanBtn = document.getElementById("scanBtn");
+  if (scanBtn) {
+    const btnText = scanBtn.querySelector(".scan-btn__text");
+    if (btnText) btnText.textContent = "🎯  Scan Options Extreme";
+  }
+  try {
+    showSkeleton();
+    const res = await fetch("/api/scan/options/results");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok && data.results) {
+        displayResults(data);
+        updateModeDesc();
+        return;
+      }
+    }
+  } catch (e) {
+    console.error("No saved Options Extreme scan available yet");
+  }
+
+  document.getElementById("results").innerHTML = `
+    <div class="empty-state">
+      <div class="empty-state__icon">🎯</div>
+      <div class="empty-state__title">Ready to scan</div>
+      <div class="empty-state__text">Click above to scan for directional exhaustion (3-Sigma Bands × RSI Extremes) with Option Plays</div>
+    </div>
+  `;
+  hideAuxUI();
+  updateModeDesc();
+}
+
 async function switchTab(mode) {
   if (scanMode === mode) return;
   scanMode = mode;
@@ -198,6 +233,10 @@ async function switchTab(mode) {
     if (btnText) btnText.textContent = "📊  Scan RSI Divergence";
     document.getElementById("tabRsiDiv").classList.add("mode-tab--active");
     document.getElementById("extHoursWrap")?.classList.add("hidden");
+  } else if (mode === "options") {
+    if (btnText) btnText.textContent = "🎯  Scan Options Extreme";
+    document.getElementById("tabOptions").classList.add("mode-tab--active");
+    document.getElementById("extHoursWrap")?.classList.add("hidden");
   }
   updateModeDesc();
 
@@ -213,6 +252,8 @@ async function switchTab(mode) {
       await loadLast52wScan();
     } else if (mode === "rsidiv") {
       await loadLastRsiDivScan();
+    } else if (mode === "options") {
+      await loadLastOptionsScan();
     }
   }
 }
@@ -885,6 +926,9 @@ async function runScan() {
   } else if (scanMode === "rsidiv") {
     endpoint = "/api/scan/rsidiv";
     resultsEndpoint = "/api/scan/rsidiv/results";
+  } else if (scanMode === "options") {
+    endpoint = "/api/scan/options";
+    resultsEndpoint = "/api/scan/options/results";
   }
 
   // Retry logic for Render cold starts
