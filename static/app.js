@@ -642,7 +642,7 @@ function buildOptionsCard(item, index) {
 
 function renderResults() {
   const el = document.getElementById("results");
-  const isOptions = scanMode === "options" || (scanData[0] && scanData[0].Direction);
+  const isOptions = (scanData[0] && scanData[0].Direction !== undefined);
 
   let filtered = scanData;
   if (isOptions) {
@@ -684,7 +684,7 @@ function renderResults() {
 // ── Stats bar ──────────────────────────────────────────────
 
 function updateStats() {
-  const isOptions = scanMode === "options" || (scanData[0] && scanData[0].Direction);
+  const isOptions = (scanData[0] && scanData[0].Direction !== undefined);
 
   if (isOptions) {
     const bullCount = scanData.filter(d => d.Direction === "Bullish").length;
@@ -710,7 +710,7 @@ function updateStats() {
 // ── Display results (shared logic) ─────────────────────────
 
 function displayResults(data) {
-  const isOptions = scanMode === "options" || (data.mode && data.mode.startsWith("options"));
+  const isOptions = (data.results && data.results[0] && data.results[0].Direction !== undefined);
 
   if (isOptions) {
     scanData = (data.results || []).sort((a, b) => (b["Catalyst Score"] || 0) - (a["Catalyst Score"] || 0));

@@ -201,7 +201,6 @@
   "USB",
   "CRWD",
   "CNC",
-  "MDLZ",
   "FITB",
   "NOW",
   "LII",
@@ -431,6 +430,7 @@
   "GRMN",
   "FLEX",
   "BNY",
+  "DECK",
   "V",
   "XOM",
   "VEEV",
@@ -500,6 +500,6 @@
   "AOS",
   "NWSA",
   "GILD",
-  "DECK",
+  "MDLZ",
   "COIN"
 ]
