@@ -30,7 +30,8 @@
 
     <div class="mode-tabs">
       <button class="mode-tab mode-tab--active" id="tab3Sigma" onclick="switchTab('3sigma')">🔔 3-Sigma Bands</button>
-      <button class="mode-tab" id="tabOptions" onclick="switchTab('options')">🎯 Options Extreme</button>
+      <button class="mode-tab" id="tab2Sigma" onclick="switchTab('2sigma')">⚡ 2-Sigma Bands</button>
+      <button class="mode-tab" id="tab52w" onclick="switchTab('52w')">📈 52-Week Reversal</button>
       <button class="mode-tab" id="tabRsiDiv" onclick="switchTab('rsidiv')">📊 RSI Divergence</button>
     </div>
 
@@ -56,12 +57,9 @@
 
     <!-- Progress bar (full scan only) -->
     <div class="progress-wrap hidden" id="progressWrap">
-      <div class="progress-header" style="display: flex; justify-content: space-between; align-items: center;">
+      <div class="progress-header">
         <span class="progress-phase" id="progressPhase">Initializing...</span>
-        <div style="display: flex; align-items: center; gap: 10px;">
-          <span class="progress-pct" id="progressPct">0%</span>
-          <button onclick="cancelScan()" class="cancel-scan-btn" id="cancelScanBtn" style="background: rgba(239,68,68,0.2); color: #fca5a5; border: 1px solid #ef4444; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; cursor: pointer; transition: 0.2s;">Cancel</button>
-        </div>
+        <span class="progress-pct" id="progressPct">0%</span>
       </div>
       <div class="progress-bar">
         <div class="progress-bar__fill" id="progressFill" style="width: 0%"></div>
@@ -137,6 +135,6 @@
   </div>
 
 
-  <script src="/app.js?v=6.0"></script>
+  <script src="/app.js?v=5.0"></script>
 </body>
 </html>
