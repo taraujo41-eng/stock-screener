@@ -287,6 +287,12 @@ _last_force_new_time = 0
 _session_lock = threading.Lock()
 
 
+class TimeoutSession(requests.Session):
+    def request(self, *args, **kwargs):
+        if "timeout" not in kwargs or kwargs["timeout"] is None:
+            kwargs["timeout"] = 5
+        return super().request(*args, **kwargs)
+
 def _get_session(force_new=False):
     """Create (or reuse) a session with Yahoo cookie + crumb."""
     global _session, _crumb, _session_time, _last_force_new_time
@@ -303,7 +309,7 @@ def _get_session(force_new=False):
                 return _session, _crumb
             _last_force_new_time = now
 
-        _session = requests.Session()
+        _session = TimeoutSession()
         _session.headers.update(_HEADERS)
 
         # Step 1: Get A3 cookie from fc.yahoo.com (returns 404 but sets cookie)
@@ -608,7 +614,8 @@ def _fetch_yahoo_one(ticker, days=180, interval="1d", includePrePost="false"):
         else:
             period = "2y"
             
-        t = yf.Ticker(ticker)
+        session, crumb = _ensure_session()
+        t = yf.Ticker(ticker, session=session)
         df = t.history(period=period, interval=interval, prepost=prepost)
         
         if df.empty:
@@ -682,7 +689,8 @@ def _fetch_yahoo_batch(tickers, days=180, interval="1d", on_progress=None, proce
     processed_count = 0
     for chunk in chunks:
         try:
-            df_batch = yf.download(chunk, period=period, interval=interval, group_by="ticker", progress=False, threads=False)
+            session, crumb = _ensure_session()
+            df_batch = yf.download(chunk, period=period, interval=interval, group_by="ticker", progress=False, threads=False, session=session)
         except Exception as e:
             print(f"[Yahoo Batch] Chunk download error: {e}")
             continue
@@ -800,7 +808,8 @@ def _fetch_yahoo_options_chain(ticker):
         import yfinance as yf
         from datetime import datetime
         
-        t = yf.Ticker(ticker)
+        session, crumb = _ensure_session()
+        t = yf.Ticker(ticker, session=session)
         dates = t.options
         if not dates:
             return None
@@ -941,7 +950,8 @@ def _fetch_yahoo_options_for_expiration(ticker, expiration_ts):
         from datetime import datetime
         
         date_str = datetime.fromtimestamp(expiration_ts).strftime("%Y-%m-%d")
-        t = yf.Ticker(ticker)
+        session, crumb = _ensure_session()
+        t = yf.Ticker(ticker, session=session)
         chain = t.option_chain(date_str)
         
         calls = chain.calls.to_dict(orient="records")
