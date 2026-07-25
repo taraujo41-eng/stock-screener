@@ -161,7 +161,7 @@ def scan_3sigma():
             with _scan_lock:
                 _scan_running = False
 
-    threading.Thread(target=_run, daemon=True).start()
+    threading.Thread(target=_run, daemon=False).start()
     return jsonify({"ok": True, "message": "3-Sigma scan started"})
 
 @app.route("/api/scan/3sigma/results", methods=["GET"])
@@ -214,7 +214,7 @@ def scan_options():
             with _scan_lock:
                 _scan_running = False
 
-    threading.Thread(target=_run, daemon=True).start()
+    threading.Thread(target=_run, daemon=False).start()
     return jsonify({"ok": True, "message": "Options scan started"})
 
 @app.route("/api/scan/options/results", methods=["GET"])
@@ -271,7 +271,7 @@ def scan_2sigma():
             with _scan_lock:
                 _scan_running = False
 
-    threading.Thread(target=_run, daemon=True).start()
+    threading.Thread(target=_run, daemon=False).start()
     return jsonify({"ok": True, "message": "2-Sigma scan started"})
 
 @app.route("/api/scan/2sigma/results", methods=["GET"])
@@ -327,7 +327,7 @@ def scan_52w():
             with _scan_lock:
                 _scan_running = False
 
-    threading.Thread(target=_run, daemon=True).start()
+    threading.Thread(target=_run, daemon=False).start()
     return jsonify({"ok": True, "message": "52-week reversal scan started"})
 
 @app.route("/api/scan/52w/results", methods=["GET"])
@@ -383,7 +383,7 @@ def scan_rsidiv():
             with _scan_lock:
                 _scan_running = False
 
-    threading.Thread(target=_run, daemon=True).start()
+    threading.Thread(target=_run, daemon=False).start()
     return jsonify({"ok": True, "message": "RSI divergence scan started"})
 
 @app.route("/api/scan/rsidiv/results", methods=["GET"])
