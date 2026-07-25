@@ -53,6 +53,9 @@ _unofficial_initialized = False
 
 def get_unofficial_client():
     """Retrieve and initialize the unofficial Webull client using account credentials."""
+    # Force Yahoo only: return None to bypass Webull client initialization
+    return None
+
     global _unofficial_client, _unofficial_initialized
     if _unofficial_initialized:
         return _unofficial_client
@@ -213,6 +216,9 @@ _webull_initialized = False
 
 def get_webull_client():
     """Retrieve and initialize the Webull OpenAPI client dynamically."""
+    # Force Yahoo only: return None to bypass Webull OpenAPI client initialization
+    return None
+
     global _webull_client, _webull_initialized
     if _webull_initialized:
         return _webull_client
@@ -731,7 +737,7 @@ def _fetch_yahoo_batch(tickers, days=180, interval="1d", on_progress=None, proce
 
 # ── Unified Single Ticker Fetcher (Resilient Ordering) ────────────────
 
-def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webull=False):
+def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webull=True):
     """
     Fetch OHLCV data for one ticker.
     Resilient multi-layered ordering:
@@ -1018,7 +1024,7 @@ def fetch_options_for_expiration(ticker, expiration_ts):
 
 # ── Batch download (sequential — for watchlists) ────────────────────
 
-def fetch_batch(tickers, days=180, delay=0.05, on_progress=None, interval="1d", includePrePost="false", skip_webull=False):
+def fetch_batch(tickers, days=180, delay=0.05, on_progress=None, interval="1d", includePrePost="false", skip_webull=True):
     """
     Download data for a list of tickers sequentially.
     Returns dict of {ticker: DataFrame}.
@@ -1044,7 +1050,7 @@ def fetch_batch(tickers, days=180, delay=0.05, on_progress=None, interval="1d", 
 
 def fetch_batch_concurrent(tickers, days=180, max_workers=8,
                            on_progress=None, delay=0.05, interval="1d", includePrePost="false",
-                           process_fn=None, skip_webull=False):
+                           process_fn=None, skip_webull=True):
     """
     Download data for many tickers using a thread pool.
     If process_fn is provided, it processes each DataFrame on-the-fly and returns the result,

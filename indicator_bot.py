@@ -219,7 +219,7 @@ def precalculate_daily_bands(tickers):
         max_workers=25,
         interval="1d",
         includePrePost="false",
-        skip_webull=False
+        skip_webull=True
     )
     
     for ticker, df in daily_dfs.items():
@@ -369,7 +369,7 @@ def bot_loop():
                 interval=candle_interval,
                 includePrePost="false",  # Regular market hours only
                 process_fn=evaluate_ticker_process,
-                skip_webull=False
+                skip_webull=True
             )
             
             # 4. Process matches in main thread
