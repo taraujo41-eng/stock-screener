@@ -60,12 +60,13 @@ def get_unofficial_client():
     # Bypass only if we would need to perform an interactive MFA login
     token_path = os.path.dirname(__file__)
     credentials_file = os.path.join(token_path, "webull_credentials.json")
+    is_cloud = bool(os.getenv("RENDER"))
     has_env_token = bool(os.getenv("WEBULL_ACCESS_TOKEN") and os.getenv("WEBULL_DID"))
-    has_cached_file = os.path.exists(credentials_file)
+    has_cached_file = (not is_cloud) and os.path.exists(credentials_file)
 
     import sys
     if not (has_env_token or has_cached_file):
-        if os.getenv("RENDER") or not (sys.stdin and sys.stdin.isatty()):
+        if is_cloud or not (sys.stdin and sys.stdin.isatty()):
             print("[Webull Unofficial] Skipping Webull client in cloud/non-interactive environment to prevent hangs.")
             _unofficial_client = None
             _unofficial_initialized = True
