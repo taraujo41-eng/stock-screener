@@ -2333,10 +2333,14 @@ def three_sigma_full_market_scan(extended_hours=False):
         _update_progress("downloading", f"Downloading daily candles... ({i}/{tot})", i, tot, ticker=sym, pct=pct)
 
     _update_progress("downloading", "Initiating daily candle download...", 0, total, pct=0)
-    daily_data = fetch_batch_concurrent(
-        tickers, days=45, max_workers=6,
-        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
-    )
+    is_cloud = bool(os.getenv("RENDER"))
+    if is_cloud:
+        daily_data = _fetch_yahoo_batch(tickers, days=180, interval="1d", on_progress=_on_daily_progress)
+    else:
+        daily_data = fetch_batch_concurrent(
+            tickers, days=45, max_workers=6,
+            on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
+        )
 
     for i, sym in enumerate(tickers):
         pct = 80 + int((i / total) * 20) if total else 100
@@ -2387,10 +2391,14 @@ def two_sigma_full_market_scan(extended_hours=False):
         _update_progress("downloading", f"Downloading daily candles... ({i}/{tot})", i, tot, ticker=sym, pct=pct)
 
     _update_progress("downloading", "Initiating daily candle download...", 0, total, pct=0)
-    daily_data = fetch_batch_concurrent(
-        tickers, days=45, max_workers=6,
-        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
-    )
+    is_cloud = bool(os.getenv("RENDER"))
+    if is_cloud:
+        daily_data = _fetch_yahoo_batch(tickers, days=180, interval="1d", on_progress=_on_daily_progress)
+    else:
+        daily_data = fetch_batch_concurrent(
+            tickers, days=45, max_workers=6,
+            on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
+        )
 
     for i, sym in enumerate(tickers):
         pct = 80 + int((i / total) * 20) if total else 100
@@ -2443,10 +2451,14 @@ def fifty_two_week_reversal_scan(extended_hours=False):
     _update_progress("downloading", "Initiating daily candle download...", 0, total, pct=0)
     
     # 365 days of 1d bars
-    daily_data = fetch_batch_concurrent(
-        tickers, days=365, max_workers=6,
-        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
-    )
+    is_cloud = bool(os.getenv("RENDER"))
+    if is_cloud:
+        daily_data = _fetch_yahoo_batch(tickers, days=365, interval="1d", on_progress=_on_daily_progress)
+    else:
+        daily_data = fetch_batch_concurrent(
+            tickers, days=365, max_workers=6,
+            on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
+        )
 
     # 2. Analyze daily candles for 52w high/low and RSI divergence
     for i, (sym, df_daily) in enumerate(daily_data.items()):
@@ -2681,10 +2693,14 @@ def rsi_divergence_full_market_scan(extended_hours=False):
 
     _update_progress("downloading", "Initiating daily candle download...", 0, total, pct=0)
     
-    daily_data = fetch_batch_concurrent(
-        tickers, days=365, max_workers=6,
-        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
-    )
+    is_cloud = bool(os.getenv("RENDER"))
+    if is_cloud:
+        daily_data = _fetch_yahoo_batch(tickers, days=365, interval="1d", on_progress=_on_daily_progress)
+    else:
+        daily_data = fetch_batch_concurrent(
+            tickers, days=365, max_workers=6,
+            on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
+        )
 
     # 2. Analyze daily candles for RSI divergence
     for i, (sym, df_daily) in enumerate(daily_data.items()):
@@ -2919,10 +2935,14 @@ def options_directional_exhaustion_scan():
         _update_progress("downloading", f"Downloading daily candles... ({i}/{tot})", i, tot, ticker=sym, pct=pct)
 
     _update_progress("downloading", "Initiating daily candle download...", 0, total, pct=0)
-    daily_data = fetch_batch_concurrent(
-        tickers, days=60, max_workers=6,
-        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
-    )
+    is_cloud = bool(os.getenv("RENDER"))
+    if is_cloud:
+        daily_data = _fetch_yahoo_batch(tickers, days=180, interval="1d", on_progress=_on_daily_progress)
+    else:
+        daily_data = fetch_batch_concurrent(
+            tickers, days=60, max_workers=6,
+            on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
+        )
 
     for i, sym in enumerate(tickers):
         pct = 80 + int((i / total) * 20) if total else 100
