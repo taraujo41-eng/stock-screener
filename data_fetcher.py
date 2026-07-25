@@ -637,6 +637,85 @@ def _fetch_yahoo_one(ticker, days=180, interval="1d", includePrePost="false"):
         return None
 
 
+def _fetch_yahoo_batch(tickers, days=180, interval="1d", on_progress=None, process_fn=None):
+    """
+    Download data for many tickers in a single batch using yf.download.
+    Prevents datacenter rate limits on cloud servers (Render, AWS, etc).
+    Returns dict of {ticker: DataFrame or process_fn result}.
+    """
+    import yfinance as yf
+    
+    if days <= 7:
+        period = f"{days}d"
+    elif days <= 30:
+        period = "1mo"
+    elif days <= 90:
+        period = "3mo"
+    elif days <= 180:
+        period = "6mo"
+    elif days <= 365:
+        period = "1y"
+    else:
+        period = "2y"
+        
+    print(f"[Yahoo Batch] Downloading batch of {len(tickers)} tickers (period={period})...")
+    if on_progress:
+        on_progress(0, len(tickers), "Initiating Yahoo batch download...")
+
+    try:
+        df_batch = yf.download(tickers, period=period, interval=interval, group_by="ticker", progress=False, threads=True)
+    except Exception as e:
+        print(f"[Yahoo Batch] Download error: {e}")
+        return {}
+
+    data = {}
+    total = len(tickers)
+    for i, t in enumerate(tickers):
+        try:
+            if len(tickers) == 1:
+                t_df = df_batch.copy()
+            else:
+                if t not in df_batch.columns.levels[0]:
+                    continue
+                t_df = df_batch[t].copy()
+            
+            t_df = t_df.dropna(subset=["Close"])
+            if len(t_df) >= 20:
+                t_df.index.name = "Date"
+                if t_df.index.tz is None:
+                    t_df.index = t_df.index.tz_localize("America/New_York")
+                else:
+                    t_df.index = t_df.index.tz_convert("America/New_York")
+                
+                cols = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in t_df.columns]
+                t_df = t_df[cols].copy()
+                if "Volume" in t_df.columns:
+                    t_df["Volume"] = t_df["Volume"].fillna(0).astype(np.int64)
+                
+                high_52w = float(t_df["High"].max()) if "High" in t_df.columns else float(t_df["Close"].max())
+                low_52w = float(t_df["Low"].min()) if "Low" in t_df.columns else float(t_df["Close"].min())
+                pre_close = float(t_df["Close"].iloc[-2]) if len(t_df) > 1 else float(t_df["Close"].iloc[0])
+                
+                t_df.attrs["fiftyTwoWeekHigh"] = high_52w
+                t_df.attrs["fiftyTwoWeekLow"] = low_52w
+                t_df.attrs["previousClose"] = pre_close
+                
+                if process_fn:
+                    res = process_fn(t, t_df)
+                    if res is not None:
+                        data[t] = res
+                else:
+                    data[t] = t_df
+        except Exception:
+            pass
+
+        if on_progress and (i % 25 == 0 or i == total - 1):
+            on_progress(i + 1, total, t)
+
+    print(f"[Yahoo Batch] Successfully fetched {len(data)} / {total} tickers")
+    return data
+
+
 
 # ── Unified Single Ticker Fetcher (Resilient Ordering) ────────────────
 
@@ -961,6 +1040,12 @@ def fetch_batch_concurrent(tickers, days=180, max_workers=8,
     """
     # Reset circuit breaker at the start of each batch scan
     reset_webull_circuit_breaker()
+
+    # If no Webull client is available (e.g. on Render/cloud), use fast Yahoo batch download
+    wb_un = None if skip_webull else get_unofficial_client()
+    wb_api = None if skip_webull else get_webull_client()
+    if wb_un is None and wb_api is None:
+        return _fetch_yahoo_batch(tickers, days=days, interval=interval, on_progress=on_progress, process_fn=process_fn)
 
     data = {}
     completed = 0
