@@ -591,152 +591,131 @@ def _fetch_webull_unofficial_one(ticker, days=180, interval="1d", includePrePost
 
 # ── Yahoo Finance Fetcher ─────────────────────────────────────────────
 
-def _fetch_yahoo_one(ticker, days=180, interval="1d", includePrePost="false"):
-    """Fetch OHLCV data using yfinance."""
-    global _yahoo_failures
+def _fetch_yahoo_direct_one(ticker, days=180, interval="1d"):
+    """Fetch Yahoo Finance chart data directly via REST API, returning a formatted DataFrame."""
     try:
-        import yfinance as yf
-        
-        # Map parameters
-        prepost = True if includePrePost.lower() == "true" else False
-        
-        # yfinance period format
         if days <= 7:
-            period = f"{days}d"
+            range_str = "7d"
         elif days <= 30:
-            period = "1mo"
+            range_str = "1mo"
         elif days <= 90:
-            period = "3mo"
+            range_str = "3mo"
         elif days <= 180:
-            period = "6mo"
+            range_str = "6mo"
         elif days <= 365:
-            period = "1y"
+            range_str = "1y"
         else:
-            period = "2y"
+            range_str = "2y"
+
+        session, crumb = _ensure_session()
+        url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}"
+        params = {"range": range_str, "interval": interval}
+        if crumb:
+            params["crumb"] = crumb
             
-        t = yf.Ticker(ticker)
-        df = t.history(period=period, interval=interval, prepost=prepost)
-        
-        if df.empty:
+        resp = session.get(url, params=params, timeout=5)
+        if resp.status_code != 200:
             return None
             
-        # Standardize columns to match Webull
-        df.index.name = "Date"
-        if df.index.tz is None:
-            df.index = df.index.tz_localize("America/New_York")
-        else:
-            df.index = df.index.tz_convert("America/New_York")
+        r = resp.json()
+        result = r.get("chart", {}).get("result", [])
+        if not result:
+            return None
             
-        # Ensure we just have Open, High, Low, Close, Volume
-        df = df[["Open", "High", "Low", "Close", "Volume"]].copy()
-        df["Volume"] = df["Volume"].fillna(0).astype(np.int64)
+        res_data = result[0]
+        timestamps = res_data.get("timestamp", [])
+        quote = res_data.get("indicators", {}).get("quote", [{}])[0]
         
-        # Try to attach 52w info if possible
-        info = {}
-        try:
-            info = t.info
-        except Exception:
-            pass
+        opens = quote.get("open", [])
+        highs = quote.get("high", [])
+        lows = quote.get("low", [])
+        closes = quote.get("close", [])
+        volumes = quote.get("volume", [])
+        
+        if not closes or not timestamps:
+            return None
             
-        high_52w = info.get("fiftyTwoWeekHigh", df["High"].max())
-        low_52w = info.get("fiftyTwoWeekLow", df["Low"].min())
-        pre_close = info.get("previousClose", df["Close"].iloc[-2] if len(df) > 1 else df["Close"].iloc[0])
+        # Create DataFrame
+        df = pd.DataFrame({
+            "Open": opens,
+            "High": highs,
+            "Low": lows,
+            "Close": closes,
+            "Volume": volumes
+        }, index=pd.to_datetime(np.array(timestamps) * 1e9))
+        
+        df = df.dropna(subset=["Close"])
+        if len(df) < 5:
+            return None
+            
+        df.index.name = "Date"
+        df.index = df.index.tz_localize("UTC").tz_convert("America/New_York")
+        
+        # Format columns
+        if "Volume" in df.columns:
+            df["Volume"] = df["Volume"].fillna(0).astype(np.int64)
+            
+        # Extract meta
+        meta = res_data.get("meta", {})
+        
+        # Fallbacks for 52w info
+        high_52w = meta.get("fiftyTwoWeekHigh") or float(df["High"].max())
+        low_52w = meta.get("fiftyTwoWeekLow") or float(df["Low"].min())
+        pre_close = meta.get("chartPreviousClose") or (float(df["Close"].iloc[-2]) if len(df) > 1 else float(df["Close"].iloc[0]))
         
         df.attrs["fiftyTwoWeekHigh"] = high_52w
         df.attrs["fiftyTwoWeekLow"] = low_52w
         df.attrs["previousClose"] = pre_close
         
         return df
-
     except Exception as e:
-        _yahoo_failures += 1
-        if _yahoo_failures >= _YAHOO_MAX_FAILURES:
-            print(f"[Circuit Breaker] Yahoo Finance failed {_YAHOO_MAX_FAILURES}x consecutively — skipping for rest of scan")
+        print(f"[Yahoo Direct] Error fetching {ticker}: {e}")
         return None
+
+
+def _fetch_yahoo_one(ticker, days=180, interval="1d", includePrePost="false"):
+    """Fetch OHLCV data directly via Yahoo chart REST API (bypass yfinance)."""
+    return _fetch_yahoo_direct_one(ticker, days=days, interval=interval)
 
 
 def _fetch_yahoo_batch(tickers, days=180, interval="1d", on_progress=None, process_fn=None):
     """
-    Download data for many tickers in a single batch using yf.download.
-    Prevents datacenter rate limits on cloud servers (Render, AWS, etc).
-    Returns dict of {ticker: DataFrame or process_fn result}.
+    Download Yahoo Finance data for many tickers concurrently using direct REST API.
+    100% thread-safe and free from curl_cffi segfaults!
     """
-    import yfinance as yf
+    print(f"[Yahoo Direct Batch] Fetching {len(tickers)} tickers concurrently...")
     
-    if days <= 7:
-        period = f"{days}d"
-    elif days <= 30:
-        period = "1mo"
-    elif days <= 90:
-        period = "3mo"
-    elif days <= 180:
-        period = "6mo"
-    elif days <= 365:
-        period = "1y"
-    else:
-        period = "2y"
-        
-    print(f"[Yahoo Batch] Downloading batch of {len(tickers)} tickers (period={period})...")
-    if on_progress:
-        on_progress(0, len(tickers), "Initiating Yahoo batch download...")
-
     data = {}
+    completed = 0
     total = len(tickers)
-    chunk_size = 20
-    chunks = [tickers[i:i + chunk_size] for i in range(0, len(tickers), chunk_size)]
     
-    processed_count = 0
-    for chunk in chunks:
-        try:
-            df_batch = yf.download(chunk, period=period, interval=interval, group_by="ticker", progress=False, threads=True)
-        except Exception as e:
-            print(f"[Yahoo Batch] Chunk download error: {e}")
-            continue
-            
-        for t in chunk:
-            processed_count += 1
-            try:
-                if len(chunk) == 1:
-                    t_df = df_batch.copy()
-                else:
-                    if t not in df_batch.columns.levels[0]:
-                        continue
-                    t_df = df_batch[t].copy()
-                
-                t_df = t_df.dropna(subset=["Close"])
-                if len(t_df) >= 20:
-                    t_df.index.name = "Date"
-                    if t_df.index.tz is None:
-                        t_df.index = t_df.index.tz_localize("America/New_York")
-                    else:
-                        t_df.index = t_df.index.tz_convert("America/New_York")
-                    
-                    cols = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in t_df.columns]
-                    t_df = t_df[cols].copy()
-                    if "Volume" in t_df.columns:
-                        t_df["Volume"] = t_df["Volume"].fillna(0).astype(np.int64)
-                    
-                    high_52w = float(t_df["High"].max()) if "High" in t_df.columns else float(t_df["Close"].max())
-                    low_52w = float(t_df["Low"].min()) if "Low" in t_df.columns else float(t_df["Close"].min())
-                    pre_close = float(t_df["Close"].iloc[-2]) if len(t_df) > 1 else float(t_df["Close"].iloc[0])
-                    
-                    t_df.attrs["fiftyTwoWeekHigh"] = high_52w
-                    t_df.attrs["fiftyTwoWeekLow"] = low_52w
-                    t_df.attrs["previousClose"] = pre_close
-                    
-                    if process_fn:
-                        res = process_fn(t, t_df)
-                        if res is not None:
-                            data[t] = res
-                    else:
-                        data[t] = t_df
-            except Exception:
-                continue
-                
-        if on_progress:
-            on_progress(processed_count, total, f"Downloaded {processed_count}/{total} tickers...")
+    def _fetch_one_wrapper(ticker):
+        df = _fetch_yahoo_direct_one(ticker, days=days, interval=interval)
+        return ticker, df
 
-    print(f"[Yahoo Batch] Successfully fetched {len(data)} / {total} tickers")
+    max_workers = 15  # Fetch 15 tickers in parallel
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_fetch_one_wrapper, t): t for t in tickers}
+        for future in as_completed(futures):
+            completed += 1
+            ticker = futures[future]
+            try:
+                ticker, df = future.result()
+                if df is not None:
+                    if process_fn:
+                        res = process_fn(ticker, df)
+                        if res is not None:
+                            data[ticker] = res
+                    else:
+                        data[ticker] = df
+                if on_progress:
+                    on_progress(completed, total, ticker)
+            except Exception as e:
+                print(f"[Yahoo Direct Batch] Error fetching {ticker}: {e}")
+                if on_progress:
+                    on_progress(completed, total, ticker)
+                    
+    print(f"[Yahoo Direct Batch] Done: fetched {len(data)} / {total} tickers")
     return data
 
 
@@ -1113,63 +1092,48 @@ def fetch_batch_concurrent(tickers, days=180, max_workers=8,
 
 def fetch_quotes_batch(tickers, max_workers=10, on_progress=None):
     """
-    Fetch live Webull quote data for many tickers concurrently.
-    Returns dict of {ticker: quote_dict} where quote_dict has keys like:
-      avgVol10Day, close, volume, name, totalShares, etc.
-    Only returns entries where the quote was successfully fetched.
+    Fetch quotes for many tickers from Yahoo Finance directly.
     """
-    wb_un = get_unofficial_client()
-    if not wb_un:
-        print("  [fetch_quotes_batch] No Webull client — cannot pre-filter")
-        return {}
-
+    print(f"[fetch_quotes_batch] Fetching {len(tickers)} quotes from Yahoo Finance...")
+    
+    chunk_size = 100
+    chunks = [tickers[i:i + chunk_size] for i in range(0, len(tickers), chunk_size)]
+    
+    session, crumb = _ensure_session()
     quotes = {}
+    
     completed = 0
     total = len(tickers)
     
-    consecutive_failures = 0
-    circuit_broken = False
-    wb_un.timeout = 3
-
-    def _fetch_quote(ticker):
-        if circuit_broken:
-            return ticker, None
+    for chunk in chunks:
         try:
-            q = wb_un.get_quote(stock=ticker)
-            if q:
-                return ticker, q
-        except Exception:
-            pass
-        return ticker, None
-
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(_fetch_quote, t): t for t in tickers}
-        for future in as_completed(futures):
-            if circuit_broken:
-                completed += 1
-                if on_progress:
-                    on_progress(completed, total, futures[future])
-                continue
-            completed += 1
-            try:
-                ticker, q = future.result(timeout=10)
-                if q:
-                    quotes[ticker] = q
-                    consecutive_failures = 0
-                else:
-                    consecutive_failures += 1
-                    
-                if consecutive_failures > 15:
-                    print("  [fetch_quotes_batch] CIRCUIT BREAKER TRIPPED! Too many Webull fetch failures.")
-                    circuit_broken = True
-                    
-                if on_progress:
-                    on_progress(completed, total, ticker)
-            except Exception:
-                consecutive_failures += 1
-                if consecutive_failures > 15:
-                    circuit_broken = True
-
+            symbols_str = ",".join(chunk)
+            url = "https://query2.finance.yahoo.com/v7/finance/quote"
+            params = {"symbols": symbols_str}
+            if crumb:
+                params["crumb"] = crumb
+            resp = session.get(url, params=params, timeout=5)
+            if resp.status_code == 200:
+                results = resp.json().get("quoteResponse", {}).get("result", [])
+                for r in results:
+                    sym = r.get("symbol")
+                    if sym:
+                        quotes[sym] = {
+                            "price": r.get("regularMarketPrice"),
+                            "close": r.get("regularMarketPreviousClose"),
+                            "marketCap": r.get("marketCap"),
+                            "avgVolume": r.get("averageDailyVolume3Month") or r.get("averageVolume") or r.get("averageVolume10Day"),
+                            "volume": r.get("regularMarketVolume"),
+                        }
+            completed += len(chunk)
+            if on_progress:
+                on_progress(min(completed, total), total, chunk[-1])
+        except Exception as e:
+            print(f"[fetch_quotes_batch] Error fetching chunk: {e}")
+            completed += len(chunk)
+            if on_progress:
+                on_progress(min(completed, total), total, chunk[-1])
+                
     return quotes
 
 
