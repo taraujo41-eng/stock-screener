@@ -911,6 +911,12 @@ async function runScan() {
   document.getElementById("emptyState")?.classList.add("hidden");
   document.getElementById("results").innerHTML = "";
 
+  // Hide old results dashboard components while new scan is running
+  document.getElementById("statsBar")?.classList.add("hidden");
+  document.getElementById("timestamp")?.classList.add("hidden");
+  document.getElementById("scanBadge")?.classList.add("hidden");
+  document.getElementById("filters")?.classList.add("hidden");
+
   const extHours = document.getElementById("extHoursToggle")?.checked || false;
 
   let endpoint, resultsEndpoint;
