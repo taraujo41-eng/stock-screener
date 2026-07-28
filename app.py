@@ -440,6 +440,52 @@ def check_imports():
     return jsonify(res)
 
 
+@app.route("/api/debug-scan", methods=["GET"])
+def debug_scan():
+    """Synchronous mini-scan: fetches 5 tickers and runs 3-sigma analysis. Returns traceback on failure."""
+    import traceback
+    steps = {}
+    try:
+        steps["step1_imports"] = "starting"
+        from reversal_scanner import (
+            get_us_tickers, prefilter_liquid_optionable,
+            _analyze_3sigma_setup, check_spy_regime
+        )
+        from data_fetcher import _fetch_yahoo_batch
+        steps["step1_imports"] = "ok"
+
+        steps["step2_tickers"] = "starting"
+        all_tickers = get_us_tickers()
+        steps["step2_tickers"] = f"ok ({len(all_tickers)} tickers)"
+
+        # Only test with 5 tickers
+        test_tickers = all_tickers[:5]
+        steps["step3_test_tickers"] = test_tickers
+
+        steps["step4_yahoo_batch"] = "starting"
+        daily_data = _fetch_yahoo_batch(test_tickers, days=180, interval="1d")
+        steps["step4_yahoo_batch"] = f"ok ({len(daily_data)} fetched)"
+
+        steps["step5_regime"] = "starting"
+        is_bullish = check_spy_regime()
+        steps["step5_regime"] = f"ok (bullish={is_bullish})"
+
+        steps["step6_analyze"] = "starting"
+        results = []
+        for sym, df_daily in daily_data.items():
+            result = _analyze_3sigma_setup(sym, None, df_daily, is_market_bullish=is_bullish)
+            if result:
+                results.append(result)
+        steps["step6_analyze"] = f"ok ({len(results)} signals)"
+
+        return jsonify({"ok": True, "steps": steps, "results_count": len(results),
+                        "results_sample": results[:2] if results else []})
+    except Exception as e:
+        steps["error"] = str(e)
+        steps["traceback"] = traceback.format_exc()
+        return jsonify({"ok": False, "steps": steps}), 500
+
+
 # ── API: Diagnostics ────────────────────────────────────────────────
 
 @app.route("/api/test", methods=["GET"])
