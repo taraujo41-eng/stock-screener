@@ -432,6 +432,11 @@ def check_imports():
     except Exception as e:
         res["yfinance_ok"] = False
         res["yfinance_error"] = str(e)
+    try:
+        from data_fetcher import _fetch_yahoo_direct_one
+        res["direct_fetch_doc"] = _fetch_yahoo_direct_one.__doc__
+    except Exception as e:
+        res["direct_fetch_doc"] = f"Error: {e}"
     return jsonify(res)
 
 
