@@ -1,8 +1,7 @@
-"""
-Stock Reversal & Momentum Scanner – Web Server
-Run:  python3 app.py
-Then open http://<your-mac-ip>:5050 on your phone.
-"""
+import sys
+# Block native curl_cffi C-extension loading to prevent Gunicorn segfaults
+sys.modules['curl_cffi'] = None
+sys.modules['curl_cffi.requests'] = None
 
 from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS

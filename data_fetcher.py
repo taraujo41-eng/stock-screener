@@ -12,6 +12,11 @@ Now integrates:
 3. Seamless, automatic fallback to Yahoo Finance on permission or access errors.
 """
 
+import sys
+# Block native curl_cffi C-extension loading to prevent Gunicorn segfaults
+sys.modules['curl_cffi'] = None
+sys.modules['curl_cffi.requests'] = None
+
 import requests
 import pandas as pd
 import numpy as np
