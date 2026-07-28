@@ -682,13 +682,13 @@ def _fetch_yahoo_batch(tickers, days=180, interval="1d", on_progress=None, proce
 
     data = {}
     total = len(tickers)
-    chunk_size = 60
+    chunk_size = 20
     chunks = [tickers[i:i + chunk_size] for i in range(0, len(tickers), chunk_size)]
     
     processed_count = 0
     for chunk in chunks:
         try:
-            df_batch = yf.download(chunk, period=period, interval=interval, group_by="ticker", progress=False, threads=False)
+            df_batch = yf.download(chunk, period=period, interval=interval, group_by="ticker", progress=False, threads=True)
         except Exception as e:
             print(f"[Yahoo Batch] Chunk download error: {e}")
             continue

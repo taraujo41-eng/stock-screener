@@ -299,44 +299,33 @@ def prefilter_liquid_optionable(tickers):
 
     start_time = time.time()
 
-    # Phase 1: Fetch live quotes for all tickers
-    print(f"  Phase 1: Fetching live quotes from Webull...")
-    _update_progress("prefilter", "Fetching live quotes for pre-filter...", 0, len(tickers), pct=0)
+    # Phase 1: Fetch live quotes using Yahoo batch download directly (Webull bypassed)
+    print("  Pre-filtering using Yahoo batch download...")
+    _update_progress("prefilter", "Pre-filter: downloading quotes via Yahoo batch...", 0, len(tickers), pct=25)
+    try:
+        def _on_yf_prefilter_progress(i, tot, sym):
+            pct = 25 + int((i / tot) * 50) if tot else 25
+            _update_progress("prefilter", f"Pre-filter: downloading quotes ({i}/{tot})...", i, tot, ticker=sym, pct=pct)
 
-    def _on_quote_progress(i, tot, sym):
-        pct = int((i / tot) * 50) if tot else 0
-        _update_progress("prefilter", f"Pre-filter: fetching quotes ({i}/{tot})...", i, tot, ticker=sym, pct=pct)
+        daily_map = _fetch_yahoo_batch(tickers, days=30, interval="1d", on_progress=_on_yf_prefilter_progress)
+        passed = []
+        for sym, df in daily_map.items():
+            if df is None or len(df) < 5:
+                continue
+            last_close = float(df["Close"].iloc[-1])
+            avg_vol = float(df["Volume"].mean())
+            if last_close >= MIN_PRICE and avg_vol >= MIN_AVG_VOLUME:
+                passed.append(sym)
+        if passed:
+            filtered = sorted(passed)
+            print(f"  ✅ Yahoo Pre-filter complete: {len(tickers)} → {len(filtered)} liquid tickers")
+            _update_progress("prefilter", f"Pre-filter done: {len(filtered)} liquid tickers", len(filtered), len(filtered), pct=100)
+            return filtered
+    except Exception as e:
+        print(f"  Yahoo pre-filter error: {e}")
 
-    quotes = fetch_quotes_batch(tickers, max_workers=10, on_progress=_on_quote_progress)
-    print(f"  Quotes fetched: {len(quotes)} / {len(tickers)}")
-
-    if not quotes:
-        print("  ⚠️ Webull quotes unavailable. Pre-filtering using Yahoo batch download...")
-        _update_progress("prefilter", "Pre-filter: downloading quotes via Yahoo batch...", 0, len(tickers), pct=25)
-        try:
-            def _on_yf_prefilter_progress(i, tot, sym):
-                pct = 25 + int((i / tot) * 50) if tot else 25
-                _update_progress("prefilter", f"Pre-filter: downloading quotes ({i}/{tot})...", i, tot, ticker=sym, pct=pct)
-
-            daily_map = _fetch_yahoo_batch(tickers, days=30, interval="1d", on_progress=_on_yf_prefilter_progress)
-            passed = []
-            for sym, df in daily_map.items():
-                if df is None or len(df) < 5:
-                    continue
-                last_close = float(df["Close"].iloc[-1])
-                avg_vol = float(df["Volume"].mean())
-                if last_close >= MIN_PRICE and avg_vol >= MIN_AVG_VOLUME:
-                    passed.append(sym)
-            if passed:
-                filtered = sorted(passed)
-                print(f"  ✅ Yahoo Pre-filter complete: {len(tickers)} → {len(filtered)} liquid tickers")
-                _update_progress("prefilter", f"Pre-filter done: {len(filtered)} liquid tickers", len(filtered), len(filtered), pct=100)
-                return filtered
-        except Exception as e:
-            print(f"  Yahoo pre-filter error: {e}")
-
-        _update_progress("prefilter", "Pre-filter fallback: using full universe", len(tickers), len(tickers), pct=100)
-        return sorted(tickers)
+    _update_progress("prefilter", "Pre-filter fallback: using full universe", len(tickers), len(tickers), pct=100)
+    return sorted(tickers)
 
     # Phase 2: Apply market cap + volume + price filters
     volume_price_passed = []
