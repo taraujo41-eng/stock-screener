@@ -353,13 +353,13 @@ def bot_loop():
             candle_interval = os.getenv("CANDLE_INTERVAL_3SIGMA", "15m")
             scan_interval = int(os.getenv("SCAN_INTERVAL_3SIGMA", "60"))
             
-            # For 3-Sigma Daily Close + 15m strategy, force candle_interval to 15m
-            candle_interval = "15m"
+            # For 3-Sigma scanner, force candle_interval to 1d (daily candles)
+            candle_interval = "1d"
             
             # 2. Pre-calculate daily bands
             precalculate_daily_bands(tickers)
             
-            logger.info(f"Scanning {len(tickers)} tickers in parallel (15m regular market hours)...")
+            logger.info(f"Scanning {len(tickers)} tickers in parallel (Daily candles)...")
             
             # 3. Download and compute 15m in parallel
             results = fetch_batch_concurrent(
