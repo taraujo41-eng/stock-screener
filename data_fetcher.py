@@ -71,63 +71,63 @@ def get_unofficial_client():
         
         # 1. Try to load cached token from environment variables or default token
         if env_access_token:
+            try:
+                wb._access_token = env_access_token
+                wb._did = env_did
+                wb._refresh_token = (os.getenv("WEBULL_REFRESH_TOKEN") or "dummy_refresh_token_bypassed").strip()
+                
                 try:
-                    wb._access_token = env_access_token
-                    wb._did = env_did
-                    wb._refresh_token = (os.getenv("WEBULL_REFRESH_TOKEN") or "dummy_refresh_token_bypassed").strip()
-                    
+                    did_bin_file = os.path.join(token_path, "did.bin")
+                    if not os.path.exists(did_bin_file):
+                        with open(did_bin_file, "wb") as f:
+                            pickle.dump(env_did, f)
+                except Exception:
+                    pass
+                
+                wb._account_id = None
+                print("[Webull Unofficial] Successfully authenticated using Environment Variables.")
+                _unofficial_client = wb
+                _unofficial_initialized = True
+                return _unofficial_client
+            except Exception as e:
+                print(f"[Webull Unofficial] Environment token load failed: {e}")
+        
+        # 2. Try to load cached token from local credentials file
+        if os.path.exists(credentials_file):
+            try:
+                with open(credentials_file, "rb") as f:
+                    token_data = pickle.load(f)
+                
+                wb._access_token = token_data.get("accessToken")
+                wb._refresh_token = token_data.get("refreshToken")
+                wb._token_expire = token_data.get("tokenExpireTime")
+                wb._uuid = token_data.get("uuid")
+                
+                did_bin_file = os.path.join(token_path, "did.bin")
+                if os.path.exists(did_bin_file):
                     try:
-                        did_bin_file = os.path.join(token_path, "did.bin")
-                        if not os.path.exists(did_bin_file):
-                            with open(did_bin_file, "wb") as f:
-                                pickle.dump(env_did, f)
+                        with open(did_bin_file, "rb") as f:
+                            wb._did = pickle.load(f)
                     except Exception:
                         pass
-                    
-                    wb._account_id = None
-                    print("[Webull Unofficial] Successfully authenticated using Environment Variables.")
+                
+                if wb._access_token:
+                    wb._account_id = token_data.get("account_id")
+                    print("[Webull Unofficial] Successfully loaded cached credentials.")
                     _unofficial_client = wb
                     _unofficial_initialized = True
                     return _unofficial_client
-                except Exception as e:
-                    print(f"[Webull Unofficial] Environment token load failed: {e}")
-            
-            # 2. Try to load cached token from local credentials file
-            if os.path.exists(credentials_file):
-                try:
-                    with open(credentials_file, "rb") as f:
-                        token_data = pickle.load(f)
-                    
-                    wb._access_token = token_data.get("accessToken")
-                    wb._refresh_token = token_data.get("refreshToken")
-                    wb._token_expire = token_data.get("tokenExpireTime")
-                    wb._uuid = token_data.get("uuid")
-                    
-                    did_bin_file = os.path.join(token_path, "did.bin")
-                    if os.path.exists(did_bin_file):
-                        try:
-                            with open(did_bin_file, "rb") as f:
-                                wb._did = pickle.load(f)
-                        except Exception:
-                            pass
-                    
-                    if wb._access_token:
-                        wb._account_id = token_data.get("account_id")
-                        print("[Webull Unofficial] Successfully loaded cached credentials.")
-                        _unofficial_client = wb
-                        _unofficial_initialized = True
-                        return _unofficial_client
-                except Exception as e:
-                    print(f"[Webull Unofficial] Cached token load failed: {e}")
-            
-            # 3. Perform Login if cached token fails/does not exist
-            import sys
-            is_interactive = sys.stdin and sys.stdin.isatty()
-            if not is_interactive:
-                print("[Webull Unofficial] Skipping fresh login in non-interactive environment to prevent hanging.")
-                _unofficial_client = None
-                _unofficial_initialized = True
-                return None
+            except Exception as e:
+                print(f"[Webull Unofficial] Cached token load failed: {e}")
+        
+        # 3. Perform Login if cached token fails/does not exist
+        import sys
+        is_interactive = sys.stdin and sys.stdin.isatty()
+        if not is_interactive:
+            print("[Webull Unofficial] Skipping fresh login in non-interactive environment to prevent hanging.")
+            _unofficial_client = None
+            _unofficial_initialized = True
+            return None
 
             print(f"[Webull Unofficial] Logging in as '{email}'...")
             res = wb.login(email, password, save_token=True, token_path=token_path)
