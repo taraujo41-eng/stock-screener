@@ -121,45 +121,29 @@ def get_unofficial_client():
                 print(f"[Webull Unofficial] Cached token load failed: {e}")
         
         # 3. Perform Login if cached token fails/does not exist
+        email = os.getenv("WEBULL_EMAIL")
+        password = os.getenv("WEBULL_PASSWORD")
+        trade_pin = os.getenv("WEBULL_TRADE_PIN")
         import sys
         is_interactive = sys.stdin and sys.stdin.isatty()
-        if not is_interactive:
-            print("[Webull Unofficial] Skipping fresh login in non-interactive environment to prevent hanging.")
+        if not is_interactive or not (email and password):
+            print("[Webull Unofficial] Skipping fresh login in non-interactive environment.")
             _unofficial_client = None
             _unofficial_initialized = True
             return None
 
-            print(f"[Webull Unofficial] Logging in as '{email}'...")
-            res = wb.login(email, password, save_token=True, token_path=token_path)
-            
-            if 'accessToken' in res:
-                wb._account_id = wb.get_account_id()
-                print("[Webull Unofficial] Login successful!")
-                
-                try:
-                    res['account_id'] = wb._account_id
-                    wb._save_token(res, token_path)
-                except Exception:
-                    pass
-                
-                if trade_pin:
-                    try:
-                        wb.get_trade_token(trade_pin)
-                        print("[Webull Unofficial] Trade token verified.")
-                    except Exception as e:
-                        print(f"[Webull Unofficial] Trade PIN verification error: {e}")
-                        
-                _unofficial_client = wb
-            else:
-                print(f"[Webull Unofficial] Login failed: {res}")
-                _unofficial_client = None
-                
-        except Exception as e:
-            print(f"[Webull Unofficial] Login exception: {e}")
+        print(f"[Webull Unofficial] Logging in as '{email}'...")
+        res = wb.login(email, password, save_token=True, token_path=token_path)
+        if 'accessToken' in res:
+            print("[Webull Unofficial] Login successful!")
+            _unofficial_client = wb
+        else:
+            print(f"[Webull Unofficial] Login failed: {res}")
             _unofficial_client = None
-    else:
+    except Exception as e:
+        print(f"[Webull Unofficial] Initialization error: {e}")
         _unofficial_client = None
-        
+
     _unofficial_initialized = True
     return _unofficial_client
 
