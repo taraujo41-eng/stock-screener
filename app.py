@@ -424,18 +424,6 @@ def check_imports():
     except Exception as e:
         res["curl_cffi_ok"] = False
         res["curl_cffi_error"] = str(e)
-    try:
-        import yfinance as yf
-        res["yfinance_ok"] = True
-        res["yfinance_version"] = getattr(yf, "__version__", "unknown")
-    except Exception as e:
-        res["yfinance_ok"] = False
-        res["yfinance_error"] = str(e)
-    try:
-        from data_fetcher import _fetch_yahoo_direct_one
-        res["direct_fetch_doc"] = _fetch_yahoo_direct_one.__doc__
-    except Exception as e:
-        res["direct_fetch_doc"] = f"Error: {e}"
     return jsonify(res)
 
 
@@ -450,7 +438,7 @@ def debug_scan():
             get_us_tickers, prefilter_liquid_optionable,
             _analyze_3sigma_setup, check_spy_regime
         )
-        from data_fetcher import _fetch_yahoo_batch
+        from data_fetcher import fetch_batch_concurrent
         steps["step1_imports"] = "ok"
 
         steps["step2_tickers"] = "starting"
@@ -461,9 +449,9 @@ def debug_scan():
         test_tickers = all_tickers[:5]
         steps["step3_test_tickers"] = test_tickers
 
-        steps["step4_yahoo_batch"] = "starting"
-        daily_data = _fetch_yahoo_batch(test_tickers, days=180, interval="1d")
-        steps["step4_yahoo_batch"] = f"ok ({len(daily_data)} fetched)"
+        steps["step4_webull_batch"] = "starting"
+        daily_data = fetch_batch_concurrent(test_tickers, days=180, interval="1d")
+        steps["step4_webull_batch"] = f"ok ({len(daily_data)} fetched)"
 
         steps["step5_regime"] = "starting"
         is_bullish = check_spy_regime()
@@ -520,37 +508,6 @@ def test_options_api():
         
         logs.append(f"Starting test for {ticker} | Type: {signal_type} | Price: {price}")
         
-        # Test Yahoo Session directly
-        logs.append("Testing Yahoo Finance cookie/crumb setup directly on server...")
-        try:
-            import requests
-            test_sess = requests.Session()
-            test_sess.headers.update({
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                ),
-            })
-            
-            # Step 1: fc.yahoo.com
-            try:
-                r1 = test_sess.get("https://fc.yahoo.com", timeout=3)
-                logs.append(f"  fc.yahoo.com returned status: {r1.status_code}")
-                logs.append(f"  fc.yahoo.com cookies: {test_sess.cookies.get_dict()}")
-            except Exception as e1:
-                logs.append(f"  fc.yahoo.com failed: {e1}")
-                
-            # Step 2: getcrumb
-            try:
-                r2 = test_sess.get("https://query2.finance.yahoo.com/v1/test/getcrumb", timeout=3)
-                logs.append(f"  getcrumb returned status: {r2.status_code}")
-                logs.append(f"  getcrumb text: {r2.text.strip()}")
-            except Exception as e2:
-                logs.append(f"  getcrumb failed: {e2}")
-        except Exception as e:
-            logs.append(f"Yahoo diagnostic block failed: {e}")
-        
         # 1. Fetch options chain
         try:
             chain_meta = fetch_options_chain(ticker)
@@ -597,34 +554,8 @@ def test_options_api():
                         has_data = True
                         break
                         
-            if not chain or not has_data:
-                logs.append("Webull chain empty/missing. Falling back to Yahoo Finance...")
-                try:
-                    from data_fetcher import _fetch_yahoo_options_chain, _fetch_yahoo_options_for_expiration
-                    if "yahoo_meta" not in chain_meta:
-                        logs.append("Fetching Yahoo options chain meta...")
-                        chain_meta["yahoo_meta"] = _fetch_yahoo_options_chain(ticker)
-                        logs.append(f"Yahoo options chain meta keys: {list(chain_meta['yahoo_meta'].keys()) if chain_meta['yahoo_meta'] else 'None'}")
-                        
-                    yahoo_meta = chain_meta.get("yahoo_meta")
-                    if yahoo_meta:
-                        closest_yahoo_exp = None
-                        min_diff = 999999
-                        for y_exp in yahoo_meta.get("expirations", []):
-                            diff = abs(y_exp - exp_ts)
-                            if diff < min_diff:
-                                min_diff = diff
-                                closest_yahoo_exp = y_exp
-                        logs.append(f"Closest Yahoo exp: {datetime.fromtimestamp(closest_yahoo_exp).strftime('%Y-%m-%d') if closest_yahoo_exp else 'None'} | diff: {min_diff}")
-                        if closest_yahoo_exp and min_diff < 86400 * 4:
-                            logs.append("Fetching Yahoo options for expiration...")
-                            chain = _fetch_yahoo_options_for_expiration(ticker, closest_yahoo_exp)
-                            logs.append(f"Yahoo options fetched: {'dict' if isinstance(chain, dict) else 'None'}")
-                except Exception as ye:
-                    logs.append(f"Yahoo fallback failed: {ye}")
-                    
             if not chain:
-                logs.append("No chain data found (even from Yahoo)")
+                logs.append("No chain data found on Webull")
                 continue
                 
             contracts = chain.get("calls" if signal_type == "bullish" else "puts", [])

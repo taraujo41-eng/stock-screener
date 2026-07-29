@@ -40,15 +40,11 @@ _webull_unofficial_failures = 0
 _webull_openapi_failures = 0
 _WEBULL_MAX_FAILURES = 5  # After this many consecutive failures, skip for the rest of the scan
 
-_yahoo_failures = 0
-_YAHOO_MAX_FAILURES = 10  # After this many consecutive failures, skip Yahoo Finance
-
 def reset_webull_circuit_breaker():
     """Reset the circuit breaker — call at the start of each new scan."""
-    global _webull_unofficial_failures, _webull_openapi_failures, _yahoo_failures
+    global _webull_unofficial_failures, _webull_openapi_failures
     _webull_unofficial_failures = 0
     _webull_openapi_failures = 0
-    _yahoo_failures = 0
 
 
 # ── Webull Unofficial Client Loader (Option B — inherits personal subscriptions) ──
@@ -58,19 +54,9 @@ _unofficial_initialized = False
 
 def get_unofficial_client():
     """Retrieve and initialize the unofficial Webull client using account credentials."""
-    # Force Yahoo only: return None to bypass Webull client initialization
-    return None
-
     global _unofficial_client, _unofficial_initialized
     if _unofficial_initialized:
         return _unofficial_client
-
-    # On cloud servers (Render), Webull drops datacenter IP requests. Skip immediately.
-    if os.getenv("RENDER"):
-        print("[Webull Unofficial] Skipping Webull client on Render cloud to prevent datacenter IP blocks.")
-        _unofficial_client = None
-        _unofficial_initialized = True
-        return None
 
     token_path = os.path.dirname(__file__)
     credentials_file = os.path.join(token_path, "webull_credentials.json")
@@ -80,7 +66,7 @@ def get_unofficial_client():
     import sys
     if not (has_env_token or has_cached_file):
         if not (sys.stdin and sys.stdin.isatty()):
-            print("[Webull Unofficial] Skipping Webull client in non-interactive environment to prevent hangs.")
+            print("[Webull Unofficial] Skipping Webull client in non-interactive environment (no credentials found).")
             _unofficial_client = None
             _unofficial_initialized = True
             return None
@@ -97,7 +83,7 @@ def get_unofficial_client():
             token_path = os.path.dirname(__file__)
             credentials_file = os.path.join(token_path, "webull_credentials.json")
             
-            # 1. Try to load cached token from environment variables (great for cloud environments like Render!)
+            # 1. Try to load cached token from environment variables
             env_access_token = (os.getenv("WEBULL_ACCESS_TOKEN") or "").strip() or None
             env_did = (os.getenv("WEBULL_DID") or "").strip() or None
             if env_access_token and env_did:
@@ -106,7 +92,6 @@ def get_unofficial_client():
                     wb._did = env_did
                     wb._refresh_token = (os.getenv("WEBULL_REFRESH_TOKEN") or "dummy_refresh_token_bypassed").strip()
                     
-                    # Ensure we set did.bin cache if running locally
                     try:
                         did_bin_file = os.path.join(token_path, "did.bin")
                         if not os.path.exists(did_bin_file):
@@ -115,13 +100,10 @@ def get_unofficial_client():
                     except Exception:
                         pass
                     
-                    # Trust env-var tokens directly — skip is_logged_in() which fails
-                    # from cloud/datacenter IPs (Render, AWS, etc). The circuit breaker
-                    # in fetch_one will handle expired tokens gracefully.
                     try:
                         wb._account_id = wb.get_account_id()
                     except Exception:
-                        wb._account_id = None  # Non-critical; data fetching still works
+                        wb._account_id = None
                     
                     print("[Webull Unofficial] Successfully authenticated using Environment Variables.")
                     _unofficial_client = wb
@@ -130,10 +112,8 @@ def get_unofficial_client():
                 except Exception as e:
                     print(f"[Webull Unofficial] Environment token load failed: {e}")
             
-            # 2. Try to load cached token from local file (local only — not on Render/cloud
-            #    where Webull API calls fail from datacenter IPs)
-            is_cloud = bool(os.getenv("RENDER"))
-            if not is_cloud and os.path.exists(credentials_file):
+            # 2. Try to load cached token from local credentials file
+            if os.path.exists(credentials_file):
                 try:
                     with open(credentials_file, "rb") as f:
                         token_data = pickle.load(f)
@@ -143,7 +123,6 @@ def get_unofficial_client():
                     wb._token_expire = token_data.get("tokenExpireTime")
                     wb._uuid = token_data.get("uuid")
                     
-                    # Load device ID from did.bin
                     did_bin_file = os.path.join(token_path, "did.bin")
                     if os.path.exists(did_bin_file):
                         try:
@@ -152,15 +131,11 @@ def get_unofficial_client():
                         except Exception:
                             pass
                     
-                    # Trust cached tokens directly — skip is_logged_in() which
-                    # rejects expired tokens even though Webull's API still
-                    # accepts them. The circuit breaker in fetch_one will handle
-                    # truly dead tokens gracefully.
                     if wb._access_token:
                         try:
                             wb._account_id = token_data.get("account_id") or wb.get_account_id()
                         except Exception:
-                            wb._account_id = None  # Non-critical; data fetching still works
+                            wb._account_id = None
                         print("[Webull Unofficial] Successfully loaded cached credentials.")
                         _unofficial_client = wb
                         _unofficial_initialized = True
@@ -168,11 +143,11 @@ def get_unofficial_client():
                 except Exception as e:
                     print(f"[Webull Unofficial] Cached token load failed: {e}")
             
-            # 2. Perform Login if cached token fails/does not exist
+            # 3. Perform Login if cached token fails/does not exist
             import sys
-            is_interactive = sys.stdin and sys.stdin.isatty() and not os.getenv("RENDER")
+            is_interactive = sys.stdin and sys.stdin.isatty()
             if not is_interactive:
-                print("[Webull Unofficial] Skipping fresh login in non-interactive/Render environment to prevent hanging.")
+                print("[Webull Unofficial] Skipping fresh login in non-interactive environment to prevent hanging.")
                 _unofficial_client = None
                 _unofficial_initialized = True
                 return None
@@ -184,14 +159,12 @@ def get_unofficial_client():
                 wb._account_id = wb.get_account_id()
                 print("[Webull Unofficial] Login successful!")
                 
-                # Cache the account_id inside credentials file too
                 try:
                     res['account_id'] = wb._account_id
                     wb._save_token(res, token_path)
                 except Exception:
                     pass
                 
-                # If Trade PIN is provided, unlock trading token as well
                 if trade_pin:
                     try:
                         wb.get_trade_token(trade_pin)
@@ -221,9 +194,6 @@ _webull_initialized = False
 
 def get_webull_client():
     """Retrieve and initialize the Webull OpenAPI client dynamically."""
-    # Force Yahoo only: return None to bypass Webull OpenAPI client initialization
-    return None
-
     global _webull_client, _webull_initialized
     if _webull_initialized:
         return _webull_client
@@ -273,80 +243,7 @@ def get_webull_client():
     return _webull_client
 
 
-# ── Session management for Yahoo Finance Fallback ──────────────────────
 
-_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-}
-
-import threading
-
-_session = None
-_crumb = None
-_session_time = 0
-_last_force_new_time = 0
-_session_lock = threading.Lock()
-
-
-class TimeoutSession(requests.Session):
-    def request(self, *args, **kwargs):
-        if "timeout" not in kwargs or kwargs["timeout"] is None:
-            kwargs["timeout"] = 5
-        return super().request(*args, **kwargs)
-
-def _get_session(force_new=False):
-    """Create (or reuse) a session with Yahoo cookie + crumb."""
-    global _session, _crumb, _session_time, _last_force_new_time
-
-    with _session_lock:
-        # Reuse session for up to 10 minutes
-        if not force_new and _session is not None and (time.time() - _session_time) < 600:
-            return _session, _crumb
-
-        # Throttle force_new to at most once per 60 seconds
-        if force_new:
-            now = time.time()
-            if now - _last_force_new_time < 60:
-                return _session, _crumb
-            _last_force_new_time = now
-
-        _session = TimeoutSession()
-        _session.headers.update(_HEADERS)
-
-        # Step 1: Get A3 cookie from fc.yahoo.com (returns 404 but sets cookie)
-        try:
-            _session.get("https://fc.yahoo.com", timeout=3)
-        except Exception:
-            pass
-
-        # Step 2: Get crumb using the cookie
-        _crumb = None
-        try:
-            resp = _session.get(
-                "https://query2.finance.yahoo.com/v1/test/getcrumb",
-                timeout=3,
-            )
-            if resp.status_code == 200 and len(resp.text) < 50:
-                _crumb = resp.text.strip()
-        except Exception:
-            pass
-
-        _session_time = time.time()
-        return _session, _crumb
-
-
-
-def _ensure_session():
-    """Get session, retry once if crumb is missing."""
-    session, crumb = _get_session()
-    if crumb is None:
-        time.sleep(1)
-        session, crumb = _get_session(force_new=True)
-    return session, crumb
 
 
 # ── Webull OpenAPI Fetcher (Option A) ───────────────────────────────────
@@ -594,148 +491,19 @@ def _fetch_webull_unofficial_one(ticker, days=180, interval="1d", includePrePost
         return None
 
 
-# ── Yahoo Finance Fetcher ─────────────────────────────────────────────
 
-def _fetch_yahoo_direct_one(ticker, days=180, interval="1d"):
-    """Fetch Yahoo Finance chart data directly via REST API, returning a formatted DataFrame."""
-    try:
-        if days <= 7:
-            range_str = "7d"
-        elif days <= 30:
-            range_str = "1mo"
-        elif days <= 90:
-            range_str = "3mo"
-        elif days <= 180:
-            range_str = "6mo"
-        elif days <= 365:
-            range_str = "1y"
-        else:
-            range_str = "2y"
-
-        session, crumb = _ensure_session()
-        url = f"https://query2.finance.yahoo.com/v8/finance/chart/{ticker}"
-        params = {"range": range_str, "interval": interval}
-        if crumb:
-            params["crumb"] = crumb
-            
-        resp = session.get(url, params=params, timeout=5)
-        if resp.status_code != 200:
-            return None
-            
-        r = resp.json()
-        result = r.get("chart", {}).get("result", [])
-        if not result:
-            return None
-            
-        res_data = result[0]
-        timestamps = res_data.get("timestamp", [])
-        quote = res_data.get("indicators", {}).get("quote", [{}])[0]
-        
-        opens = quote.get("open", [])
-        highs = quote.get("high", [])
-        lows = quote.get("low", [])
-        closes = quote.get("close", [])
-        volumes = quote.get("volume", [])
-        
-        if not closes or not timestamps:
-            return None
-            
-        # Create DataFrame
-        df = pd.DataFrame({
-            "Open": opens,
-            "High": highs,
-            "Low": lows,
-            "Close": closes,
-            "Volume": volumes
-        }, index=pd.to_datetime(np.array(timestamps) * 1e9))
-        
-        df = df.dropna(subset=["Close"])
-        if len(df) < 5:
-            return None
-            
-        df.index.name = "Date"
-        df.index = df.index.tz_localize("UTC").tz_convert("America/New_York")
-        
-        # Format columns
-        if "Volume" in df.columns:
-            df["Volume"] = df["Volume"].fillna(0).astype(np.int64)
-            
-        # Extract meta
-        meta = res_data.get("meta", {})
-        
-        # Fallbacks for 52w info
-        high_52w = meta.get("fiftyTwoWeekHigh") or float(df["High"].max())
-        low_52w = meta.get("fiftyTwoWeekLow") or float(df["Low"].min())
-        pre_close = meta.get("chartPreviousClose") or (float(df["Close"].iloc[-2]) if len(df) > 1 else float(df["Close"].iloc[0]))
-        
-        df.attrs["fiftyTwoWeekHigh"] = high_52w
-        df.attrs["fiftyTwoWeekLow"] = low_52w
-        df.attrs["previousClose"] = pre_close
-        
-        return df
-    except Exception as e:
-        print(f"[Yahoo Direct] Error fetching {ticker}: {e}")
-        return None
-
-
-def _fetch_yahoo_one(ticker, days=180, interval="1d", includePrePost="false"):
-    """Fetch OHLCV data directly via Yahoo chart REST API (bypass yfinance)."""
-    return _fetch_yahoo_direct_one(ticker, days=days, interval=interval)
-
-
-def _fetch_yahoo_batch(tickers, days=180, interval="1d", on_progress=None, process_fn=None):
-    """
-    Download Yahoo Finance data for many tickers concurrently using direct REST API.
-    100% thread-safe and free from curl_cffi segfaults!
-    """
-    print(f"[Yahoo Direct Batch] Fetching {len(tickers)} tickers concurrently...")
-    
-    data = {}
-    completed = 0
-    total = len(tickers)
-    
-    def _fetch_one_wrapper(ticker):
-        df = _fetch_yahoo_direct_one(ticker, days=days, interval=interval)
-        return ticker, df
-
-    max_workers = 15  # Fetch 15 tickers in parallel
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(_fetch_one_wrapper, t): t for t in tickers}
-        for future in as_completed(futures):
-            completed += 1
-            ticker = futures[future]
-            try:
-                ticker, df = future.result()
-                if df is not None:
-                    if process_fn:
-                        res = process_fn(ticker, df)
-                        if res is not None:
-                            data[ticker] = res
-                    else:
-                        data[ticker] = df
-                if on_progress:
-                    on_progress(completed, total, ticker)
-            except Exception as e:
-                print(f"[Yahoo Direct Batch] Error fetching {ticker}: {e}")
-                if on_progress:
-                    on_progress(completed, total, ticker)
-                    
-    print(f"[Yahoo Direct Batch] Done: fetched {len(data)} / {total} tickers")
-    return data
 
 
 
 # ── Unified Single Ticker Fetcher (Resilient Ordering) ────────────────
 
-def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webull=True):
+# ── Unified Single Ticker Fetcher (Webull Primary) ────────────────
+
+def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webull=False):
     """
-    Fetch OHLCV data for one ticker.
-    Resilient multi-layered ordering:
+    Fetch OHLCV data for one ticker using Webull API.
     1. Try Unofficial Webull account credentials (Option B — inherits user's real-time subscriptions).
     2. Try Official Webull OpenAPI developer credentials (Option A).
-    3. Seamless, automatic fallback to Yahoo Finance chart scraping.
-    
-    Circuit breaker: after 2 consecutive Webull failures, auto-skip Webull.
     """
     global _webull_unofficial_failures, _webull_openapi_failures
 
@@ -765,71 +533,14 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webu
                 if _webull_openapi_failures >= _WEBULL_MAX_FAILURES:
                     print(f"[Circuit Breaker] Webull OpenAPI failed {_WEBULL_MAX_FAILURES}x consecutively — skipping for rest of scan")
 
-    # 3. Fallback to Yahoo Finance
-    global _yahoo_failures
-    if _yahoo_failures < _YAHOO_MAX_FAILURES:
-        df = _fetch_yahoo_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
-        if df is not None:
-            _yahoo_failures = 0
-            return df
-        else:
-            _yahoo_failures += 1
-            if _yahoo_failures >= _YAHOO_MAX_FAILURES:
-                print(f"[Circuit Breaker] Yahoo Finance failed {_YAHOO_MAX_FAILURES}x consecutively — skipping for rest of scan")
-
     return None
 
 
-
-# ── Options Chain Download (Webull Unofficial & Yahoo) ───────────────
-
-def _fetch_yahoo_options_chain(ticker):
-    """Fetch option chain metadata using Yahoo Finance fallback."""
-    global _yahoo_failures
-    try:
-        import yfinance as yf
-        from datetime import datetime
-        
-        t = yf.Ticker(ticker)
-        dates = t.options
-        if not dates:
-            return None
-            
-        expirations = []
-        for d in dates:
-            try:
-                ts = int(datetime.strptime(d, "%Y-%m-%d").timestamp())
-                expirations.append(ts)
-            except Exception:
-                pass
-                
-        underlyingPrice = None
-        try:
-            underlyingPrice = t.info.get("regularMarketPrice")
-            if underlyingPrice is None:
-                underlyingPrice = float(t.history(period="1d")["Close"].iloc[-1])
-        except Exception:
-            pass
-            
-        return {
-            "ticker": ticker,
-            "expirations": expirations,
-            "underlyingPrice": underlyingPrice,
-            "firstChain": None # Not strictly needed initially
-        }
-    except Exception as e:
-        _yahoo_failures += 1
-        if _yahoo_failures >= _YAHOO_MAX_FAILURES:
-            print(f"[Circuit Breaker] Yahoo Finance options chain failed {_YAHOO_MAX_FAILURES}x consecutively — skipping for rest of scan")
-        return None
-
-
+# ── Options Chain Download (Webull Unofficial) ───────────────
 
 def fetch_options_chain(ticker):
     """
-    Fetch options chain with dynamic inheritance of Webull subscriptions.
-    1. Try Unofficial Webull Account Client (Option B — fetches real-time options data).
-    2. Fallback to Yahoo Finance options data.
+    Fetch options chain using Webull API (Option B — fetches real-time options data).
     """
     wb_un = get_unofficial_client()
     if wb_un:
@@ -908,50 +619,11 @@ def fetch_options_chain(ticker):
         except Exception as e:
             print(f"[Webull Unofficial] Error fetching option chain for {ticker}: {e}")
             
-    # Fallback to Yahoo
-    global _yahoo_failures
-    if _yahoo_failures < _YAHOO_MAX_FAILURES:
-        res = _fetch_yahoo_options_chain(ticker)
-        if res is not None:
-            _yahoo_failures = 0
-            return res
-        else:
-            _yahoo_failures += 1
-            if _yahoo_failures >= _YAHOO_MAX_FAILURES:
-                print(f"[Circuit Breaker] Yahoo Finance failed {_YAHOO_MAX_FAILURES}x consecutively — skipping for rest of scan")
-
     return None
 
 
-
-def _fetch_yahoo_options_for_expiration(ticker, expiration_ts):
-    """Fetch the full option chain for a specific expiration date from Yahoo Finance."""
-    try:
-        import yfinance as yf
-        from datetime import datetime
-        
-        date_str = datetime.fromtimestamp(expiration_ts).strftime("%Y-%m-%d")
-        t = yf.Ticker(ticker)
-        chain = t.option_chain(date_str)
-        
-        calls = chain.calls.to_dict(orient="records")
-        puts = chain.puts.to_dict(orient="records")
-        
-        # Convert NaN to None for JSON serialization
-        import math
-        for c in calls + puts:
-            for k, v in c.items():
-                if isinstance(v, float) and math.isnan(v):
-                    c[k] = None
-                    
-        return {"calls": calls, "puts": puts}
-    except Exception as e:
-        print(f"[Yahoo Fallback] Failed to fetch options for {ticker} at {expiration_ts}: {e}")
-        return None
-
-
 def fetch_options_for_expiration(ticker, expiration_ts):
-    """Fetch options for a specific expiration timestamp from Webull or Yahoo."""
+    """Fetch options for a specific expiration timestamp from Webull."""
     wb_un = get_unofficial_client()
     if wb_un:
         try:
@@ -995,28 +667,15 @@ def fetch_options_for_expiration(ticker, expiration_ts):
             }
         except Exception as e:
             print(f"[Webull Unofficial] Error fetching options at expiration timestamp {expiration_ts}: {e}")
-            
-    # Fallback to Yahoo
-    global _yahoo_failures
-    if _yahoo_failures < _YAHOO_MAX_FAILURES:
-        res = _fetch_yahoo_options_for_expiration(ticker, expiration_ts)
-        if res is not None:
-            _yahoo_failures = 0
-            return res
-        else:
-            _yahoo_failures += 1
-            if _yahoo_failures >= _YAHOO_MAX_FAILURES:
-                print(f"[Circuit Breaker] Yahoo Finance failed {_YAHOO_MAX_FAILURES}x consecutively — skipping for rest of scan")
 
     return None
 
 
-
 # ── Batch download (sequential — for watchlists) ────────────────────
 
-def fetch_batch(tickers, days=180, delay=0.05, on_progress=None, interval="1d", includePrePost="false", skip_webull=True):
+def fetch_batch(tickers, days=180, delay=0.05, on_progress=None, interval="1d", includePrePost="false", skip_webull=False):
     """
-    Download data for a list of tickers sequentially.
+    Download data for a list of tickers sequentially via Webull.
     Returns dict of {ticker: DataFrame}.
     """
     data = {}
@@ -1040,20 +699,17 @@ def fetch_batch(tickers, days=180, delay=0.05, on_progress=None, interval="1d", 
 
 def fetch_batch_concurrent(tickers, days=180, max_workers=8,
                            on_progress=None, delay=0.05, interval="1d", includePrePost="false",
-                           process_fn=None, skip_webull=True):
+                           process_fn=None, skip_webull=False):
     """
-    Download data for many tickers using a thread pool.
-    If process_fn is provided, it processes each DataFrame on-the-fly and returns the result,
-    completely discarding the DataFrame to keep memory footprint close to zero!
+    Download data for many tickers using a thread pool via Webull API.
     """
-    # Reset circuit breaker at the start of each batch scan
     reset_webull_circuit_breaker()
 
-    # If no Webull client is available (e.g. on Render/cloud), use fast Yahoo batch download
     wb_un = None if skip_webull else get_unofficial_client()
     wb_api = None if skip_webull else get_webull_client()
     if wb_un is None and wb_api is None:
-        return _fetch_yahoo_batch(tickers, days=days, interval=interval, on_progress=on_progress, process_fn=process_fn)
+        print("[fetch_batch_concurrent] Webull API unavailable or unconfigured.")
+        return {}
 
     data = {}
     completed = 0
@@ -1097,48 +753,48 @@ def fetch_batch_concurrent(tickers, days=180, max_workers=8,
 
 def fetch_quotes_batch(tickers, max_workers=10, on_progress=None):
     """
-    Fetch quotes for many tickers from Yahoo Finance directly.
+    Fetch quotes for many tickers from Webull directly.
     """
-    print(f"[fetch_quotes_batch] Fetching {len(tickers)} quotes from Yahoo Finance...")
-    
-    chunk_size = 100
-    chunks = [tickers[i:i + chunk_size] for i in range(0, len(tickers), chunk_size)]
-    
-    session, crumb = _ensure_session()
+    print(f"[fetch_quotes_batch] Fetching {len(tickers)} quotes from Webull...")
+    wb_un = get_unofficial_client()
+    if not wb_un:
+        print("[fetch_quotes_batch] Webull client unavailable.")
+        return {}
+
     quotes = {}
-    
     completed = 0
     total = len(tickers)
-    
-    for chunk in chunks:
+
+    def _fetch_quote_one(sym):
         try:
-            symbols_str = ",".join(chunk)
-            url = "https://query2.finance.yahoo.com/v7/finance/quote"
-            params = {"symbols": symbols_str}
-            if crumb:
-                params["crumb"] = crumb
-            resp = session.get(url, params=params, timeout=5)
-            if resp.status_code == 200:
-                results = resp.json().get("quoteResponse", {}).get("result", [])
-                for r in results:
-                    sym = r.get("symbol")
-                    if sym:
-                        quotes[sym] = {
-                            "price": r.get("regularMarketPrice"),
-                            "close": r.get("regularMarketPreviousClose"),
-                            "marketCap": r.get("marketCap"),
-                            "avgVolume": r.get("averageDailyVolume3Month") or r.get("averageVolume") or r.get("averageVolume10Day"),
-                            "volume": r.get("regularMarketVolume"),
-                        }
-            completed += len(chunk)
+            q = wb_un.get_quote(stock=sym)
+            if q and isinstance(q, dict):
+                price = float(q["close"]) if q.get("close") else None
+                pre_close = float(q["preClose"]) if q.get("preClose") else None
+                mcap = float(q["marketValue"]) if q.get("marketValue") else None
+                vol = int(float(q["volume"])) if q.get("volume") else None
+                avg_vol = int(float(q["avgVol3M"])) if q.get("avgVol3M") else (int(float(q["avgVol10D"])) if q.get("avgVol10D") else None)
+                return sym, {
+                    "price": price,
+                    "close": pre_close,
+                    "marketCap": mcap,
+                    "avgVolume": avg_vol,
+                    "volume": vol,
+                }
+        except Exception:
+            pass
+        return sym, None
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_fetch_quote_one, t): t for t in tickers}
+        for future in as_completed(futures):
+            completed += 1
+            sym, q_data = future.result()
+            if q_data:
+                quotes[sym] = q_data
             if on_progress:
-                on_progress(min(completed, total), total, chunk[-1])
-        except Exception as e:
-            print(f"[fetch_quotes_batch] Error fetching chunk: {e}")
-            completed += len(chunk)
-            if on_progress:
-                on_progress(min(completed, total), total, chunk[-1])
-                
+                on_progress(completed, total, sym)
+
     return quotes
 
 
@@ -1150,7 +806,7 @@ def check_optionable_batch(tickers, max_workers=10):
     wb_un = get_unofficial_client()
     if not wb_un:
         print("  [check_optionable_batch] No Webull client — cannot check optionability")
-        return set(tickers)  # Assume all are optionable if we can't check
+        return set(tickers)
 
     optionable = set()
     consecutive_failures = 0
@@ -1206,7 +862,7 @@ def check_optionable_batch(tickers, max_workers=10):
 # ── Connectivity test ────────────────────────────────────────────────
 
 def test_connection(ticker="AAPL"):
-    """Test connection for all layers (Webull Unofficial, Webull OpenAPI, and Yahoo)."""
+    """Test connection for Webull API layers (Webull Unofficial and Webull OpenAPI)."""
     diag = {"ticker": ticker, "time": datetime.now().isoformat()}
 
     # 1. Test Webull Unofficial (Option B)
@@ -1252,33 +908,7 @@ def test_connection(ticker="AAPL"):
         diag["webull_openapi_ok"] = False
         diag["webull_openapi_error"] = "OpenAPI credentials not configured in .env"
 
-    # 3. Test Yahoo
-    try:
-        session, crumb = _ensure_session()
-        diag["yahoo_has_crumb"] = crumb is not None
-
-        # Direct HTTP test to check if Yahoo is blocking the IP
-        try:
-            url = "https://query2.finance.yahoo.com/v8/finance/chart/AAPL?range=1mo&interval=1d"
-            resp = requests.get(url, headers=_HEADERS, timeout=5)
-            diag["direct_yahoo_status"] = resp.status_code
-            diag["direct_yahoo_text"] = resp.text[:200]
-        except Exception as ey:
-            diag["direct_yahoo_error"] = str(ey)
-
-        df = _fetch_yahoo_one(ticker, days=30)
-        if df is not None:
-            diag["yahoo_ok"] = True
-            diag["yahoo_rows"] = len(df)
-            diag["yahoo_last_close"] = round(float(df["Close"].iloc[-1]), 2)
-        else:
-            diag["yahoo_ok"] = False
-            diag["yahoo_error"] = "No data returned from Yahoo"
-    except Exception as e:
-        diag["yahoo_ok"] = False
-        diag["yahoo_error"] = str(e)
-
-    diag["ok"] = diag["webull_unofficial_ok"] or diag["webull_openapi_ok"] or diag["yahoo_ok"]
+    diag["ok"] = diag["webull_unofficial_ok"] or diag["webull_openapi_ok"]
     return diag
 
 

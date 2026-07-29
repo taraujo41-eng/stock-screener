@@ -23,7 +23,7 @@ import warnings
 from data_fetcher import (
     fetch_batch, fetch_batch_concurrent, test_connection,
     fetch_options_chain, fetch_options_for_expiration, fetch_news,
-    fetch_quotes_batch, check_optionable_batch, _fetch_yahoo_batch
+    fetch_quotes_batch, check_optionable_batch
 )
 
 warnings.filterwarnings("ignore")
@@ -281,33 +281,24 @@ MIN_AVG_VOLUME = float(os.getenv("MIN_AVG_VOLUME", "1000000"))  # Minimum averag
 MIN_PRICE = float(os.getenv("MIN_PRICE", "20.0"))               # Minimum stock price ($)
 MIN_MARKET_CAP = float(os.getenv("MIN_MARKET_CAP", "10000000000"))  # Minimum market cap ($10B)
 
-def prefilter_liquid_optionable(tickers):
+def prefilter_liquid_optionable(tickers, MIN_PRICE=10.0, MIN_AVG_VOLUME=500_000):
     """
-    Pre-filter tickers to only include high-liquidity, optionable stocks.
-    Uses Webull live quote data to check:
-      1. Market cap >= $10B
-      2. Average daily volume >= 500K shares
-      3. Last price >= $20
-      4. Has an options chain (at least 1 expiration on Webull)
-    Returns the filtered (sorted) ticker list.
+    Pre-filters a large list of tickers down to liquid ones.
+    Fetches daily candles for all tickers in parallel via Webull, checking price and volume.
+    Returns sorted list of liquid tickers.
     """
-    print(f"\n{'='*60}")
-    print(f"  🔍  PRE-FILTER: Liquidity + Optionable Check")
-    print(f"{'='*60}")
-    print(f"  Input tickers: {len(tickers)}")
-    print(f"  Criteria: MktCap >= $10B | AvgVol >= {MIN_AVG_VOLUME:,} | Price >= ${MIN_PRICE:.0f} | Optionable")
-
+    print(f"  [Prefilter] Screening {len(tickers)} tickers for liquidity (Price >= ${MIN_PRICE}, AvgVol >= {MIN_AVG_VOLUME:,})...")
     start_time = time.time()
 
-    # Phase 1: Fetch live quotes using Yahoo batch download directly (Webull bypassed)
-    print("  Pre-filtering using Yahoo batch download...")
-    _update_progress("prefilter", "Pre-filter: downloading quotes via Yahoo batch...", 0, len(tickers), pct=25)
+    # Phase 1: Fetch live candles using Webull batch download
+    print("  Pre-filtering using Webull batch download...")
+    _update_progress("prefilter", "Pre-filter: downloading candles via Webull...", 0, len(tickers), pct=25)
     try:
-        def _on_yf_prefilter_progress(i, tot, sym):
+        def _on_webull_prefilter_progress(i, tot, sym):
             pct = 25 + int((i / tot) * 50) if tot else 25
-            _update_progress("prefilter", f"Pre-filter: downloading quotes ({i}/{tot})...", i, tot, ticker=sym, pct=pct)
+            _update_progress("prefilter", f"Pre-filter: downloading candles ({i}/{tot})...", i, tot, ticker=sym, pct=pct)
 
-        daily_map = _fetch_yahoo_batch(tickers, days=30, interval="1d", on_progress=_on_yf_prefilter_progress)
+        daily_map = fetch_batch_concurrent(tickers, days=30, interval="1d", on_progress=_on_webull_prefilter_progress)
         passed = []
         for sym, df in daily_map.items():
             if df is None or len(df) < 5:
@@ -318,11 +309,11 @@ def prefilter_liquid_optionable(tickers):
                 passed.append(sym)
         if passed:
             filtered = sorted(passed)
-            print(f"  ✅ Yahoo Pre-filter complete: {len(tickers)} → {len(filtered)} liquid tickers")
+            print(f"  ✅ Webull Pre-filter complete: {len(tickers)} → {len(filtered)} liquid tickers")
             _update_progress("prefilter", f"Pre-filter done: {len(filtered)} liquid tickers", len(filtered), len(filtered), pct=100)
             return filtered
     except Exception as e:
-        print(f"  Yahoo pre-filter error: {e}")
+        print(f"  Webull pre-filter error: {e}")
 
     _update_progress("prefilter", "Pre-filter fallback: using full universe", len(tickers), len(tickers), pct=100)
     return sorted(tickers)
@@ -443,41 +434,28 @@ def check_spy_regime():
 
 def fetch_upcoming_earnings(tickers):
     """
-    Fetch upcoming earnings timestamps for a list of tickers.
+    Fetch upcoming earnings timestamps for a list of tickers via Webull API.
     Returns a dict of {ticker: (start_timestamp, end_timestamp)}.
     """
     try:
-        import data_fetcher
-        if data_fetcher._yahoo_failures >= data_fetcher._YAHOO_MAX_FAILURES:
+        from data_fetcher import get_unofficial_client
+        wb_un = get_unofficial_client()
+        if not wb_un:
             return {}
-
-        from data_fetcher import _ensure_session
-        session, crumb = _ensure_session()
-        symbols_str = ",".join(tickers)
-        url = "https://query2.finance.yahoo.com/v7/finance/quote"
-        params = {"symbols": symbols_str}
-        if crumb:
-            params["crumb"] = crumb
-        resp = session.get(url, params=params, timeout=5)
-        if resp.status_code == 200:
-            data_fetcher._yahoo_failures = 0  # Reset on success
-            data = resp.json()
-            results = data.get("quoteResponse", {}).get("result", [])
-            earnings = {}
-            for r in results:
-                sym = r.get("symbol")
-                start = r.get("earningsTimestampStart") or r.get("earningsTimestamp")
-                end = r.get("earningsTimestampEnd") or r.get("earningsTimestamp")
-                if sym and (start or end):
-                    earnings[sym] = (start, end)
-            return earnings
-        else:
-            data_fetcher._yahoo_failures += 1
+        earnings = {}
+        for sym in tickers:
+            try:
+                q = wb_un.get_quote(stock=sym)
+                if q and isinstance(q, dict):
+                    earning_ts = q.get("nextEarningDay") or q.get("estimateEarningsDate")
+                    if earning_ts:
+                        earnings[sym] = (int(earning_ts), int(earning_ts))
+            except Exception:
+                pass
+        return earnings
     except Exception as e:
-        import data_fetcher
-        data_fetcher._yahoo_failures += 1
         print(f"  Error fetching earnings dates: {e}")
-    return {}
+        return {}
 
 
 def get_upcoming_earnings_map(tickers):
@@ -1003,24 +981,6 @@ def find_best_option(ticker, signal_type, last_price):
                     if c.get("bid") is not None or c.get("ask") is not None:
                         has_data = True
                         break
-            
-            # If empty/missing, fall back to Yahoo Finance
-            if not chain or not has_data:
-                from data_fetcher import _fetch_yahoo_options_chain, _fetch_yahoo_options_for_expiration
-                if "yahoo_meta" not in chain_meta:
-                    chain_meta["yahoo_meta"] = _fetch_yahoo_options_chain(ticker)
-                
-                yahoo_meta = chain_meta.get("yahoo_meta")
-                if yahoo_meta:
-                    closest_yahoo_exp = None
-                    min_diff = 999999
-                    for y_exp in yahoo_meta.get("expirations", []):
-                        diff = abs(y_exp - exp_ts)
-                        if diff < min_diff:
-                            min_diff = diff
-                            closest_yahoo_exp = y_exp
-                    if closest_yahoo_exp and min_diff < 86400 * 4: # within 4 days
-                        chain = _fetch_yahoo_options_for_expiration(ticker, closest_yahoo_exp)
             
             if not chain: continue
             
@@ -1847,26 +1807,6 @@ def _analyze_options_setup(sym, df, iv_history):
                         has_data = True
                         break
                         
-            if not chain or not has_data:
-                # Webull data is empty/missing pricing — fall back directly to Yahoo
-                from data_fetcher import _fetch_yahoo_options_chain, _fetch_yahoo_options_for_expiration
-                if "yahoo_meta" not in chain_meta:
-                    chain_meta["yahoo_meta"] = _fetch_yahoo_options_chain(sym)
-                    
-                yahoo_meta = chain_meta.get("yahoo_meta")
-                if yahoo_meta:
-                    # Fuzzy match the expiration timestamp (find closest Yahoo timestamp)
-                    closest_yahoo_exp = None
-                    min_diff = 999999
-                    for y_exp in yahoo_meta.get("expirations", []):
-                        diff = abs(y_exp - exp_ts)
-                        if diff < min_diff:
-                            min_diff = diff
-                            closest_yahoo_exp = y_exp
-                            
-                    if closest_yahoo_exp and min_diff < 86400 * 4: # within 4 days
-                        chain = _fetch_yahoo_options_for_expiration(sym, closest_yahoo_exp)
-                
             if not chain:
                 continue
 
@@ -2322,14 +2262,10 @@ def three_sigma_full_market_scan(extended_hours=False):
         _update_progress("downloading", f"Downloading daily candles... ({i}/{tot})", i, tot, ticker=sym, pct=pct)
 
     _update_progress("downloading", "Initiating daily candle download...", 0, total, pct=0)
-    is_cloud = bool(os.getenv("RENDER"))
-    if is_cloud:
-        daily_data = _fetch_yahoo_batch(tickers, days=180, interval="1d", on_progress=_on_daily_progress)
-    else:
-        daily_data = fetch_batch_concurrent(
-            tickers, days=45, max_workers=6,
-            on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
-        )
+    daily_data = fetch_batch_concurrent(
+        tickers, days=45, max_workers=6,
+        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
+    )
 
     for i, sym in enumerate(tickers):
         pct = 80 + int((i / total) * 20) if total else 100
@@ -2380,14 +2316,10 @@ def two_sigma_full_market_scan(extended_hours=False):
         _update_progress("downloading", f"Downloading daily candles... ({i}/{tot})", i, tot, ticker=sym, pct=pct)
 
     _update_progress("downloading", "Initiating daily candle download...", 0, total, pct=0)
-    is_cloud = bool(os.getenv("RENDER"))
-    if is_cloud:
-        daily_data = _fetch_yahoo_batch(tickers, days=180, interval="1d", on_progress=_on_daily_progress)
-    else:
-        daily_data = fetch_batch_concurrent(
-            tickers, days=45, max_workers=6,
-            on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
-        )
+    daily_data = fetch_batch_concurrent(
+        tickers, days=45, max_workers=6,
+        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
+    )
 
     for i, sym in enumerate(tickers):
         pct = 80 + int((i / total) * 20) if total else 100
@@ -2440,14 +2372,10 @@ def fifty_two_week_reversal_scan(extended_hours=False):
     _update_progress("downloading", "Initiating daily candle download...", 0, total, pct=0)
     
     # 365 days of 1d bars
-    is_cloud = bool(os.getenv("RENDER"))
-    if is_cloud:
-        daily_data = _fetch_yahoo_batch(tickers, days=365, interval="1d", on_progress=_on_daily_progress)
-    else:
-        daily_data = fetch_batch_concurrent(
-            tickers, days=365, max_workers=6,
-            on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
-        )
+    daily_data = fetch_batch_concurrent(
+        tickers, days=365, max_workers=6,
+        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
+    )
 
     # 2. Analyze daily candles for 52w high/low and RSI divergence
     for i, (sym, df_daily) in enumerate(daily_data.items()):
@@ -2682,14 +2610,10 @@ def rsi_divergence_full_market_scan(extended_hours=False):
 
     _update_progress("downloading", "Initiating daily candle download...", 0, total, pct=0)
     
-    is_cloud = bool(os.getenv("RENDER"))
-    if is_cloud:
-        daily_data = _fetch_yahoo_batch(tickers, days=365, interval="1d", on_progress=_on_daily_progress)
-    else:
-        daily_data = fetch_batch_concurrent(
-            tickers, days=365, max_workers=6,
-            on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
-        )
+    daily_data = fetch_batch_concurrent(
+        tickers, days=365, max_workers=6,
+        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
+    )
 
     # 2. Analyze daily candles for RSI divergence
     for i, (sym, df_daily) in enumerate(daily_data.items()):
@@ -2924,14 +2848,10 @@ def options_directional_exhaustion_scan():
         _update_progress("downloading", f"Downloading daily candles... ({i}/{tot})", i, tot, ticker=sym, pct=pct)
 
     _update_progress("downloading", "Initiating daily candle download...", 0, total, pct=0)
-    is_cloud = bool(os.getenv("RENDER"))
-    if is_cloud:
-        daily_data = _fetch_yahoo_batch(tickers, days=180, interval="1d", on_progress=_on_daily_progress)
-    else:
-        daily_data = fetch_batch_concurrent(
-            tickers, days=60, max_workers=6,
-            on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
-        )
+    daily_data = fetch_batch_concurrent(
+        tickers, days=60, max_workers=6,
+        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost="false"
+    )
 
     for i, sym in enumerate(tickers):
         pct = 80 + int((i / total) * 20) if total else 100
