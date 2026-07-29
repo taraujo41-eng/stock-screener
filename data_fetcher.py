@@ -55,7 +55,7 @@ _unofficial_initialized = False
 def get_unofficial_client():
     """Retrieve and initialize the unofficial Webull client using account credentials."""
     global _unofficial_client, _unofficial_initialized
-    if _unofficial_initialized:
+    if _unofficial_client is not None:
         return _unofficial_client
 
     token_path = os.path.dirname(__file__)
