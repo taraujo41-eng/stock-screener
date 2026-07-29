@@ -84,11 +84,7 @@ def get_unofficial_client():
                     except Exception:
                         pass
                     
-                    try:
-                        wb._account_id = wb.get_account_id()
-                    except Exception:
-                        wb._account_id = None
-                    
+                    wb._account_id = None
                     print("[Webull Unofficial] Successfully authenticated using Environment Variables.")
                     _unofficial_client = wb
                     _unofficial_initialized = True
@@ -116,10 +112,7 @@ def get_unofficial_client():
                             pass
                     
                     if wb._access_token:
-                        try:
-                            wb._account_id = token_data.get("account_id") or wb.get_account_id()
-                        except Exception:
-                            wb._account_id = None
+                        wb._account_id = token_data.get("account_id")
                         print("[Webull Unofficial] Successfully loaded cached credentials.")
                         _unofficial_client = wb
                         _unofficial_initialized = True
