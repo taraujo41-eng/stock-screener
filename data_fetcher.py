@@ -60,11 +60,14 @@ def get_unofficial_client():
 
     token_path = os.path.dirname(__file__)
     credentials_file = os.path.join(token_path, "webull_credentials.json")
-    has_env_token = bool(os.getenv("WEBULL_ACCESS_TOKEN") and os.getenv("WEBULL_DID"))
+    has_env_credentials = bool(
+        os.getenv("WEBULL_ACCESS_TOKEN") or 
+        (os.getenv("WEBULL_EMAIL") and os.getenv("WEBULL_EMAIL") != "your_email_here" and os.getenv("WEBULL_PASSWORD") and os.getenv("WEBULL_PASSWORD") != "your_password_here")
+    )
     has_cached_file = os.path.exists(credentials_file)
 
     import sys
-    if not (has_env_token or has_cached_file):
+    if not (has_env_credentials or has_cached_file):
         if not (sys.stdin and sys.stdin.isatty()):
             print("[Webull Unofficial] Skipping Webull client in non-interactive environment (no credentials found).")
             _unofficial_client = None
@@ -72,11 +75,10 @@ def get_unofficial_client():
             return None
         
     email = os.getenv("WEBULL_EMAIL")
-
     password = os.getenv("WEBULL_PASSWORD")
     trade_pin = os.getenv("WEBULL_TRADE_PIN")
     
-    if (email and email != "your_email_here" and password and password != "your_password_here") or os.getenv("WEBULL_ACCESS_TOKEN"):
+    if has_env_credentials or has_cached_file:
         try:
             from webull import webull
             wb = webull()
@@ -85,8 +87,8 @@ def get_unofficial_client():
             
             # 1. Try to load cached token from environment variables
             env_access_token = (os.getenv("WEBULL_ACCESS_TOKEN") or "").strip() or None
-            env_did = (os.getenv("WEBULL_DID") or "").strip() or None
-            if env_access_token and env_did:
+            env_did = (os.getenv("WEBULL_DID") or "f9s4nk68xjcslox4g2we0xu3zsxdfam0y").strip() or None
+            if env_access_token:
                 try:
                     wb._access_token = env_access_token
                     wb._did = env_did
