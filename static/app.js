@@ -739,6 +739,9 @@ function displayResults(data) {
   } else if (data.mode === "rsidiv") {
     badge.textContent = `RSI Divergence scan`;
     badge.classList.remove("hidden");
+  } else if (data.mode === "options") {
+    badge.textContent = `Options Extreme scan`;
+    badge.classList.remove("hidden");
   } else {
     badge.classList.add("hidden");
   }
@@ -840,6 +843,8 @@ function startProgressPolling() {
             targetResultsEndpoint = "/api/scan/52w/results";
           } else if (p.mode === "rsidiv") {
             targetResultsEndpoint = "/api/scan/rsidiv/results";
+          } else if (p.mode === "options") {
+            targetResultsEndpoint = "/api/scan/options/results";
           }
 
           // Only display results if user is on the tab of the finished scan
