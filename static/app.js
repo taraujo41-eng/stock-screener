@@ -381,7 +381,8 @@ function buildCard(item, index) {
     <div class="card" style="animation-delay: ${Math.min(index * 0.04, 1.2)}s">
       <div class="card__top">
         <div class="card__ticker-wrap">
-          <div class="card__ticker">${item.Ticker}</div>
+          <div class="card__ticker card__ticker--clickable" onclick="openChartModal('${item.Ticker}')" title="Click to view chart">${item.Ticker}</div>
+          <button class="btn-chart" onclick="openChartModal('${item.Ticker}')" title="Open Interactive Chart">📈 Chart</button>
           <div class="grade-badge ${gradeCls}">${grade} <span class="grade-badge__score">(${score}pts)</span></div>
         </div>
         <div class="card__price">$${item["Last Price"].toFixed(2)}</div>
@@ -553,7 +554,8 @@ function buildOptionsCard(item, index) {
     <div class="card opts-card" style="animation-delay: ${Math.min(index * 0.04, 1.2)}s">
       <div class="card__top">
         <div class="card__ticker-wrap">
-          <div class="card__ticker">${item.Ticker}</div>
+          <div class="card__ticker card__ticker--clickable" onclick="openChartModal('${item.Ticker}')" title="Click to view chart">${item.Ticker}</div>
+          <button class="btn-chart" onclick="openChartModal('${item.Ticker}')" title="Open Interactive Chart">📈 Chart</button>
           <div class="opts-dir-badge ${dirClass}">${dirIcon} ${item.Direction}</div>
           <div class="grade-badge ${gradeCls}">${catGrade} <span class="grade-badge__score">(${catScore}pts)</span></div>
         </div>
@@ -1081,4 +1083,69 @@ function openNewsModal(newsJsonEncoded) {
 function closeNewsModal() {
   document.getElementById("newsModal").classList.add("hidden");
 }
+
+// ── Interactive Chart Modal ────────────────────────────────────
+
+function openChartModal(ticker) {
+  const modal = document.getElementById("chartModal");
+  const tickerEl = document.getElementById("chartModalTicker");
+  const extLink = document.getElementById("chartExternalLink");
+  
+  if (tickerEl) tickerEl.textContent = ticker;
+  if (extLink) extLink.href = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(ticker)}`;
+  
+  if (modal) modal.classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+
+  const container = document.getElementById("tradingview_chart");
+  if (container) container.innerHTML = "";
+
+  if (typeof TradingView !== "undefined") {
+    try {
+      new TradingView.widget({
+        "autosize": true,
+        "symbol": ticker,
+        "interval": "15",
+        "timezone": "Etc/UTC",
+        "theme": "dark",
+        "style": "1",
+        "locale": "en",
+        "toolbar_bg": "#0a0e17",
+        "enable_publishing": false,
+        "allow_symbol_change": true,
+        "container_id": "tradingview_chart",
+        "studies": [
+          "STD;Bollinger_Bands",
+          "STD;RSI"
+        ]
+      });
+    } catch (err) {
+      console.warn("TradingView widget init error, using iframe fallback:", err);
+      container.innerHTML = `<iframe src="https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(ticker)}&interval=15&symboledit=1&saveimage=1&toolbarbg=0a0e17&theme=dark&style=1&timezone=Exchange&studies=%5B%22STD%3BBollinger_Bands%22%2C%22STD%3BRSI%22%5D" style="width:100%;height:100%;border:0;" allowfullscreen></iframe>`;
+    }
+  } else {
+    container.innerHTML = `<iframe src="https://s.tradingview.com/widgetembed/?symbol=${encodeURIComponent(ticker)}&interval=15&symboledit=1&saveimage=1&toolbarbg=0a0e17&theme=dark&style=1&timezone=Exchange&studies=%5B%22STD%3BBollinger_Bands%22%2C%22STD%3BRSI%22%5D" style="width:100%;height:100%;border:0;" allowfullscreen></iframe>`;
+  }
+}
+
+function closeChartModal() {
+  const modal = document.getElementById("chartModal");
+  if (modal) modal.classList.add("hidden");
+  document.body.style.overflow = "";
+  const container = document.getElementById("tradingview_chart");
+  if (container) container.innerHTML = "";
+}
+
+function handleChartModalOverlayClick(event) {
+  if (event.target.id === "chartModal") {
+    closeChartModal();
+  }
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    closeChartModal();
+    closeNewsModal();
+  }
+});
 
