@@ -7,6 +7,7 @@ let currentFilter = "all";
 let scanMode = "3sigma";
 let pollTimer = null;
 let hideTimeout = null;
+let userWatchlist = [];
 
 // ── Format helpers ─────────────────────────────────────────
 
@@ -34,6 +35,11 @@ function fmtEta(seconds) {
 function updateModeDesc() {
   const desc = document.getElementById("modeDesc");
   const subtitle = document.getElementById("headerSubtitle");
+  const editBtn = document.getElementById("editWatchlistBtn");
+  if (editBtn) {
+    if (scanMode === "watchlist") editBtn.classList.remove("hidden");
+    else editBtn.classList.add("hidden");
+  }
   if (scanMode === "3sigma") {
     desc.textContent = "Scans S&P 500, NASDAQ 100, and ETFs for 15m regular hour Close piercing Daily 3-Sigma Bollinger Bands";
     if (subtitle) subtitle.textContent = "15m Close × Daily 3-Sigma Bollinger Bands";
@@ -49,6 +55,9 @@ function updateModeDesc() {
   } else if (scanMode === "options") {
     desc.textContent = "Scans S&P 500, NASDAQ 100, and ETFs for Options Exhaustion: 3-Sigma Bands (std=3) × RSI (<30 Calls, >70 Puts)";
     if (subtitle) subtitle.textContent = "Options Directional Exhaustion Scanner";
+  } else if (scanMode === "watchlist") {
+    desc.textContent = "Scans tickers in your custom watchlist — quick & focused reversal setup scan";
+    if (subtitle) subtitle.textContent = "Custom Watchlist Reversal Scanner";
   }
 }
 
@@ -200,6 +209,35 @@ async function loadLastOptionsScan() {
   updateModeDesc();
 }
 
+async function loadLastWatchlistScan() {
+  const scanBtn = document.getElementById("scanBtn");
+  if (scanBtn) scanBtn.querySelector(".scan-btn__text").textContent = "📋  Scan Watchlist";
+  try {
+    showSkeleton();
+    const res = await fetch("/api/scan/watchlist/results");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok && data.results) {
+        displayResults(data);
+        updateModeDesc();
+        return;
+      }
+    }
+  } catch (e) {
+    console.error("No saved Watchlist scan available yet");
+  }
+
+  document.getElementById("results").innerHTML = `
+    <div class="empty-state">
+      <div class="empty-state__icon">📋</div>
+      <div class="empty-state__title">Ready to scan</div>
+      <div class="empty-state__text">Click above to scan your custom watchlist tickers for reversal setups</div>
+    </div>
+  `;
+  hideAuxUI();
+  updateModeDesc();
+}
+
 async function switchTab(mode) {
   if (scanMode === mode) return;
   scanMode = mode;
@@ -237,6 +275,10 @@ async function switchTab(mode) {
     if (btnText) btnText.textContent = "🎯  Scan Options Extreme";
     document.getElementById("tabOptions").classList.add("mode-tab--active");
     document.getElementById("extHoursWrap")?.classList.add("hidden");
+  } else if (mode === "watchlist") {
+    if (btnText) btnText.textContent = "📋  Scan Watchlist";
+    document.getElementById("tabWatchlist")?.classList.add("mode-tab--active");
+    document.getElementById("extHoursWrap")?.classList.remove("hidden");
   }
   updateModeDesc();
 
@@ -254,6 +296,8 @@ async function switchTab(mode) {
       await loadLastRsiDivScan();
     } else if (mode === "options") {
       await loadLastOptionsScan();
+    } else if (mode === "watchlist") {
+      await loadLastWatchlistScan();
     }
   }
 }
@@ -744,6 +788,9 @@ function displayResults(data) {
   } else if (data.mode === "options") {
     badge.textContent = `Options Extreme scan`;
     badge.classList.remove("hidden");
+  } else if (data.mode === "watchlist") {
+    badge.textContent = `Watchlist scan`;
+    badge.classList.remove("hidden");
   } else {
     badge.classList.add("hidden");
   }
@@ -847,6 +894,8 @@ function startProgressPolling() {
             targetResultsEndpoint = "/api/scan/rsidiv/results";
           } else if (p.mode === "options") {
             targetResultsEndpoint = "/api/scan/options/results";
+          } else if (p.mode === "watchlist") {
+            targetResultsEndpoint = "/api/scan/watchlist/results";
           }
 
           // Only display results if user is on the tab of the finished scan
@@ -942,6 +991,9 @@ async function runScan() {
   } else if (scanMode === "options") {
     endpoint = "/api/scan/options";
     resultsEndpoint = "/api/scan/options/results";
+  } else if (scanMode === "watchlist") {
+    endpoint = "/api/scan/watchlist";
+    resultsEndpoint = "/api/scan/watchlist/results";
   }
 
   // Retry logic for Render cold starts
@@ -1058,6 +1110,177 @@ checkActiveScan().then(running => {
     loadLast3SigmaScan();
   }
 });
+
+// Fetch user watchlist from server on app load
+fetchWatchlist();
+
+// ── Watchlist Manager Functions ───────────────────────────────────
+
+async function fetchWatchlist() {
+  try {
+    const res = await fetch("/api/watchlist");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.watchlist)) {
+        userWatchlist = data.watchlist;
+        localStorage.setItem("userWatchlist", JSON.stringify(userWatchlist));
+      }
+    }
+  } catch (e) {
+    console.error("Error fetching watchlist:", e);
+    const saved = localStorage.getItem("userWatchlist");
+    if (saved) {
+      try { userWatchlist = JSON.parse(saved); } catch (_) {}
+    }
+  }
+}
+
+function renderWatchlistUI() {
+  const container = document.getElementById("watchlistContainer");
+  const countEl = document.getElementById("watchlistCount");
+  if (!container) return;
+
+  if (countEl) {
+    countEl.textContent = `${userWatchlist.length} TICKER${userWatchlist.length === 1 ? '' : 'S'}`;
+  }
+
+  if (userWatchlist.length === 0) {
+    container.innerHTML = `<div class="modal__empty">No tickers in watchlist. Add one above!</div>`;
+    return;
+  }
+
+  container.innerHTML = userWatchlist.map(sym => `
+    <div class="ticker-chip">
+      <span>${sym}</span>
+      <button class="ticker-chip__remove" onclick="deleteTicker('${sym}')">&times;</button>
+    </div>
+  `).join("");
+}
+
+async function openWatchlistModal() {
+  await fetchWatchlist();
+  renderWatchlistUI();
+  const msgEl = document.getElementById("modalMsg");
+  if (msgEl) msgEl.classList.add("hidden");
+  document.getElementById("watchlistModal")?.classList.remove("hidden");
+}
+
+function closeWatchlistModal() {
+  document.getElementById("watchlistModal")?.classList.add("hidden");
+}
+
+async function addTickerFromInput() {
+  const input = document.getElementById("newTickerInput");
+  if (!input) return;
+  const raw = input.value.trim().toUpperCase();
+  if (!raw) return;
+
+  const msgEl = document.getElementById("modalMsg");
+  input.value = "";
+
+  try {
+    const res = await fetch("/api/watchlist/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker: raw })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      userWatchlist = data.watchlist;
+      localStorage.setItem("userWatchlist", JSON.stringify(userWatchlist));
+      renderWatchlistUI();
+      if (msgEl) {
+        msgEl.textContent = `Added ${raw} to watchlist`;
+        msgEl.className = "modal__msg modal__msg--success";
+        msgEl.classList.remove("hidden");
+        setTimeout(() => msgEl.classList.add("hidden"), 3000);
+      }
+    } else {
+      if (msgEl) {
+        msgEl.textContent = data.error || "Failed to add ticker";
+        msgEl.className = "modal__msg modal__msg--error";
+        msgEl.classList.remove("hidden");
+      }
+    }
+  } catch (e) {
+    if (msgEl) {
+      msgEl.textContent = "Network error adding ticker";
+      msgEl.className = "modal__msg modal__msg--error";
+      msgEl.classList.remove("hidden");
+    }
+  }
+}
+
+function handleNewTickerKey(e) {
+  if (e.key === "Enter") {
+    addTickerFromInput();
+  }
+}
+
+async function deleteTicker(sym) {
+  const msgEl = document.getElementById("modalMsg");
+  try {
+    const res = await fetch("/api/watchlist/remove", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker: sym })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      userWatchlist = data.watchlist;
+      localStorage.setItem("userWatchlist", JSON.stringify(userWatchlist));
+      renderWatchlistUI();
+    } else if (msgEl) {
+      msgEl.textContent = data.error || "Failed to remove ticker";
+      msgEl.className = "modal__msg modal__msg--error";
+      msgEl.classList.remove("hidden");
+    }
+  } catch (e) {
+    if (msgEl) {
+      msgEl.textContent = "Network error removing ticker";
+      msgEl.className = "modal__msg modal__msg--error";
+      msgEl.classList.remove("hidden");
+    }
+  }
+}
+
+async function importFromWebull() {
+  const btn = document.getElementById("importWebullBtn");
+  const msgEl = document.getElementById("modalMsg");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳ Importing from Webull...";
+  }
+  try {
+    const res = await fetch("/api/watchlist/import-webull", { method: "POST" });
+    const data = await res.json();
+    if (data.ok) {
+      userWatchlist = data.watchlist;
+      localStorage.setItem("userWatchlist", JSON.stringify(userWatchlist));
+      renderWatchlistUI();
+      if (msgEl) {
+        msgEl.textContent = `Imported ${data.added_count} new ticker(s) from Webull! (${data.total_imported} total)`;
+        msgEl.className = "modal__msg modal__msg--success";
+        msgEl.classList.remove("hidden");
+      }
+    } else if (msgEl) {
+      msgEl.textContent = data.error || "Import failed";
+      msgEl.className = "modal__msg modal__msg--error";
+      msgEl.classList.remove("hidden");
+    }
+  } catch (e) {
+    if (msgEl) {
+      msgEl.textContent = "Network error importing Webull watchlists";
+      msgEl.className = "modal__msg modal__msg--error";
+      msgEl.classList.remove("hidden");
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "📥 Import from Webull";
+    }
+  }
+}
 
 function openNewsModal(newsJsonEncoded) {
   try {

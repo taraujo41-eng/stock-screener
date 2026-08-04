@@ -35,11 +35,13 @@
       <button class="mode-tab" id="tab52w" onclick="switchTab('52w')">📈 52-Week Reversal</button>
       <button class="mode-tab" id="tabRsiDiv" onclick="switchTab('rsidiv')">📊 RSI Divergence</button>
       <button class="mode-tab" id="tabOptions" onclick="switchTab('options')">🎯 Options Extreme</button>
+      <button class="mode-tab" id="tabWatchlist" onclick="switchTab('watchlist')">📋 Watchlist</button>
     </div>
 
     <!-- Scanner description -->
     <div class="mode-info">
       <p class="mode-desc" id="modeDesc">Scans full market list for 15m Close piercing Daily 3-Sigma Bollinger Bands</p>
+      <button class="edit-link hidden" id="editWatchlistBtn" onclick="openWatchlistModal()">⚙️ Edit</button>
     </div>
 
     <!-- Extended Hours Toggle -->
@@ -154,6 +156,38 @@
     </div>
   </div>
 
-  <script src="/app.js?v=5.1"></script>
+  <!-- Watchlist Manager Modal Overlay -->
+  <div class="modal-overlay hidden" id="watchlistModal">
+    <div class="modal">
+      <div class="modal__header">
+        <span class="modal__title">📋 Edit Watchlist</span>
+        <button class="modal__close" onclick="closeWatchlistModal()">&times;</button>
+      </div>
+      
+      <div class="modal__add">
+        <input type="text" class="modal__input" id="newTickerInput" placeholder="Add Ticker (e.g. AAPL)" onkeydown="handleNewTickerKey(event)">
+        <button class="modal__add-btn" onclick="addTickerFromInput()">Add</button>
+      </div>
+      
+      <!-- Webull Import Button -->
+      <div style="padding: 0 20px 8px; display: flex; gap: 8px;">
+        <button class="modal__add-btn" style="flex: 1; background: linear-gradient(135deg, #0284c7, #0369a1); display: flex; align-items: center; justify-content: center; gap: 8px;" id="importWebullBtn" onclick="importFromWebull()">
+          📥 Import from Webull
+        </button>
+      </div>
+      
+      <div class="modal__msg hidden" id="modalMsg"></div>
+      
+      <div class="modal__count" id="watchlistCount">0 TICKERS</div>
+      
+      <div class="modal__list" id="watchlistContainer">
+        <!-- Ticker chips will be generated here -->
+      </div>
+      
+      <button class="modal__done-btn" onclick="closeWatchlistModal()">Done</button>
+    </div>
+  </div>
+
+  <script src="/app.js?v=5.2"></script>
 </body>
 </html>

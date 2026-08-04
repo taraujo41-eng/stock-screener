@@ -3030,8 +3030,110 @@ def options_directional_exhaustion_scan():
 
 
 # =====================================================================
+# Watchlist Scanners
+# =====================================================================
+
+def watchlist_scan(tickers, extended_hours=False):
+    """Scan watchlist tickers for stock reversal setups."""
+    _reset_progress()
+    scan_progress["status"] = "running"
+    start_time = time.time()
+
+    results = []
+    total = len(tickers)
+    _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
+
+    def _on_dl_progress(i, tot, sym):
+        _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=len(results))
+
+    interval = "15m" if extended_hours else "1d"
+    includePrePost = "true" if extended_hours else "false"
+    fetch_days = 14 if extended_hours else 280
+
+    stock_data = fetch_batch_concurrent(
+        tickers, days=fetch_days, max_workers=4,
+        on_progress=_on_dl_progress, delay=0.05, interval=interval, includePrePost=includePrePost
+    )
+
+    is_bullish = check_spy_regime()
+
+    for i, (sym, df) in enumerate(stock_data.items()):
+        _update_progress("analyzing", f"Analyzing {sym}...", i, len(stock_data), ticker=sym, found=len(results))
+        try:
+            if df is None or len(df) < 20:
+                continue
+            result = _analyze_stock(sym, df, is_market_bullish=is_bullish)
+            if result:
+                results.append(result)
+        except Exception as e:
+            print(f"Error analyzing {sym} in watchlist scan: {e}")
+            continue
+
+    total_time = time.time() - start_time
+    scan_progress.update({
+        "status": "done", "phase": "complete",
+        "phase_label": f"Done — {len(results)} signals found",
+        "current": total, "total": total,
+        "found": len(results), "pct": 100, "eta_seconds": 0,
+    })
+
+    print(f"[Done] Watchlist scan: {len(results)} signals in {total_time:.1f}s")
+    if not results:
+        return pd.DataFrame()
+    return pd.DataFrame(results).sort_values(by="Score", ascending=False)
+
+
+def options_watchlist_scan(tickers, extended_hours=False):
+    """Scan watchlist tickers for options setups."""
+    _reset_progress()
+    scan_progress["status"] = "running"
+    start_time = time.time()
+    iv_history = _load_iv_history()
+
+    results = []
+    total = len(tickers)
+    _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
+
+    def _on_dl_progress(i, tot, sym):
+        _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=len(results))
+
+    stock_data = fetch_batch_concurrent(
+        tickers, days=280, max_workers=4,
+        on_progress=_on_dl_progress, delay=0.05, interval="1d"
+    )
+
+    for i, (sym, df) in enumerate(stock_data.items()):
+        _update_progress("analyzing", f"Analyzing {sym} options...", i, len(stock_data), ticker=sym, found=len(results))
+        try:
+            if df is None or len(df) < 20:
+                continue
+            result = _analyze_options_setup(sym, df, iv_history)
+            if result:
+                results.append(result)
+        except Exception as e:
+            print(f"Error analyzing {sym} options in watchlist scan: {e}")
+            continue
+
+    _save_iv_history(iv_history)
+
+    total_time = time.time() - start_time
+    scan_progress.update({
+        "status": "done", "phase": "complete",
+        "phase_label": f"Done — {len(results)} options setups found",
+        "current": total, "total": total,
+        "found": len(results), "pct": 100, "eta_seconds": 0,
+    })
+
+    print(f"[Done] Options watchlist scan: {len(results)} setups in {total_time:.1f}s")
+    if not results:
+        return pd.DataFrame()
+    return pd.DataFrame(results).sort_values(by="Catalyst Score", ascending=False)
+
+
+# =====================================================================
 # CLI entry point
 # =====================================================================
+
 
 if __name__ == "__main__":
     print("=" * 60)

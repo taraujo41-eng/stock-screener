@@ -11,6 +11,8 @@ from reversal_scanner import (
     fifty_two_week_reversal_scan,
     rsi_divergence_full_market_scan,
     options_directional_exhaustion_scan,
+    watchlist_scan,
+    options_watchlist_scan,
     scan_progress, _reset_progress
 )
 from datetime import datetime, timedelta
@@ -55,6 +57,32 @@ TWO_SIGMA_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_2sigma_sc
 FIFTY_TWO_WEEK_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_52w_scan.json")
 RSIDIV_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_rsidiv_scan.json")
 OPTIONS_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_options_scan.json")
+WATCHLIST_FILE = os.path.join(os.path.dirname(__file__), "watchlist.json")
+WATCHLIST_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_watchlist_scan.json")
+OPTIONS_WATCHLIST_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_options_watchlist_scan.json")
+
+DEFAULT_WATCHLIST = ["AAPL", "MSFT", "TSLA", "AMZN", "GOOGL", "META", "NVDA", "NFLX", "AMD", "SPY", "QQQ"]
+
+def load_watchlist():
+    """Load watchlist from file, or use default."""
+    if os.path.exists(WATCHLIST_FILE):
+        try:
+            with open(WATCHLIST_FILE, "r") as f:
+                data = json.load(f)
+                return data if isinstance(data, list) else DEFAULT_WATCHLIST[:]
+        except Exception:
+            pass
+    return DEFAULT_WATCHLIST[:]
+
+def save_watchlist(tickers):
+    """Save watchlist to file."""
+    try:
+        with open(WATCHLIST_FILE, "w") as f:
+            json.dump(tickers, f, indent=2)
+    except Exception as e:
+        print(f"Failed to save watchlist to {WATCHLIST_FILE}: {e}")
+
+user_watchlist = load_watchlist()
 
 def load_last_scan(filepath=THREE_SIGMA_RESULTS_FILE):
     """Load the last scan results from file."""
@@ -395,6 +423,203 @@ def scan_rsidiv_results():
     if results is None:
         return jsonify({"ok": False, "error": "No scan results available"}), 404
     return jsonify(results)
+
+# ── API: Watchlist Scan ─────────────────────────────────────────────
+
+@app.route("/api/scan/watchlist", methods=["POST"])
+def scan_watchlist():
+    """Start a watchlist reversal scan in the background."""
+    global _scan_running
+    with _scan_lock:
+        if _scan_running:
+            return jsonify({"ok": False, "error": "A scan is already running"}), 409
+        _scan_running = True
+
+    data = request.get_json() or {}
+    extended_hours = data.get("extended_hours", False)
+
+    def _run():
+        global _scan_running
+        try:
+            et_tz = get_ny_timezone()
+            df = watchlist_scan(user_watchlist, extended_hours=extended_hours)
+            results_data = {
+                "ok": True,
+                "mode": "watchlist",
+                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
+                "count": len(df) if not df.empty else 0,
+                "results": df.to_dict(orient="records") if not df.empty else [],
+            }
+            app.config["LAST_WATCHLIST_RESULTS"] = results_data
+            save_last_scan(results_data, WATCHLIST_RESULTS_FILE)
+            scan_progress["status"] = "done"
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            app.config["LAST_WATCHLIST_RESULTS"] = {"ok": False, "error": str(e), "traceback": traceback.format_exc()}
+            scan_progress["status"] = "error"
+            scan_progress["phase_label"] = str(e)
+        finally:
+            with _scan_lock:
+                _scan_running = False
+
+    threading.Thread(target=_run, daemon=False).start()
+    return jsonify({"ok": True, "message": "Watchlist scan started"})
+
+@app.route("/api/scan/watchlist/results", methods=["GET"])
+def scan_watchlist_results():
+    results = app.config.get("LAST_WATCHLIST_RESULTS")
+    if results is None:
+        results = load_last_scan(WATCHLIST_RESULTS_FILE)
+        if results:
+            app.config["LAST_WATCHLIST_RESULTS"] = results
+    if results is None:
+        return jsonify({"ok": False, "error": "No scan results available"}), 404
+    return jsonify(results)
+
+@app.route("/api/scan/options/watchlist", methods=["POST"])
+def scan_options_watchlist():
+    """Start an options watchlist scan in the background."""
+    global _scan_running
+    with _scan_lock:
+        if _scan_running:
+            return jsonify({"ok": False, "error": "A scan is already running"}), 409
+        _scan_running = True
+
+    data = request.get_json() or {}
+    extended_hours = data.get("extended_hours", False)
+
+    def _run():
+        global _scan_running
+        try:
+            et_tz = get_ny_timezone()
+            df = options_watchlist_scan(user_watchlist, extended_hours=extended_hours)
+            results_data = {
+                "ok": True,
+                "mode": "options_watchlist",
+                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
+                "count": len(df) if not df.empty else 0,
+                "results": df.to_dict(orient="records") if not df.empty else [],
+            }
+            app.config["LAST_OPTIONS_WATCHLIST_RESULTS"] = results_data
+            save_last_scan(results_data, OPTIONS_WATCHLIST_RESULTS_FILE)
+            scan_progress["status"] = "done"
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            app.config["LAST_OPTIONS_WATCHLIST_RESULTS"] = {"ok": False, "error": str(e), "traceback": traceback.format_exc()}
+            scan_progress["status"] = "error"
+            scan_progress["phase_label"] = str(e)
+        finally:
+            with _scan_lock:
+                _scan_running = False
+
+    threading.Thread(target=_run, daemon=False).start()
+    return jsonify({"ok": True, "message": "Options watchlist scan started"})
+
+@app.route("/api/scan/options/watchlist/results", methods=["GET"])
+def scan_options_watchlist_results():
+    results = app.config.get("LAST_OPTIONS_WATCHLIST_RESULTS")
+    if results is None:
+        results = load_last_scan(OPTIONS_WATCHLIST_RESULTS_FILE)
+        if results:
+            app.config["LAST_OPTIONS_WATCHLIST_RESULTS"] = results
+    if results is None:
+        return jsonify({"ok": False, "error": "No scan results available"}), 404
+    return jsonify(results)
+
+# ── API: Watchlist CRUD ─────────────────────────────────────────────
+
+@app.route("/api/watchlist", methods=["GET"])
+def watchlist_get():
+    """Return current watchlist."""
+    return jsonify({"ok": True, "watchlist": user_watchlist})
+
+@app.route("/api/watchlist", methods=["PUT"])
+def watchlist_replace():
+    """Replace entire watchlist."""
+    global user_watchlist
+    data = request.get_json() or {}
+    tickers = data.get("watchlist", [])
+    cleaned = []
+    for t in tickers:
+        sym = t.strip().upper().replace(" ", "")
+        if sym and sym.isalpha() and 1 <= len(sym) <= 5:
+            if sym not in cleaned:
+                cleaned.append(sym)
+    user_watchlist = cleaned
+    save_watchlist(user_watchlist)
+    return jsonify({"ok": True, "watchlist": user_watchlist})
+
+@app.route("/api/watchlist/add", methods=["POST"])
+def watchlist_add():
+    """Add a ticker to the watchlist."""
+    global user_watchlist
+    data = request.get_json() or {}
+    ticker = data.get("ticker", "").strip().upper().replace(" ", "")
+    if not ticker or not ticker.isalpha() or len(ticker) > 5:
+        return jsonify({"ok": False, "error": "Invalid ticker symbol"}), 400
+    if ticker in user_watchlist:
+        return jsonify({"ok": False, "error": f"{ticker} is already in watchlist"}), 409
+    user_watchlist.append(ticker)
+    save_watchlist(user_watchlist)
+    return jsonify({"ok": True, "watchlist": user_watchlist})
+
+@app.route("/api/watchlist/remove", methods=["POST"])
+def watchlist_remove():
+    """Remove a ticker from the watchlist."""
+    global user_watchlist
+    data = request.get_json() or {}
+    ticker = data.get("ticker", "").strip().upper().replace(" ", "")
+    if ticker in user_watchlist:
+        user_watchlist.remove(ticker)
+        save_watchlist(user_watchlist)
+    return jsonify({"ok": True, "watchlist": user_watchlist})
+
+@app.route("/api/watchlist/import-webull", methods=["POST"])
+def watchlist_import_webull():
+    """Import all watchlists from Webull account credentials."""
+    global user_watchlist
+    try:
+        from data_fetcher import get_unofficial_client
+        wb = get_unofficial_client()
+        if not wb:
+            return jsonify({"ok": False, "error": "Webull client authentication failed. Check credentials in .env"}), 400
+        
+        watchlists = wb.get_watchlists()
+        if not watchlists:
+            return jsonify({"ok": False, "error": "No watchlists found on Webull account"}), 400
+        
+        imported = set()
+        if isinstance(watchlists, list):
+            for wl in watchlists:
+                ticker_list = wl.get("tickerList", [])
+                for tick in ticker_list:
+                    sym = tick.get("symbol")
+                    if sym:
+                        sym_clean = sym.strip().upper().replace(" ", "")
+                        if sym_clean and sym_clean.isalpha() and 1 <= len(sym_clean) <= 5:
+                            imported.add(sym_clean)
+        
+        added_count = 0
+        for sym in sorted(imported):
+            if sym not in user_watchlist:
+                user_watchlist.append(sym)
+                added_count += 1
+        
+        if added_count > 0:
+            save_watchlist(user_watchlist)
+            
+        return jsonify({
+            "ok": True,
+            "watchlist": user_watchlist,
+            "added_count": added_count,
+            "total_imported": len(imported)
+        })
+    except Exception as e:
+        print(f"Error importing Webull watchlists: {e}")
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 # ── API: Reset Stuck Scan State ─────────────────────────────────────
 
