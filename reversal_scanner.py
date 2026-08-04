@@ -199,9 +199,13 @@ MIN_MARKET_CAP = float(os.getenv("MIN_MARKET_CAP", "10000000000"))  # Minimum ma
 def prefilter_liquid_optionable(tickers, MIN_PRICE=10.0, MIN_AVG_VOLUME=500_000):
     """
     Pre-filters a large list of tickers down to liquid ones.
-    Fetches quotes for all tickers in parallel via Webull, checking price and volume.
-    Returns sorted list of liquid tickers.
+    For watchlist scans (<= 200 tickers), returns the full list immediately.
     """
+    if not tickers:
+        return []
+    if len(tickers) <= 200:
+        return sorted(tickers)
+
     print(f"  [Prefilter] Screening {len(tickers)} tickers for liquidity (Price >= ${MIN_PRICE}, AvgVol >= {MIN_AVG_VOLUME:,})...")
     start_time = time.time()
 
