@@ -2199,7 +2199,7 @@ def three_sigma_full_market_scan(extended_hours=False):
 
     total_time = time.time() - start_time
     scan_progress.update({
-        "status": "running", "phase": "complete",
+        "status": "done", "phase": "complete",
         "phase_label": f"Done — {len(results)} 3-sigma signals found",
         "current": total, "total": total,
         "found": len(results), "pct": 100, "eta_seconds": 0,
@@ -2253,7 +2253,7 @@ def two_sigma_full_market_scan(extended_hours=False):
 
     total_time = time.time() - start_time
     scan_progress.update({
-        "status": "running", "phase": "complete",
+        "status": "done", "phase": "complete",
         "phase_label": f"Done — {len(results)} 2-sigma signals found",
         "current": total, "total": total,
         "found": len(results), "pct": 100, "eta_seconds": 0,
@@ -2489,7 +2489,7 @@ def fifty_two_week_reversal_scan(extended_hours=False):
 
     total_time = time.time() - start_time
     scan_progress.update({
-        "status": "running", "phase": "complete",
+        "status": "done", "phase": "complete",
         "phase_label": f"Done — {len(results)} 52w reversals found",
         "current": total, "total": total,
         "found": len(results), "pct": 100, "eta_seconds": 0,
@@ -2723,7 +2723,7 @@ def rsi_divergence_full_market_scan(extended_hours=False):
 
     total_time = time.time() - start_time
     scan_progress.update({
-        "status": "running", "phase": "complete",
+        "status": "done", "phase": "complete",
         "phase_label": f"Done — {len(results)} RSI divergence signals found",
         "current": total, "total": total,
         "found": len(results), "pct": 100, "eta_seconds": 0,
@@ -2930,7 +2930,7 @@ def options_directional_exhaustion_scan():
 
     total_time = time.time() - start_time
     scan_progress.update({
-        "status": "running", "phase": "complete",
+        "status": "done", "phase": "complete",
         "phase_label": f"Done — {len(results)} Options signals found",
         "current": total, "total": total,
         "found": len(results), "pct": 100, "eta_seconds": 0,
