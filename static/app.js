@@ -41,22 +41,22 @@ function updateModeDesc() {
     else editBtn.classList.add("hidden");
   }
   if (scanMode === "3sigma") {
-    desc.textContent = "Scans S&P 500, NASDAQ 100, and ETFs for 15m regular hour Close piercing Daily 3-Sigma Bollinger Bands";
+    desc.textContent = "Scans your watchlist tickers for 15m regular hour Close piercing Daily 3-Sigma Bollinger Bands";
     if (subtitle) subtitle.textContent = "15m Close × Daily 3-Sigma Bollinger Bands";
   } else if (scanMode === "2sigma") {
-    desc.textContent = "Scans S&P 500, NASDAQ 100, and ETFs for 15m regular hour Close piercing Daily 2-Sigma Bollinger Bands";
+    desc.textContent = "Scans your watchlist tickers for 15m regular hour Close piercing Daily 2-Sigma Bollinger Bands";
     if (subtitle) subtitle.textContent = "15m Close × Daily 2-Sigma Bollinger Bands";
   } else if (scanMode === "52w") {
-    desc.textContent = "Scans S&P 500, NASDAQ 100, and ETFs for daily RSI divergence at 52-week Highs and Lows";
+    desc.textContent = "Scans your watchlist tickers for daily RSI divergence at 52-week Highs and Lows";
     if (subtitle) subtitle.textContent = "Daily 52-Week High/Low × RSI Divergence";
   } else if (scanMode === "rsidiv") {
-    desc.textContent = "Scans S&P 500, NASDAQ 100, and ETFs for daily RSI divergence (bullish or bearish)";
+    desc.textContent = "Scans your watchlist tickers for daily RSI divergence (bullish or bearish)";
     if (subtitle) subtitle.textContent = "Daily RSI Divergence Scanner";
   } else if (scanMode === "options") {
-    desc.textContent = "Scans S&P 500, NASDAQ 100, and ETFs for Options Exhaustion: 3-Sigma Bands (std=3) × RSI (<30 Calls, >70 Puts)";
+    desc.textContent = "Scans your watchlist tickers for Options Exhaustion: 3-Sigma Bands (std=3) × RSI (<30 Calls, >70 Puts)";
     if (subtitle) subtitle.textContent = "Options Directional Exhaustion Scanner";
   } else if (scanMode === "watchlist") {
-    desc.textContent = "Scans tickers in your custom watchlist — quick & focused reversal setup scan";
+    desc.textContent = "Scans your custom watchlist tickers for reversal setups";
     if (subtitle) subtitle.textContent = "Custom Watchlist Reversal Scanner";
   }
 }
