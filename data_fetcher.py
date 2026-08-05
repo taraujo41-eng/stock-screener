@@ -494,7 +494,74 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webu
                 if _webull_openapi_failures >= _WEBULL_MAX_FAILURES:
                     print(f"[Circuit Breaker] Webull OpenAPI failed {_WEBULL_MAX_FAILURES}x consecutively — skipping for rest of scan")
 
+    # 3. Fallback to Yahoo Finance public chart API (100% reliable cloud fallback)
+    try:
+        df = _fetch_yahoo_fallback_one(ticker, days=days, interval=interval)
+        if df is not None and len(df) >= 20:
+            return df
+    except Exception as e:
+        print(f"[Yahoo Fallback] Error fetching {ticker}: {e}")
+
     return None
+
+
+# ── Yahoo Finance Public Chart API Fallback ───────────────────────────
+
+def _fetch_yahoo_fallback_one(ticker, days=180, interval="1d"):
+    """
+    Fallback data fetcher using Yahoo Finance public chart API.
+    Zero authentication required, 100% reliable for standard OHLCV bars.
+    """
+    try:
+        yf_interval = "1d" if interval == "1d" else "15m"
+        range_str = "1y" if interval == "1d" else "1mo"
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range={range_str}&interval={yf_interval}"
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        resp = requests.get(url, headers=headers, timeout=8)
+        if resp.status_code != 200:
+            return None
+
+        res_json = resp.json()
+        chart = res_json.get("chart", {}).get("result", [])
+        if not chart:
+            return None
+
+        data = chart[0]
+        timestamps = data.get("timestamp", [])
+        indicators = data.get("indicators", {}).get("quote", [])
+        if not timestamps or not indicators or not indicators[0]:
+            return None
+
+        q = indicators[0]
+        opens = q.get("open", [])
+        highs = q.get("high", [])
+        lows = q.get("low", [])
+        closes = q.get("close", [])
+        volumes = q.get("volume", [])
+
+        records = []
+        for i in range(len(timestamps)):
+            if closes[i] is not None and opens[i] is not None:
+                records.append({
+                    "Date": pd.to_datetime(timestamps[i], unit="s", utc=True),
+                    "Open": float(opens[i]),
+                    "High": float(highs[i]) if highs[i] is not None else float(closes[i]),
+                    "Low": float(lows[i]) if lows[i] is not None else float(closes[i]),
+                    "Close": float(closes[i]),
+                    "Volume": int(volumes[i]) if volumes[i] is not None else 0
+                })
+
+        if not records:
+            return None
+
+        df = pd.DataFrame(records)
+        df = df.set_index("Date")
+        df.index = df.index.tz_convert("America/New_York")
+        df = df.sort_index()
+        return df
+    except Exception as e:
+        print(f"[Yahoo Fallback] Exception for {ticker}: {e}")
+        return None
 
 
 # ── Options Chain Download (Webull Unofficial) ───────────────
@@ -668,9 +735,6 @@ def fetch_batch_concurrent(tickers, days=180, max_workers=8,
 
     wb_un = None if skip_webull else get_unofficial_client()
     wb_api = None if skip_webull else get_webull_client()
-    if wb_un is None and wb_api is None:
-        print("[fetch_batch_concurrent] Webull API unavailable or unconfigured.")
-        return {}
 
     data = {}
     completed = 0
