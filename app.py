@@ -500,6 +500,28 @@ def scan_watchlist_sync():
             "traceback": traceback.format_exc()
         }), 500
 
+@app.route("/api/debug-watchlist-scan", methods=["GET"])
+def debug_watchlist_scan():
+    """Diagnostic route: run watchlist scan synchronously and return raw output or exception trace."""
+    try:
+        current_watchlist = load_watchlist()
+        df = watchlist_scan(current_watchlist[:10], extended_hours=False)
+        raw_records = df.to_dict(orient="records") if not df.empty else []
+        clean_records = sanitize_for_json(raw_records)
+        return jsonify({
+            "ok": True,
+            "tickers_count": len(current_watchlist[:10]),
+            "signals_count": len(clean_records),
+            "results": clean_records
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({
+            "ok": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+
 @app.route("/api/scan/watchlist/results", methods=["GET"])
 def scan_watchlist_results():
     results = app.config.get("LAST_WATCHLIST_RESULTS")
