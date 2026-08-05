@@ -565,11 +565,12 @@ def debug_files():
 @app.route("/api/scan/watchlist/results", methods=["GET"])
 def scan_watchlist_results():
     results = app.config.get("LAST_WATCHLIST_RESULTS")
-    if results is None:
-        results = load_last_scan(WATCHLIST_RESULTS_FILE)
-        if results:
+    if not results or not isinstance(results, dict) or not results.get("ok"):
+        disk_results = load_last_scan(WATCHLIST_RESULTS_FILE)
+        if disk_results and disk_results.get("ok"):
+            results = disk_results
             app.config["LAST_WATCHLIST_RESULTS"] = results
-    if results is None:
+    if not results or not isinstance(results, dict) or not results.get("ok"):
         return jsonify({"ok": False, "error": "No scan results available"}), 404
     return jsonify(results)
 
