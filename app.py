@@ -91,9 +91,28 @@ def load_last_scan(filepath=THREE_SIGMA_RESULTS_FILE):
             pass
     return None
 
+def sanitize_for_json(obj):
+    """Recursively convert timestamps, numpy types, and non-serializable objects for JSON."""
+    if isinstance(obj, (datetime, pd.Timestamp)):
+        return obj.isoformat()
+    elif isinstance(obj, (np.integer, np.int64, np.int32)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float64, np.float32)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {str(k): sanitize_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [sanitize_for_json(x) for x in obj]
+    elif pd.isna(obj):
+        return None
+    return obj
+
 def save_last_scan(data, filepath=THREE_SIGMA_RESULTS_FILE):
     """Save the scan results to file for persistence."""
     try:
+        data = sanitize_for_json(data)
         with open(filepath, "w") as f:
             json.dump(data, f, indent=2)
     except Exception as e:
@@ -434,12 +453,14 @@ def scan_watchlist():
             et_tz = get_ny_timezone()
             current_watchlist = load_watchlist()
             df = watchlist_scan(current_watchlist, extended_hours=extended_hours)
+            raw_records = df.to_dict(orient="records") if not df.empty else []
+            clean_records = sanitize_for_json(raw_records)
             results_data = {
                 "ok": True,
                 "mode": "watchlist",
                 "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
-                "count": len(df) if not df.empty else 0,
-                "results": df.to_dict(orient="records") if not df.empty else [],
+                "count": len(clean_records),
+                "results": clean_records,
             }
             app.config["LAST_WATCHLIST_RESULTS"] = results_data
             save_last_scan(results_data, WATCHLIST_RESULTS_FILE)
