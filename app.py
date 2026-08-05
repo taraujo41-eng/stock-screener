@@ -83,12 +83,14 @@ user_watchlist = load_watchlist()
 
 def load_last_scan(filepath=THREE_SIGMA_RESULTS_FILE):
     """Load the last scan results from file."""
-    if os.path.exists(filepath):
-        try:
-            with open(filepath, "r") as f:
-                return json.load(f)
-        except:
-            pass
+    paths_to_check = [filepath, os.path.join("/tmp", os.path.basename(filepath))]
+    for p in paths_to_check:
+        if os.path.exists(p):
+            try:
+                with open(p, "r") as f:
+                    return json.load(f)
+            except Exception:
+                pass
     return None
 
 def sanitize_for_json(obj):
@@ -111,12 +113,14 @@ def sanitize_for_json(obj):
 
 def save_last_scan(data, filepath=THREE_SIGMA_RESULTS_FILE):
     """Save the scan results to file for persistence."""
-    try:
-        data = sanitize_for_json(data)
-        with open(filepath, "w") as f:
-            json.dump(data, f, indent=2)
-    except Exception as e:
-        print(f"Failed to save scan results to {filepath}: {e}")
+    data = sanitize_for_json(data)
+    paths_to_save = [filepath, os.path.join("/tmp", os.path.basename(filepath))]
+    for p in paths_to_save:
+        try:
+            with open(p, "w") as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            print(f"Failed to save scan results to {p}: {e}")
 
 # Track whether a full scan is in progress
 _scan_lock = threading.Lock()
