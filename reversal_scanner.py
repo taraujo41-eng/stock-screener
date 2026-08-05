@@ -3068,7 +3068,9 @@ def watchlist_scan(tickers, extended_hours=False):
         def _parse_signals(s):
             if not s or s == "—":
                 return []
-            inner = s.strip().lstrip("[").rstrip("]")
+            if isinstance(s, list):
+                return [str(x).strip() for x in s if str(x).strip()]
+            inner = str(s).strip().lstrip("[").rstrip("]")
             return [x.strip() for x in inner.split("|") if x.strip()]
 
         def _merge_signal_str(existing, new_signals_str, prefix=""):
