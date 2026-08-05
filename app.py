@@ -83,14 +83,24 @@ user_watchlist = load_watchlist()
 
 def load_last_scan(filepath=THREE_SIGMA_RESULTS_FILE):
     """Load the last scan results from file."""
-    paths_to_check = [filepath, os.path.join("/tmp", os.path.basename(filepath))]
+    if not filepath:
+        return None
+    filename = os.path.basename(filepath)
+    paths_to_check = [
+        filepath,
+        os.path.join(os.path.dirname(__file__), filename),
+        os.path.join(os.getcwd(), filename),
+        os.path.join("/tmp", filename)
+    ]
     for p in paths_to_check:
         if os.path.exists(p):
             try:
                 with open(p, "r") as f:
-                    return json.load(f)
-            except Exception:
-                pass
+                    data = json.load(f)
+                    if data and isinstance(data, dict):
+                        return data
+            except Exception as e:
+                print(f"Error loading scan file {p}: {e}")
     return None
 
 def sanitize_for_json(obj):
