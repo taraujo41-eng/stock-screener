@@ -2991,8 +2991,9 @@ def watchlist_scan(tickers, extended_hours=False):
     options_results = {}  # ticker -> dict  (from _analyze_options_setup)
 
     for i, sym in enumerate(tickers):
+        found_cnt = len(set(stock_results) | set(sigma3_results) | set(sigma2_results))
         pct = int((i / total) * 100) if total else 100
-        _update_progress("analyzing", f"Analyzing {sym} (all criteria)...", i, total, ticker=sym, found=len(stock_results), pct=pct)
+        _update_progress("analyzing", f"Analyzing {sym} (all criteria)...", i, total, ticker=sym, found=found_cnt, pct=pct)
         try:
             df = daily_data.get(sym)
             if df is None or len(df) < 20:
