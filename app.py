@@ -549,6 +549,19 @@ def debug_watchlist_scan():
             "traceback": traceback.format_exc()
         }), 500
 
+@app.route("/api/debug-files", methods=["GET"])
+def debug_files():
+    app_dir = os.path.dirname(__file__)
+    files = os.listdir(app_dir) if os.path.exists(app_dir) else []
+    tmp_files = os.listdir("/tmp") if os.path.exists("/tmp") else []
+    return jsonify({
+        "app_dir": app_dir,
+        "cwd": os.getcwd(),
+        "has_watchlist_json": "last_watchlist_scan.json" in files,
+        "app_dir_files": [f for f in files if f.endswith(".json")],
+        "tmp_files": [f for f in tmp_files if f.endswith(".json")]
+    })
+
 @app.route("/api/scan/watchlist/results", methods=["GET"])
 def scan_watchlist_results():
     results = app.config.get("LAST_WATCHLIST_RESULTS")
