@@ -456,6 +456,8 @@ def scan_watchlist():
         try:
             et_tz = get_ny_timezone()
             current_watchlist = load_watchlist()
+            with open("/tmp/scan_debug.log", "a") as f:
+                f.write(f"[{datetime.now()}] Scan started for {len(current_watchlist)} tickers\n")
             df = watchlist_scan(current_watchlist, extended_hours=extended_hours)
             raw_records = df.to_dict(orient="records") if not df.empty else []
             clean_records = sanitize_for_json(raw_records)
@@ -470,10 +472,14 @@ def scan_watchlist():
             save_last_scan(results_data, WATCHLIST_RESULTS_FILE)
             scan_progress["status"] = "done"
             scan_progress["mode"] = "watchlist"
-        except Exception as e:
+            with open("/tmp/scan_debug.log", "a") as f:
+                f.write(f"[{datetime.now()}] Scan completed with {len(clean_records)} signals\n")
+        except BaseException as e:
             import traceback
             tb_str = traceback.format_exc()
             print(f"[Watchlist Scan Error] {e}\n{tb_str}")
+            with open("/tmp/scan_debug.log", "a") as f:
+                f.write(f"[{datetime.now()}] ERROR: {e}\n{tb_str}\n")
             app.config["LAST_WATCHLIST_RESULTS"] = {"ok": False, "error": str(e), "traceback": tb_str}
             scan_progress["status"] = "error"
             scan_progress["phase_label"] = str(e)
@@ -483,6 +489,13 @@ def scan_watchlist():
 
     threading.Thread(target=_run, daemon=False).start()
     return jsonify({"ok": True, "message": "Watchlist scan started (all criteria)"})
+
+@app.route("/api/scan/watchlist/log", methods=["GET"])
+def get_scan_debug_log():
+    if os.path.exists("/tmp/scan_debug.log"):
+        with open("/tmp/scan_debug.log", "r") as f:
+            return f.read(), 200, {"Content-Type": "text/plain"}
+    return "No debug log found", 404
 
 @app.route("/api/scan/watchlist/sync", methods=["GET", "POST"])
 def scan_watchlist_sync():
