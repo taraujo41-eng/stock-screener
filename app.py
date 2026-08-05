@@ -435,7 +435,8 @@ def scan_watchlist():
         global _scan_running
         try:
             et_tz = get_ny_timezone()
-            df = watchlist_scan(user_watchlist, extended_hours=extended_hours)
+            current_watchlist = load_watchlist()
+            df = watchlist_scan(current_watchlist, extended_hours=extended_hours)
             results_data = {
                 "ok": True,
                 "mode": "watchlist",
@@ -446,10 +447,12 @@ def scan_watchlist():
             app.config["LAST_WATCHLIST_RESULTS"] = results_data
             save_last_scan(results_data, WATCHLIST_RESULTS_FILE)
             scan_progress["status"] = "done"
+            scan_progress["mode"] = "watchlist"
         except Exception as e:
             import traceback
-            traceback.print_exc()
-            app.config["LAST_WATCHLIST_RESULTS"] = {"ok": False, "error": str(e), "traceback": traceback.format_exc()}
+            tb_str = traceback.format_exc()
+            print(f"[Watchlist Scan Error] {e}\n{tb_str}")
+            app.config["LAST_WATCHLIST_RESULTS"] = {"ok": False, "error": str(e), "traceback": tb_str}
             scan_progress["status"] = "error"
             scan_progress["phase_label"] = str(e)
         finally:
@@ -458,6 +461,26 @@ def scan_watchlist():
 
     threading.Thread(target=_run, daemon=False).start()
     return jsonify({"ok": True, "message": "Watchlist scan started (all criteria)"})
+
+@app.route("/api/scan/watchlist/sync", methods=["GET", "POST"])
+def scan_watchlist_sync():
+    """Run a synchronous mini watchlist scan for diagnostic testing."""
+    try:
+        current_watchlist = load_watchlist()[:5]
+        df = watchlist_scan(current_watchlist, extended_hours=False)
+        return jsonify({
+            "ok": True,
+            "tickers": current_watchlist,
+            "count": len(df) if not df.empty else 0,
+            "results": df.to_dict(orient="records") if not df.empty else []
+        })
+    except Exception as e:
+        import traceback
+        return jsonify({
+            "ok": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
 
 @app.route("/api/scan/watchlist/results", methods=["GET"])
 def scan_watchlist_results():
