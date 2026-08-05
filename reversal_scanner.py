@@ -3022,14 +3022,6 @@ def watchlist_scan(tickers, extended_hours=False):
             except Exception as e:
                 print(f"  [watchlist] 2-sigma error for {sym}: {e}")
 
-            # 4. Options directional exhaustion
-            try:
-                r = _analyze_options_setup(sym, df, iv_history)
-                if r:
-                    options_results[sym] = r
-            except Exception as e:
-                print(f"  [watchlist] options error for {sym}: {e}")
-
         except Exception as e:
             print(f"Error analyzing {sym} in watchlist scan: {e}")
             continue
