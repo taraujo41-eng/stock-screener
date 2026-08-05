@@ -137,16 +137,7 @@ def scan_cancel():
 # ── API: 3-Sigma Scans (async) ──────────────────────────────────────
 
 def _scan_conflict_response():
-    running_mode = scan_progress.get("mode")
-    mode_names = {
-        "3sigma": "3-Sigma Bands",
-        "options": "Options Scan",
-        "2sigma": "2-Sigma Bands",
-        "52w": "52-Week Reversal",
-        "rsidiv": "RSI Divergence"
-    }
-    friendly_name = mode_names.get(running_mode, "another tab")
-    return jsonify({"ok": False, "error": f"A scan is already running on the {friendly_name} tab"}), 409
+    return jsonify({"ok": False, "error": "A scan is already running. Please wait for it to complete."}), 409
 
 @app.route("/api/scan/3sigma", methods=["POST"])
 def scan_3sigma():
@@ -432,8 +423,10 @@ def scan_watchlist():
     global _scan_running
     with _scan_lock:
         if _scan_running:
-            return jsonify({"ok": False, "error": "A scan is already running"}), 409
+            return _scan_conflict_response()
         _scan_running = True
+        _reset_progress(status="running", mode="watchlist")
+        scan_progress["phase_label"] = "Initiating watchlist scan (all criteria)..."
 
     data = request.get_json() or {}
     extended_hours = data.get("extended_hours", False)
@@ -464,7 +457,7 @@ def scan_watchlist():
                 _scan_running = False
 
     threading.Thread(target=_run, daemon=False).start()
-    return jsonify({"ok": True, "message": "Watchlist scan started"})
+    return jsonify({"ok": True, "message": "Watchlist scan started (all criteria)"})
 
 @app.route("/api/scan/watchlist/results", methods=["GET"])
 def scan_watchlist_results():

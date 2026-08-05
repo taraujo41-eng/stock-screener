@@ -2953,53 +2953,226 @@ def options_directional_exhaustion_scan():
 # =====================================================================
 
 def watchlist_scan(tickers, extended_hours=False):
-    """Scan watchlist tickers for stock reversal setups."""
+    """Enhanced watchlist scan — runs ALL analysis criteria on watchlist tickers.
+
+    Combines results from:
+      1. General reversal analysis (_analyze_stock)
+      2. 3-Sigma Bollinger Band analysis (_analyze_3sigma_setup, std=3.0)
+      3. 2-Sigma Bollinger Band analysis (_analyze_3sigma_setup, std=2.0)
+      4. Options directional exhaustion (_analyze_options_setup)
+
+    Results are merged per ticker so each ticker appears at most once with
+    all signals, patterns, and option plays aggregated.
+    """
     _reset_progress()
     scan_progress["status"] = "running"
+    scan_progress["mode"] = "watchlist"
     start_time = time.time()
 
-    results = []
     total = len(tickers)
     _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
 
     def _on_dl_progress(i, tot, sym):
-        _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=len(results))
+        _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=0)
 
-    interval = "15m" if extended_hours else "1d"
-    includePrePost = "true" if extended_hours else "false"
-    fetch_days = 14 if extended_hours else 280
-
-    stock_data = fetch_batch_concurrent(
-        tickers, days=fetch_days, max_workers=4,
-        on_progress=_on_dl_progress, delay=0.05, interval=interval, includePrePost=includePrePost
+    # Fetch daily data (needed by all analyzers)
+    daily_data = fetch_batch_concurrent(
+        tickers, days=280, max_workers=4,
+        on_progress=_on_dl_progress, delay=0.05, interval="1d", includePrePost="false"
     )
 
     is_bullish = check_spy_regime()
+    iv_history = _load_iv_history()
 
-    for i, (sym, df) in enumerate(stock_data.items()):
-        _update_progress("analyzing", f"Analyzing {sym}...", i, len(stock_data), ticker=sym, found=len(results))
+    # Collect results keyed by ticker for merging
+    stock_results = {}    # ticker -> dict  (from _analyze_stock)
+    sigma3_results = {}   # ticker -> dict  (from _analyze_3sigma_setup std=3)
+    sigma2_results = {}   # ticker -> dict  (from _analyze_3sigma_setup std=2)
+    options_results = {}  # ticker -> dict  (from _analyze_options_setup)
+
+    for i, sym in enumerate(tickers):
+        pct = int((i / total) * 100) if total else 100
+        _update_progress("analyzing", f"Analyzing {sym} (all criteria)...", i, total, ticker=sym, found=len(stock_results), pct=pct)
         try:
+            df = daily_data.get(sym)
             if df is None or len(df) < 20:
                 continue
-            result = _analyze_stock(sym, df, is_market_bullish=is_bullish)
-            if result:
-                results.append(result)
+
+            # 1. General reversal analysis
+            try:
+                r = _analyze_stock(sym, df, is_market_bullish=is_bullish)
+                if r:
+                    stock_results[sym] = r
+            except Exception as e:
+                print(f"  [watchlist] _analyze_stock error for {sym}: {e}")
+
+            # 2. 3-Sigma Bollinger Band analysis
+            try:
+                r = _analyze_3sigma_setup(sym, None, df, is_market_bullish=is_bullish, std_dev_mult=3.0)
+                if r:
+                    sigma3_results[sym] = r
+            except Exception as e:
+                print(f"  [watchlist] 3-sigma error for {sym}: {e}")
+
+            # 3. 2-Sigma Bollinger Band analysis
+            try:
+                r = _analyze_3sigma_setup(sym, None, df, is_market_bullish=is_bullish, std_dev_mult=2.0)
+                if r:
+                    sigma2_results[sym] = r
+            except Exception as e:
+                print(f"  [watchlist] 2-sigma error for {sym}: {e}")
+
+            # 4. Options directional exhaustion
+            try:
+                r = _analyze_options_setup(sym, df, iv_history)
+                if r:
+                    options_results[sym] = r
+            except Exception as e:
+                print(f"  [watchlist] options error for {sym}: {e}")
+
         except Exception as e:
             print(f"Error analyzing {sym} in watchlist scan: {e}")
             continue
 
+    _save_iv_history(iv_history)
+
+    # ── Merge all results per ticker ────────────────────────────
+    all_tickers_with_signals = set(stock_results) | set(sigma3_results) | set(sigma2_results) | set(options_results)
+    merged = []
+
+    for sym in all_tickers_with_signals:
+        stock_r = stock_results.get(sym)
+        s3_r = sigma3_results.get(sym)
+        s2_r = sigma2_results.get(sym)
+        opts_r = options_results.get(sym)
+
+        # Use stock result as the base if available, otherwise use first available sigma result
+        base = stock_r or s3_r or s2_r
+        if base is None and opts_r is not None:
+            # Only options signal — still include it as a stock-style card
+            # Build a minimal base from the options result
+            base = {
+                "Ticker": sym,
+                "Last Price": opts_r.get("Last Price", 0),
+                "Volume": opts_r.get("Volume", 0),
+                "RSI": opts_r.get("RSI", 50) if "RSI" in opts_r else 50,
+                "Bullish Signals": "—",
+                "Bearish Signals": "—",
+                "Patterns": "—",
+                "Score": 0,
+                "Grade": "B",
+                "RVOL": opts_r.get("RVOL", 0),
+                "ADR": opts_r.get("ADR", 0),
+                "BB_Pct": opts_r.get("BB_Pct", 50),
+                "EMA20_Dist": opts_r.get("EMA20_Dist", 0),
+                "SMA200_Dist": opts_r.get("SMA200_Dist", 0),
+                "Squeeze": opts_r.get("Squeeze", False),
+            }
+
+        if base is None:
+            continue
+
+        # Helper to parse signal strings
+        def _parse_signals(s):
+            if not s or s == "—":
+                return []
+            inner = s.strip().lstrip("[").rstrip("]")
+            return [x.strip() for x in inner.split("|") if x.strip()]
+
+        def _merge_signal_str(existing, new_signals_str, prefix=""):
+            existing_list = _parse_signals(existing)
+            new_list = _parse_signals(new_signals_str)
+            if prefix:
+                new_list = [f"{prefix}: {s}" if not s.startswith(prefix) else s for s in new_list]
+            combined = existing_list[:]
+            for s in new_list:
+                if s not in combined:
+                    combined.append(s)
+            return " | ".join(combined) if combined else "—"
+
+        def _merge_patterns(existing, new_pat):
+            existing_list = _parse_signals(existing)
+            new_list = _parse_signals(new_pat)
+            combined = existing_list[:]
+            for p in new_list:
+                if p not in combined:
+                    combined.append(p)
+            return " | ".join(combined) if combined else "—"
+
+        # Merge 3-sigma signals into base
+        if s3_r and s3_r is not base:
+            base["Bullish Signals"] = _merge_signal_str(base.get("Bullish Signals", "—"), s3_r.get("Bullish Signals", "—"), "3σ")
+            base["Bearish Signals"] = _merge_signal_str(base.get("Bearish Signals", "—"), s3_r.get("Bearish Signals", "—"), "3σ")
+            base["Patterns"] = _merge_patterns(base.get("Patterns", "—"), s3_r.get("Patterns", "—"))
+            # Take the higher score
+            base["Score"] = max(base.get("Score", 0), s3_r.get("Score", 0))
+            # Merge trade levels if not already present
+            if not base.get("Stop Loss") and s3_r.get("Stop Loss"):
+                base["Stop Loss"] = s3_r["Stop Loss"]
+                base["Entry"] = s3_r.get("Entry")
+                base["Profit Target"] = s3_r.get("Profit Target")
+            # Merge Option Play if not already present
+            if not base.get("Option Play") and s3_r.get("Option Play"):
+                base["Option Play"] = s3_r["Option Play"]
+
+        # Merge 2-sigma signals into base
+        if s2_r and s2_r is not base:
+            base["Bullish Signals"] = _merge_signal_str(base.get("Bullish Signals", "—"), s2_r.get("Bullish Signals", "—"), "2σ")
+            base["Bearish Signals"] = _merge_signal_str(base.get("Bearish Signals", "—"), s2_r.get("Bearish Signals", "—"), "2σ")
+            base["Patterns"] = _merge_patterns(base.get("Patterns", "—"), s2_r.get("Patterns", "—"))
+            base["Score"] = max(base.get("Score", 0), s2_r.get("Score", 0))
+            if not base.get("Stop Loss") and s2_r.get("Stop Loss"):
+                base["Stop Loss"] = s2_r["Stop Loss"]
+                base["Entry"] = s2_r.get("Entry")
+                base["Profit Target"] = s2_r.get("Profit Target")
+            if not base.get("Option Play") and s2_r.get("Option Play"):
+                base["Option Play"] = s2_r["Option Play"]
+
+        # Merge options exhaustion signals
+        if opts_r:
+            # Add options info as signals
+            direction = opts_r.get("Direction", "")
+            catalyst_tags = opts_r.get("Catalyst Tags", "")
+            if direction == "Bullish" and catalyst_tags:
+                base["Bullish Signals"] = _merge_signal_str(base.get("Bullish Signals", "—"), catalyst_tags, "Opts")
+            elif direction == "Bearish" and catalyst_tags:
+                base["Bearish Signals"] = _merge_signal_str(base.get("Bearish Signals", "—"), catalyst_tags, "Opts")
+
+            # Attach the options contract as Option Play if not already set
+            if not base.get("Option Play"):
+                base["Option Play"] = {
+                    "symbol": opts_r.get("Symbol", ""),
+                    "strike": opts_r.get("Strike", 0),
+                    "type": opts_r.get("Type", "CALL"),
+                    "exp": opts_r.get("Exp", ""),
+                    "dte": opts_r.get("DTE", 0),
+                    "mid": opts_r.get("Mid", 0),
+                    "iv": opts_r.get("IV", 0),
+                }
+
+        # Recalculate grade based on merged score
+        score = base.get("Score", 0)
+        if score >= 8:
+            base["Grade"] = "A+"
+        elif score >= 5:
+            base["Grade"] = "A"
+        else:
+            base["Grade"] = "B"
+
+        merged.append(base)
+
     total_time = time.time() - start_time
     scan_progress.update({
         "status": "done", "phase": "complete",
-        "phase_label": f"Done — {len(results)} signals found",
+        "phase_label": f"Done — {len(merged)} signals found",
         "current": total, "total": total,
-        "found": len(results), "pct": 100, "eta_seconds": 0,
+        "found": len(merged), "pct": 100, "eta_seconds": 0,
     })
 
-    print(f"[Done] Watchlist scan: {len(results)} signals in {total_time:.1f}s")
-    if not results:
+    print(f"[Done] Watchlist scan (all criteria): {len(merged)} signals in {total_time:.1f}s")
+    if not merged:
         return pd.DataFrame()
-    return pd.DataFrame(results).sort_values(by="Score", ascending=False)
+    return pd.DataFrame(merged).sort_values(by="Score", ascending=False)
 
 
 def options_watchlist_scan(tickers, extended_hours=False):

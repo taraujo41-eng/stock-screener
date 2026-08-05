@@ -6,8 +6,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#0a0e17">
-  <meta name="description" content="Real-time 3-Sigma Bot Reversal Scanner — scans for 15m Close crossing Daily 3-Sigma Bollinger Bands.">
-  <title>3-Sigma Bot Scanner</title>
+  <meta name="description" content="Watchlist Stock Scanner — scans your watchlist tickers for reversals, sigma bands, RSI divergence & options setups.">
+  <title>Watchlist Scanner</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="/icon.png">
   <link rel="icon" href="/icon.png">
@@ -24,24 +24,15 @@
 
     <!-- Header -->
     <header class="header">
-      <span class="header__icon">🔔</span>
-      <h1 class="header__title">3-Sigma Bot Scanner</h1>
-      <p class="header__subtitle" id="headerSubtitle">15m Close × Daily 3-Sigma Bollinger Bands</p>
+      <span class="header__icon">📋</span>
+      <h1 class="header__title">Watchlist Scanner</h1>
+      <p class="header__subtitle" id="headerSubtitle">All Criteria × Your Custom Watchlist</p>
     </header>
-
-    <div class="mode-tabs">
-      <button class="mode-tab mode-tab--active" id="tab3Sigma" onclick="switchTab('3sigma')">🔔 3-Sigma Bands</button>
-      <button class="mode-tab" id="tab2Sigma" onclick="switchTab('2sigma')">⚡ 2-Sigma Bands</button>
-      <button class="mode-tab" id="tab52w" onclick="switchTab('52w')">📈 52-Week Reversal</button>
-      <button class="mode-tab" id="tabRsiDiv" onclick="switchTab('rsidiv')">📊 RSI Divergence</button>
-      <button class="mode-tab" id="tabOptions" onclick="switchTab('options')">🎯 Options Extreme</button>
-      <button class="mode-tab" id="tabWatchlist" onclick="switchTab('watchlist')">📋 Watchlist</button>
-    </div>
 
     <!-- Scanner description -->
     <div class="mode-info">
-      <p class="mode-desc" id="modeDesc">Scans full market list for 15m Close piercing Daily 3-Sigma Bollinger Bands</p>
-      <button class="edit-link hidden" id="editWatchlistBtn" onclick="openWatchlistModal()">⚙️ Edit</button>
+      <p class="mode-desc" id="modeDesc">Scans your watchlist tickers using all criteria: Reversals, 3σ/2σ Bands, RSI Divergence & Options Exhaustion</p>
+      <button class="edit-link" id="editWatchlistBtn" onclick="openWatchlistModal()">⚙️ Edit Watchlist</button>
     </div>
 
     <!-- Extended Hours Toggle -->
@@ -56,7 +47,7 @@
     <!-- Scan Button -->
     <button class="scan-btn" id="scanBtn" onclick="runScan()">
       <div class="scan-btn__spinner"></div>
-      <span class="scan-btn__text">🔔  Scan 3-Sigma Bot</span>
+      <span class="scan-btn__text">📋  Scan Watchlist</span>
     </button>
 
     <!-- Progress bar (full scan only) -->

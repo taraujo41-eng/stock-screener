@@ -4,7 +4,7 @@
 
 let scanData = [];
 let currentFilter = "all";
-let scanMode = "3sigma";
+let scanMode = "watchlist";
 let pollTimer = null;
 let hideTimeout = null;
 let userWatchlist = [];
@@ -35,178 +35,8 @@ function fmtEta(seconds) {
 function updateModeDesc() {
   const desc = document.getElementById("modeDesc");
   const subtitle = document.getElementById("headerSubtitle");
-  const editBtn = document.getElementById("editWatchlistBtn");
-  if (editBtn) {
-    if (scanMode === "watchlist") editBtn.classList.remove("hidden");
-    else editBtn.classList.add("hidden");
-  }
-  if (scanMode === "3sigma") {
-    desc.textContent = "Scans your watchlist tickers for 15m regular hour Close piercing Daily 3-Sigma Bollinger Bands";
-    if (subtitle) subtitle.textContent = "15m Close × Daily 3-Sigma Bollinger Bands";
-  } else if (scanMode === "2sigma") {
-    desc.textContent = "Scans your watchlist tickers for 15m regular hour Close piercing Daily 2-Sigma Bollinger Bands";
-    if (subtitle) subtitle.textContent = "15m Close × Daily 2-Sigma Bollinger Bands";
-  } else if (scanMode === "52w") {
-    desc.textContent = "Scans your watchlist tickers for daily RSI divergence at 52-week Highs and Lows";
-    if (subtitle) subtitle.textContent = "Daily 52-Week High/Low × RSI Divergence";
-  } else if (scanMode === "rsidiv") {
-    desc.textContent = "Scans your watchlist tickers for daily RSI divergence (bullish or bearish)";
-    if (subtitle) subtitle.textContent = "Daily RSI Divergence Scanner";
-  } else if (scanMode === "options") {
-    desc.textContent = "Scans your watchlist tickers for Options Exhaustion: 3-Sigma Bands (std=3) × RSI (<30 Calls, >70 Puts)";
-    if (subtitle) subtitle.textContent = "Options Directional Exhaustion Scanner";
-  } else if (scanMode === "watchlist") {
-    desc.textContent = "Scans your custom watchlist tickers for reversal setups";
-    if (subtitle) subtitle.textContent = "Custom Watchlist Reversal Scanner";
-  }
-}
-
-async function loadLast3SigmaScan() {
-  const scanBtn = document.getElementById("scanBtn");
-  scanBtn.querySelector(".scan-btn__text").textContent = "🔔  Scan 3-Sigma Bot";
-  try {
-    showSkeleton();
-    const res = await fetch("/api/scan/3sigma/results");
-    if (res.ok) {
-      const data = await res.json();
-      if (data.ok && data.results) {
-        displayResults(data);
-        updateModeDesc();
-        return;
-      }
-    }
-  } catch (e) {
-    console.error("No saved 3-sigma scan available yet");
-  }
-
-  document.getElementById("results").innerHTML = `
-    <div class="empty-state">
-      <div class="empty-state__icon">🔔</div>
-      <div class="empty-state__title">Ready to scan</div>
-      <div class="empty-state__text">Click above to scan S&P 500, NASDAQ 100, and ETFs for 15m Close crossing Daily 3-Sigma Bollinger Bands</div>
-    </div>
-  `;
-  hideAuxUI();
-  updateModeDesc();
-}
-
-async function loadLast2SigmaScan() {
-  const scanBtn = document.getElementById("scanBtn");
-  scanBtn.querySelector(".scan-btn__text").textContent = "⚡  Scan 2-Sigma Bot";
-  try {
-    showSkeleton();
-    const res = await fetch("/api/scan/2sigma/results");
-    if (res.ok) {
-      const data = await res.json();
-      if (data.ok && data.results) {
-        displayResults(data);
-        updateModeDesc();
-        return;
-      }
-    }
-  } catch (e) {
-    console.error("No saved 2-sigma scan available yet");
-  }
-
-  document.getElementById("results").innerHTML = `
-    <div class="empty-state">
-      <div class="empty-state__icon">⚡</div>
-      <div class="empty-state__title">Ready to scan</div>
-      <div class="empty-state__text">Click above to scan S&P 500, NASDAQ 100, and ETFs for 15m Close crossing Daily 2-Sigma Bollinger Bands</div>
-    </div>
-  `;
-  hideAuxUI();
-  updateModeDesc();
-}
-
-async function loadLast52wScan() {
-  const scanBtn = document.getElementById("scanBtn");
-  scanBtn.querySelector(".scan-btn__text").textContent = "📈  Scan 52-Week Reversal";
-  try {
-    showSkeleton();
-    const res = await fetch("/api/scan/52w/results");
-    if (res.ok) {
-      const data = await res.json();
-      if (data.ok && data.results) {
-        displayResults(data);
-        updateModeDesc();
-        return;
-      }
-    }
-  } catch (e) {
-    console.error("No saved 52w scan available yet");
-  }
-
-  document.getElementById("results").innerHTML = `
-    <div class="empty-state">
-      <div class="empty-state__icon">📈</div>
-      <div class="empty-state__title">Ready to scan</div>
-      <div class="empty-state__text">Click above to scan for stocks at 52-week High/Low showing daily RSI divergence</div>
-    </div>
-  `;
-  hideAuxUI();
-  updateModeDesc();
-}
-
-async function loadLastRsiDivScan() {
-  const scanBtn = document.getElementById("scanBtn");
-  scanBtn.querySelector(".scan-btn__text").textContent = "📊  Scan RSI Divergence";
-  try {
-    showSkeleton();
-    const res = await fetch("/api/scan/rsidiv/results");
-    if (res.ok) {
-      const data = await res.json();
-      if (data.ok && data.results) {
-        displayResults(data);
-        updateModeDesc();
-        return;
-      }
-    }
-  } catch (e) {
-    console.error("No saved RSI divergence scan available yet");
-  }
-
-  document.getElementById("results").innerHTML = `
-    <div class="empty-state">
-      <div class="empty-state__icon">📊</div>
-      <div class="empty-state__title">Ready to scan</div>
-      <div class="empty-state__text">Click above to scan for stocks showing daily RSI divergence</div>
-    </div>
-  `;
-  hideAuxUI();
-  updateModeDesc();
-}
-
-async function loadLastOptionsScan() {
-  const scanBtn = document.getElementById("scanBtn");
-  if (scanBtn) {
-    const btnText = scanBtn.querySelector(".scan-btn__text");
-    if (btnText) btnText.textContent = "🎯  Scan Options Extreme";
-  }
-  try {
-    showSkeleton();
-    const res = await fetch("/api/scan/options/results");
-    if (res.ok) {
-      const data = await res.json();
-      if (data.ok && data.results) {
-        displayResults(data);
-        updateModeDesc();
-        return;
-      }
-    }
-  } catch (e) {
-    console.error("No saved Options Extreme scan available yet");
-  }
-
-  document.getElementById("results").innerHTML = `
-    <div class="empty-state">
-      <div class="empty-state__icon">🎯</div>
-      <div class="empty-state__title">Ready to scan</div>
-      <div class="empty-state__text">Click above to scan for directional exhaustion (3-Sigma Bands × RSI Extremes) with Option Plays</div>
-    </div>
-  `;
-  hideAuxUI();
-  updateModeDesc();
+  if (desc) desc.textContent = "Scans your watchlist tickers using all criteria: Reversals, 3σ/2σ Bands, RSI Divergence & Options Exhaustion";
+  if (subtitle) subtitle.textContent = "All Criteria × Your Custom Watchlist";
 }
 
 async function loadLastWatchlistScan() {
@@ -219,7 +49,6 @@ async function loadLastWatchlistScan() {
       const data = await res.json();
       if (data.ok && data.results) {
         displayResults(data);
-        updateModeDesc();
         return;
       }
     }
@@ -231,75 +60,10 @@ async function loadLastWatchlistScan() {
     <div class="empty-state">
       <div class="empty-state__icon">📋</div>
       <div class="empty-state__title">Ready to scan</div>
-      <div class="empty-state__text">Click above to scan your custom watchlist tickers for reversal setups</div>
+      <div class="empty-state__text">Tap scan to analyze your watchlist tickers<br>using all criteria (Reversals, Sigma Bands, RSI & Options)</div>
     </div>
   `;
   hideAuxUI();
-  updateModeDesc();
-}
-
-async function switchTab(mode) {
-  if (scanMode === mode) return;
-  scanMode = mode;
-  
-  document.querySelectorAll(".mode-tab").forEach(tab => {
-    tab.classList.remove("mode-tab--active");
-  });
-  
-  // Clear any existing polling timer if we change tabs
-  stopProgressPolling();
-  
-  // Reset scan button loading states and set text
-  const btn = document.getElementById("scanBtn");
-  btn.classList.remove("scan-btn--loading");
-  btn.disabled = false;
-  const btnText = btn.querySelector(".scan-btn__text");
-  
-  if (mode === "3sigma") {
-    if (btnText) btnText.textContent = "🔔  Scan 3-Sigma Bot";
-    document.getElementById("tab3Sigma").classList.add("mode-tab--active");
-    document.getElementById("extHoursWrap")?.classList.remove("hidden");
-  } else if (mode === "2sigma") {
-    if (btnText) btnText.textContent = "⚡  Scan 2-Sigma Bot";
-    document.getElementById("tab2Sigma").classList.add("mode-tab--active");
-    document.getElementById("extHoursWrap")?.classList.remove("hidden");
-  } else if (mode === "52w") {
-    if (btnText) btnText.textContent = "📈  Scan 52-Week Reversal";
-    document.getElementById("tab52w").classList.add("mode-tab--active");
-    document.getElementById("extHoursWrap")?.classList.add("hidden");
-  } else if (mode === "rsidiv") {
-    if (btnText) btnText.textContent = "📊  Scan RSI Divergence";
-    document.getElementById("tabRsiDiv").classList.add("mode-tab--active");
-    document.getElementById("extHoursWrap")?.classList.add("hidden");
-  } else if (mode === "options") {
-    if (btnText) btnText.textContent = "🎯  Scan Options Extreme";
-    document.getElementById("tabOptions").classList.add("mode-tab--active");
-    document.getElementById("extHoursWrap")?.classList.add("hidden");
-  } else if (mode === "watchlist") {
-    if (btnText) btnText.textContent = "📋  Scan Watchlist";
-    document.getElementById("tabWatchlist")?.classList.add("mode-tab--active");
-    document.getElementById("extHoursWrap")?.classList.remove("hidden");
-  }
-  updateModeDesc();
-
-  // Check if a scan is already running on the server
-  const running = await checkActiveScan();
-  if (!running) {
-    // If no scan is running, load historical results for the tab
-    if (mode === "3sigma") {
-      await loadLast3SigmaScan();
-    } else if (mode === "2sigma") {
-      await loadLast2SigmaScan();
-    } else if (mode === "52w") {
-      await loadLast52wScan();
-    } else if (mode === "rsidiv") {
-      await loadLastRsiDivScan();
-    } else if (mode === "options") {
-      await loadLastOptionsScan();
-    } else if (mode === "watchlist") {
-      await loadLastWatchlistScan();
-    }
-  }
 }
 
 function hideAuxUI() {
@@ -773,23 +537,8 @@ function displayResults(data) {
   if (data.tickers_scanned) {
     badge.textContent = `Scanned ${data.tickers_scanned.toLocaleString()} tickers`;
     badge.classList.remove("hidden");
-  } else if (data.mode === "3sigma") {
-    badge.textContent = `3-Sigma Bot scan`;
-    badge.classList.remove("hidden");
-  } else if (data.mode === "2sigma") {
-    badge.textContent = `2-Sigma Bot scan`;
-    badge.classList.remove("hidden");
-  } else if (data.mode === "52w") {
-    badge.textContent = `52-Week Reversal scan`;
-    badge.classList.remove("hidden");
-  } else if (data.mode === "rsidiv") {
-    badge.textContent = `RSI Divergence scan`;
-    badge.classList.remove("hidden");
-  } else if (data.mode === "options") {
-    badge.textContent = `Options Extreme scan`;
-    badge.classList.remove("hidden");
   } else if (data.mode === "watchlist") {
-    badge.textContent = `Watchlist scan`;
+    badge.textContent = `Watchlist scan (all criteria)`;
     badge.classList.remove("hidden");
   } else {
     badge.classList.add("hidden");
@@ -884,19 +633,7 @@ function startProgressPolling() {
 
         if (p.status === "done") {
           let targetResultsEndpoint;
-          if (p.mode === "3sigma") {
-            targetResultsEndpoint = "/api/scan/3sigma/results";
-          } else if (p.mode === "2sigma") {
-            targetResultsEndpoint = "/api/scan/2sigma/results";
-          } else if (p.mode === "52w") {
-            targetResultsEndpoint = "/api/scan/52w/results";
-          } else if (p.mode === "rsidiv") {
-            targetResultsEndpoint = "/api/scan/rsidiv/results";
-          } else if (p.mode === "options") {
-            targetResultsEndpoint = "/api/scan/options/results";
-          } else if (p.mode === "watchlist") {
-            targetResultsEndpoint = "/api/scan/watchlist/results";
-          }
+          targetResultsEndpoint = "/api/scan/watchlist/results";
 
           // Only display results if user is on the tab of the finished scan
           if (p.mode === scanMode && targetResultsEndpoint) {
@@ -975,26 +712,8 @@ async function runScan() {
 
   const extHours = document.getElementById("extHoursToggle")?.checked || false;
 
-  let endpoint, resultsEndpoint;
-  if (scanMode === "3sigma") {
-    endpoint = "/api/scan/3sigma";
-    resultsEndpoint = "/api/scan/3sigma/results";
-  } else if (scanMode === "2sigma") {
-    endpoint = "/api/scan/2sigma";
-    resultsEndpoint = "/api/scan/2sigma/results";
-  } else if (scanMode === "52w") {
-    endpoint = "/api/scan/52w";
-    resultsEndpoint = "/api/scan/52w/results";
-  } else if (scanMode === "rsidiv") {
-    endpoint = "/api/scan/rsidiv";
-    resultsEndpoint = "/api/scan/rsidiv/results";
-  } else if (scanMode === "options") {
-    endpoint = "/api/scan/options";
-    resultsEndpoint = "/api/scan/options/results";
-  } else if (scanMode === "watchlist") {
-    endpoint = "/api/scan/watchlist";
-    resultsEndpoint = "/api/scan/watchlist/results";
-  }
+  const endpoint = "/api/scan/watchlist";
+  const resultsEndpoint = "/api/scan/watchlist/results";
 
   // Retry logic for Render cold starts
   const maxRetries = 3;
@@ -1107,7 +826,7 @@ async function checkActiveScan() {
 
 checkActiveScan().then(running => {
   if (!running) {
-    loadLast3SigmaScan();
+    loadLastWatchlistScan();
   }
 });
 
