@@ -632,16 +632,10 @@ function startProgressPolling() {
         stopProgressPolling();
 
         if (p.status === "done") {
-          let targetResultsEndpoint;
-          targetResultsEndpoint = "/api/scan/watchlist/results";
-
-          // Only display results if user is on the tab of the finished scan
-          if (p.mode === scanMode && targetResultsEndpoint) {
-            const resData = await fetch(`${targetResultsEndpoint}?t=${Date.now()}`);
-            const data = await resData.json();
-            if (data.ok) {
-              displayResults(data);
-            }
+          const resData = await fetch(`/api/scan/watchlist/results?t=${Date.now()}`);
+          const data = await resData.json();
+          if (data.ok) {
+            displayResults(data);
           }
         } else if (p.status === "error") {
           document.getElementById("results").innerHTML = `

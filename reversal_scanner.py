@@ -2964,7 +2964,7 @@ def watchlist_scan(tickers, extended_hours=False):
     Results are merged per ticker so each ticker appears at most once with
     all signals, patterns, and option plays aggregated.
     """
-    _reset_progress()
+    _reset_progress(status="running", mode="watchlist")
     scan_progress["status"] = "running"
     scan_progress["mode"] = "watchlist"
     start_time = time.time()
@@ -3155,7 +3155,7 @@ def watchlist_scan(tickers, extended_hours=False):
 
     total_time = time.time() - start_time
     scan_progress.update({
-        "status": "done", "phase": "complete",
+        "status": "done", "mode": "watchlist", "phase": "complete",
         "phase_label": f"Done — {len(merged)} signals found",
         "current": total, "total": total,
         "found": len(merged), "pct": 100, "eta_seconds": 0,
