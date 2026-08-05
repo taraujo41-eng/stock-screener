@@ -13,10 +13,6 @@ Now integrates:
 """
 
 import sys
-# Block native curl_cffi C-extension loading to prevent Gunicorn segfaults
-sys.modules['curl_cffi'] = None
-sys.modules['curl_cffi.requests'] = None
-
 import requests
 import pandas as pd
 import numpy as np
@@ -509,58 +505,49 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webu
 
 def _fetch_yahoo_fallback_one(ticker, days=180, interval="1d"):
     """
-    Fallback data fetcher using Yahoo Finance public chart API.
-    Zero authentication required, 100% reliable for standard OHLCV bars.
+    Fallback data fetcher using yfinance package.
+    Zero authentication required, 100% reliable for standard OHLCV bars on cloud platforms.
     """
     try:
-        yf_interval = "1d" if interval == "1d" else "15m"
-        range_str = "1y" if interval == "1d" else "1mo"
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range={range_str}&interval={yf_interval}"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        resp = requests.get(url, headers=headers, timeout=8)
-        if resp.status_code != 200:
+        import yfinance as yf
+        t = yf.Ticker(ticker)
+        period = "1y" if interval == "1d" else "1mo"
+        yf_intv = "1d" if interval == "1d" else "15m"
+        df = t.history(period=period, interval=yf_intv)
+        if df is None or df.empty or len(df) < 20:
             return None
-
-        res_json = resp.json()
-        chart = res_json.get("chart", {}).get("result", [])
-        if not chart:
-            return None
-
-        data = chart[0]
-        timestamps = data.get("timestamp", [])
-        indicators = data.get("indicators", {}).get("quote", [])
-        if not timestamps or not indicators or not indicators[0]:
-            return None
-
-        q = indicators[0]
-        opens = q.get("open", [])
-        highs = q.get("high", [])
-        lows = q.get("low", [])
-        closes = q.get("close", [])
-        volumes = q.get("volume", [])
-
-        records = []
-        for i in range(len(timestamps)):
-            if closes[i] is not None and opens[i] is not None:
-                records.append({
-                    "Date": pd.to_datetime(timestamps[i], unit="s", utc=True),
-                    "Open": float(opens[i]),
-                    "High": float(highs[i]) if highs[i] is not None else float(closes[i]),
-                    "Low": float(lows[i]) if lows[i] is not None else float(closes[i]),
-                    "Close": float(closes[i]),
-                    "Volume": int(volumes[i]) if volumes[i] is not None else 0
-                })
-
-        if not records:
-            return None
-
-        df = pd.DataFrame(records)
+            
+        df = df.reset_index()
+        col_map = {}
+        for c in df.columns:
+            cl = str(c).lower()
+            if "date" in cl or "time" in cl:
+                col_map[c] = "Date"
+            elif "open" in cl:
+                col_map[c] = "Open"
+            elif "high" in cl:
+                col_map[c] = "High"
+            elif "low" in cl:
+                col_map[c] = "Low"
+            elif "close" in cl:
+                col_map[c] = "Close"
+            elif "vol" in cl:
+                col_map[c] = "Volume"
+                
+        df = df.rename(columns=col_map)
+        df["Date"] = pd.to_datetime(df["Date"], utc=True)
         df = df.set_index("Date")
         df.index = df.index.tz_convert("America/New_York")
         df = df.sort_index()
-        return df
+        
+        req_cols = ["Open", "High", "Low", "Close", "Volume"]
+        for c in req_cols:
+            if c not in df.columns:
+                return None
+                
+        return df[req_cols]
     except Exception as e:
-        print(f"[Yahoo Fallback] Exception for {ticker}: {e}")
+        print(f"[Yahoo Fallback Error] {ticker}: {e}")
         return None
 
 
