@@ -697,14 +697,14 @@ function startProgressPolling(scanType = "watchlist") {
       const res = await fetch(`/api/scan/progress?t=${Date.now()}`);
       const p = await res.json();
 
-      if (p.status === "done" || p.status === "error") {
+      if (p.status === "done" || p.status === "error" || p.status === "idle") {
         stopProgressPolling();
 
-        if (p.status === "done") {
+        if (p.status === "done" || p.status === "idle") {
           const resultsUrl = scanType === "options_spreads" ? "/api/scan/options/tight_spreads/results" : "/api/scan/watchlist/results";
           const resData = await fetch(`${resultsUrl}?t=${Date.now()}`);
           const data = await resData.json();
-          if (data.ok) {
+          if (data.ok && data.results && data.results.length > 0) {
             displayResults(data);
           }
         } else if (p.status === "error") {
@@ -800,10 +800,21 @@ async function runScan(scanType = "watchlist") {
         body: JSON.stringify(payload)
       });
       const data = await res.json();
-      if (!data.ok) throw new Error(data.error || "Failed to start scan");
+      if (!data.ok) {
+        if (res.status === 409 || (data.error && data.error.includes("already running"))) {
+          console.log("Scan already running on server — attaching to active scan progress...");
+          startProgressPolling(scanType);
+          return;
+        }
+        throw new Error(data.error || "Failed to start scan");
+      }
       startProgressPolling(scanType);
       return;
     } catch (err) {
+      if (err.message && err.message.includes("already running")) {
+        startProgressPolling(scanType);
+        return;
+      }
       if (attempt === maxRetries) {
         let errorHtml = `
           <div class="empty-state">
