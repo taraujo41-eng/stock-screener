@@ -13,3 +13,6 @@ last_orb_scan.json
 conf/
 3sigma_bot.log
 last_bollinger_scan.json
+app_local.log
+webull_trade_sdk.log
+trade_log.json

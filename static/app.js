@@ -448,15 +448,70 @@ function buildOptionsCard(item, index) {
   `;
 }
 
+// ── Build a tight spreads option card ─────────────────────
+
+function buildOptionsSpreadsCard(item, index) {
+  const isCall = item.Type === "CALL";
+  const typeClass = isCall ? "opts-type--call" : "opts-type--put";
+  const spreadPct = item["Spread (%)"] !== undefined ? item["Spread (%)"] : 0;
+  const spreadDollar = item["Spread ($)"] !== undefined ? item["Spread ($)"] : 0;
+
+  return `
+    <div class="card card--option" style="animation-delay: ${index * 0.05}s">
+      <div class="card__header">
+        <div class="card__symbol-group">
+          <span class="card__symbol card__symbol--clickable" onclick="openChartModal('${item.Ticker}')">${item.Ticker}</span>
+          <span class="opts-type ${typeClass}">${item.Type}</span>
+          <span class="pill pill--bull">Spread: ${spreadPct}% ($${spreadDollar.toFixed(2)})</span>
+        </div>
+        <div class="card__score-badge grade--aplus">
+          ${item.DTE}d DTE
+        </div>
+      </div>
+
+      <div class="opts-card-details" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 12px; background: rgba(15, 23, 42, 0.6); padding: 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.05);">
+        <div class="opts-detail-row">
+          <span class="opts-detail-label" style="font-size: 0.75rem; color: #94a3b8; display: block;">Strike / Exp</span>
+          <span class="opts-detail-val" style="color: #f8fafc; font-weight: 600;">$${item.Strike} (${item.Expiration})</span>
+        </div>
+        <div class="opts-detail-row">
+          <span class="opts-detail-label" style="font-size: 0.75rem; color: #94a3b8; display: block;">Bid / Ask</span>
+          <span class="opts-detail-val" style="color: #60a5fa; font-weight: 600;">$${item.Bid.toFixed(2)} / $${item.Ask.toFixed(2)}</span>
+        </div>
+        <div class="opts-detail-row">
+          <span class="opts-detail-label" style="font-size: 0.75rem; color: #94a3b8; display: block;">Mid Price</span>
+          <span class="opts-detail-val" style="color: #4ade80; font-weight: 700;">$${item["Mid Price"].toFixed(2)}</span>
+        </div>
+        <div class="opts-detail-row">
+          <span class="opts-detail-label" style="font-size: 0.75rem; color: #94a3b8; display: block;">Volume / OI</span>
+          <span class="opts-detail-val" style="color: #e2e8f0;">${(item.Volume || 0).toLocaleString()} / ${(item.OI || 0).toLocaleString()}</span>
+        </div>
+      </div>
+
+      <div class="card__option" style="margin-top: 10px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); padding: 8px 12px; border-radius: 6px;">
+        <div class="option-tag" style="color: #34d399; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.5px;">🎯 TIGHT SPREAD PLAY</div>
+        <div class="option-val" style="color: #f1f5f9; font-size: 0.9rem; font-weight: 600; margin-top: 2px;">${item["Suggested Option"]}</div>
+      </div>
+    </div>
+  `;
+}
+
+
 // ── Render results ─────────────────────────────────────────
 
 function renderResults() {
   const el = document.getElementById("results");
+  const isOptionsSpreads = (scanData[0] && scanData[0]["Spread (%)"] !== undefined);
   const isOptions = (scanData[0] && scanData[0].Direction !== undefined);
 
   let filtered = scanData;
-  if (isOptions) {
-    // Options mode filters by direction
+  if (isOptionsSpreads) {
+    if (currentFilter === "bullish") {
+      filtered = scanData.filter(d => d.Type === "CALL");
+    } else if (currentFilter === "bearish") {
+      filtered = scanData.filter(d => d.Type === "PUT");
+    }
+  } else if (isOptions) {
     if (currentFilter === "bullish") {
       filtered = scanData.filter(d => d.Direction === "Bullish");
     } else if (currentFilter === "bearish") {
@@ -487,16 +542,28 @@ function renderResults() {
     return;
   }
 
-  const cardBuilder = isOptions ? buildOptionsCard : buildCard;
+  let cardBuilder = buildCard;
+  if (isOptionsSpreads) cardBuilder = buildOptionsSpreadsCard;
+  else if (isOptions) cardBuilder = buildOptionsCard;
+
   el.innerHTML = `<div class="cards">${filtered.map(cardBuilder).join("")}</div>`;
 }
 
 // ── Stats bar ──────────────────────────────────────────────
 
 function updateStats() {
+  const isOptionsSpreads = (scanData[0] && scanData[0]["Spread (%)"] !== undefined);
   const isOptions = (scanData[0] && scanData[0].Direction !== undefined);
 
-  if (isOptions) {
+  if (isOptionsSpreads) {
+    const callsCount = scanData.filter(d => d.Type === "CALL").length;
+    const putsCount = scanData.filter(d => d.Type === "PUT").length;
+    document.getElementById("statTotal").textContent = scanData.length;
+    document.getElementById("statBull").textContent = callsCount;
+    document.getElementById("statBear").textContent = putsCount;
+    document.querySelectorAll(".stat__label")[1].textContent = "Calls";
+    document.querySelectorAll(".stat__label")[2].textContent = "Puts";
+  } else if (isOptions) {
     const bullCount = scanData.filter(d => d.Direction === "Bullish").length;
     const bearCount = scanData.filter(d => d.Direction === "Bearish").length;
     document.getElementById("statTotal").textContent = scanData.length;
@@ -520,9 +587,12 @@ function updateStats() {
 // ── Display results (shared logic) ─────────────────────────
 
 function displayResults(data) {
+  const isOptionsSpreads = (data.mode === "options_spreads" || (data.results && data.results[0] && data.results[0]["Spread (%)"] !== undefined));
   const isOptions = (data.results && data.results[0] && data.results[0].Direction !== undefined);
 
-  if (isOptions) {
+  if (isOptionsSpreads) {
+    scanData = (data.results || []).sort((a, b) => (a["Spread (%)"] || 0) - (b["Spread (%)"] || 0));
+  } else if (isOptions) {
     scanData = (data.results || []).sort((a, b) => (b["Catalyst Score"] || 0) - (a["Catalyst Score"] || 0));
   } else {
     scanData = (data.results || []).sort((a, b) => (b.Score || 0) - (a.Score || 0));
@@ -534,11 +604,14 @@ function displayResults(data) {
   document.getElementById("tsValue").textContent = data.timestamp;
 
   const badge = document.getElementById("scanBadge");
-  if (data.tickers_scanned) {
+  if (isOptionsSpreads) {
+    badge.textContent = `Watchlist Option Plays`;
+    badge.classList.remove("hidden");
+  } else if (data.tickers_scanned) {
     badge.textContent = `Scanned ${data.tickers_scanned.toLocaleString()} tickers`;
     badge.classList.remove("hidden");
   } else if (data.mode === "watchlist") {
-    badge.textContent = `Watchlist scan (all criteria)`;
+    badge.textContent = `Watchlist option plays (all criteria)`;
     badge.classList.remove("hidden");
   } else {
     badge.classList.add("hidden");
@@ -551,9 +624,8 @@ function displayResults(data) {
     b.classList.remove("filter-btn--active"));
   document.querySelector('[data-filter="all"]').classList.add("filter-btn--active");
 
-  // Update filter labels
   let bullLabel, bearLabel;
-  if (isOptions) {
+  if (isOptionsSpreads || isOptions) {
     bullLabel = "🟢 Calls";
     bearLabel = "🔴 Puts";
   } else {
@@ -563,9 +635,8 @@ function displayResults(data) {
   document.querySelector('[data-filter="bullish"]').textContent = bullLabel;
   document.querySelector('[data-filter="bearish"]').textContent = bearLabel;
 
-  // Hide "both" filter for options mode (not applicable)
   const bothBtn = document.querySelector('[data-filter="both"]');
-  if (isOptions) {
+  if (isOptionsSpreads || isOptions) {
     bothBtn.classList.add("hidden");
   } else {
     bothBtn.classList.remove("hidden");
@@ -605,7 +676,7 @@ function setFilter(filter, btnEl) {
 
 // ── Progress polling (both scan modes) ─────────────────────
 
-function startProgressPolling() {
+function startProgressPolling(scanType = "watchlist") {
   if (hideTimeout) {
     clearTimeout(hideTimeout);
     hideTimeout = null;
@@ -613,8 +684,7 @@ function startProgressPolling() {
   const wrap = document.getElementById("progressWrap");
   wrap.classList.remove("hidden");
 
-  // Disable buttons and set loading state for the scanner button
-  const btn = document.getElementById("scanBtn");
+  const btn = document.getElementById(scanType === "options_spreads" ? "scanSpreadsBtn" : "scanBtn");
   btn.classList.add("scan-btn--loading");
   btn.disabled = true;
 
@@ -627,12 +697,12 @@ function startProgressPolling() {
       const res = await fetch(`/api/scan/progress?t=${Date.now()}`);
       const p = await res.json();
 
-      // Only stop polling when scan completes or encounters an error
       if (p.status === "done" || p.status === "error") {
         stopProgressPolling();
 
         if (p.status === "done") {
-          const resData = await fetch(`/api/scan/watchlist/results?t=${Date.now()}`);
+          const resultsUrl = scanType === "options_spreads" ? "/api/scan/options/tight_spreads/results" : "/api/scan/watchlist/results";
+          const resData = await fetch(`${resultsUrl}?t=${Date.now()}`);
           const data = await resData.json();
           if (data.ok) {
             displayResults(data);
@@ -647,18 +717,20 @@ function startProgressPolling() {
           `;
         }
 
-        const scanBtn = document.getElementById("scanBtn");
-        scanBtn.classList.remove("scan-btn--loading");
-        scanBtn.disabled = false;
+        document.getElementById("scanBtn").classList.remove("scan-btn--loading");
+        document.getElementById("scanBtn").disabled = false;
+        if (document.getElementById("scanSpreadsBtn")) {
+          document.getElementById("scanSpreadsBtn").classList.remove("scan-btn--loading");
+          document.getElementById("scanSpreadsBtn").disabled = false;
+        }
         return;
       }
 
-      // If running, update UI
       document.getElementById("progressPhase").textContent = p.phase_label || "Working...";
       document.getElementById("progressPct").textContent = `${p.pct}%`;
       document.getElementById("progressFill").style.width = `${p.pct}%`;
       document.getElementById("progressDetail").textContent =
-        p.found > 0 ? `${p.found} signals found` : "";
+        p.found > 0 ? `${p.found} matches found` : "";
       document.getElementById("progressEta").textContent = fmtEta(p.eta_seconds);
 
       const fill = document.getElementById("progressFill");
@@ -690,15 +762,14 @@ function stopProgressPolling() {
 
 // ── Main scan ──────────────────────────────────────────────
 
-async function runScan() {
-  const btn = document.getElementById("scanBtn");
+async function runScan(scanType = "watchlist") {
+  const btn = document.getElementById(scanType === "options_spreads" ? "scanSpreadsBtn" : "scanBtn");
   btn.classList.add("scan-btn--loading");
   btn.disabled = true;
 
   document.getElementById("emptyState")?.classList.add("hidden");
   document.getElementById("results").innerHTML = "";
 
-  // Hide old results dashboard components while new scan is running
   document.getElementById("statsBar")?.classList.add("hidden");
   document.getElementById("timestamp")?.classList.add("hidden");
   document.getElementById("scanBadge")?.classList.add("hidden");
@@ -706,10 +777,9 @@ async function runScan() {
 
   const extHours = document.getElementById("extHoursToggle")?.checked || false;
 
-  const endpoint = "/api/scan/watchlist";
-  const resultsEndpoint = "/api/scan/watchlist/results";
+  const endpoint = scanType === "options_spreads" ? "/api/scan/options/tight_spreads" : "/api/scan/watchlist";
+  const payload = scanType === "options_spreads" ? { use_watchlist: true } : { extended_hours: extHours };
 
-  // Retry logic for Render cold starts
   const maxRetries = 3;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -727,12 +797,12 @@ async function runScan() {
       const res = await fetch(endpoint, { 
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ extended_hours: extHours })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || "Failed to start scan");
-      startProgressPolling();
-      return; // success — exit the retry loop
+      startProgressPolling(scanType);
+      return;
     } catch (err) {
       if (attempt === maxRetries) {
         let errorHtml = `

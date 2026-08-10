@@ -25,7 +25,7 @@
     <!-- Header -->
     <header class="header">
       <span class="header__icon">📋</span>
-      <h1 class="header__title">Watchlist Scanner</h1>
+      <h1 class="header__title">Watchlist Option Plays</h1>
       <p class="header__subtitle" id="headerSubtitle">All Criteria × Your Custom Watchlist</p>
     </header>
 
@@ -44,11 +44,17 @@
       </label>
     </div>
 
-    <!-- Scan Button -->
-    <button class="scan-btn" id="scanBtn" onclick="runScan()">
-      <div class="scan-btn__spinner"></div>
-      <span class="scan-btn__text">📋  Scan Watchlist</span>
-    </button>
+    <!-- Scan Buttons -->
+    <div style="display: flex; gap: 10px; width: 100%; margin-bottom: 16px;">
+      <button class="scan-btn" id="scanBtn" onclick="runScan('watchlist')" style="flex: 1;">
+        <div class="scan-btn__spinner"></div>
+        <span class="scan-btn__text">📋 Watchlist Reversals</span>
+      </button>
+      <button class="scan-btn" id="scanSpreadsBtn" onclick="runScan('options_spreads')" style="flex: 1; background: linear-gradient(135deg, #059669, #10b981);">
+        <div class="scan-btn__spinner"></div>
+        <span class="scan-btn__text">🎯 Watchlist Option Plays</span>
+      </button>
+    </div>
 
     <!-- Progress bar (full scan only) -->
     <div class="progress-wrap hidden" id="progressWrap">

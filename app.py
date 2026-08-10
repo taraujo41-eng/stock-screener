@@ -1,5 +1,7 @@
 import sys
 
+import pandas as pd
+import numpy as np
 from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
 from reversal_scanner import (
@@ -8,6 +10,7 @@ from reversal_scanner import (
     fifty_two_week_reversal_scan,
     rsi_divergence_full_market_scan,
     options_directional_exhaustion_scan,
+    tight_spread_options_scan,
     watchlist_scan,
     options_watchlist_scan,
     scan_progress, _reset_progress
@@ -54,6 +57,7 @@ TWO_SIGMA_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_2sigma_sc
 FIFTY_TWO_WEEK_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_52w_scan.json")
 RSIDIV_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_rsidiv_scan.json")
 OPTIONS_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_options_scan.json")
+OPTIONS_SPREADS_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_options_spreads_scan.json")
 WATCHLIST_FILE = os.path.join(os.path.dirname(__file__), "watchlist.json")
 WATCHLIST_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_watchlist_scan.json")
 OPTIONS_WATCHLIST_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_options_watchlist_scan.json")
@@ -227,7 +231,7 @@ def scan_3sigma_results():
 
 @app.route("/api/scan/options", methods=["POST"])
 def scan_options():
-    """Start a full market Options Directional Exhaustion scan in the background."""
+    """Start an Options setup scan on custom watchlist tickers in the background."""
     global _scan_running
 
     with _scan_lock:
@@ -235,13 +239,17 @@ def scan_options():
             return _scan_conflict_response()
         _scan_running = True
         _reset_progress(status="running", mode="options")
-        scan_progress["phase_label"] = "Initiating Options scan..."
+        scan_progress["phase_label"] = "Initiating Watchlist Options scan..."
+
+    req_data = request.get_json(silent=True) or {}
+    extended_hours = req_data.get("extended_hours", False)
 
     def _run():
         global _scan_running
         try:
             et_tz = get_ny_timezone()
-            df = options_directional_exhaustion_scan()
+            watchlist = load_watchlist()
+            df = options_watchlist_scan(watchlist, extended_hours=extended_hours)
             results_data = {
                 "ok": True,
                 "mode": "options",
@@ -263,7 +271,7 @@ def scan_options():
                 _scan_running = False
 
     threading.Thread(target=_run, daemon=False).start()
-    return jsonify({"ok": True, "message": "Options scan started"})
+    return jsonify({"ok": True, "message": "Options watchlist scan started"})
 
 @app.route("/api/scan/options/results", methods=["GET"])
 def scan_options_results():
@@ -275,6 +283,67 @@ def scan_options_results():
     if results is None:
         return jsonify({"ok": False, "error": "No scan results available"}), 404
     return jsonify(results)
+
+
+@app.route("/api/scan/options/tight_spreads", methods=["POST"])
+def scan_options_tight_spreads():
+    """Start a Tightest Bid-Ask Spread Options scan in the background."""
+    global _scan_running
+
+    with _scan_lock:
+        if _scan_running:
+            return _scan_conflict_response()
+        _scan_running = True
+        _reset_progress(status="running", mode="options_spreads")
+        scan_progress["phase_label"] = "Initiating Tight Spreads Options scan..."
+
+    req_data = request.get_json(silent=True) or {}
+    use_watchlist = req_data.get("use_watchlist", True)
+
+    def _run():
+        global _scan_running
+        try:
+            et_tz = get_ny_timezone()
+            watchlist = load_watchlist()
+            tickers = watchlist if use_watchlist else None
+            df = tight_spread_options_scan(tickers=tickers)
+            if not df.empty and watchlist:
+                df = df[df["Ticker"].isin(watchlist)]
+            results_data = {
+                "ok": True,
+                "mode": "options_spreads",
+                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
+                "count": len(df) if not df.empty else 0,
+                "results": df.to_dict(orient="records") if not df.empty else [],
+            }
+            app.config["LAST_OPTIONS_SPREADS_RESULTS"] = results_data
+            save_last_scan(results_data, OPTIONS_SPREADS_RESULTS_FILE)
+            scan_progress["status"] = "done"
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            app.config["LAST_OPTIONS_SPREADS_RESULTS"] = {"ok": False, "error": str(e), "traceback": traceback.format_exc()}
+            scan_progress["status"] = "error"
+            scan_progress["phase_label"] = traceback.format_exc()
+        finally:
+            with _scan_lock:
+                _scan_running = False
+
+    threading.Thread(target=_run, daemon=False).start()
+    return jsonify({"ok": True, "message": "Tight Spreads Options scan started"})
+
+
+@app.route("/api/scan/options/tight_spreads/results", methods=["GET"])
+def scan_options_tight_spreads_results():
+    results = app.config.get("LAST_OPTIONS_SPREADS_RESULTS")
+    if results is None:
+        results = load_last_scan(OPTIONS_SPREADS_RESULTS_FILE)
+        if results:
+            app.config["LAST_OPTIONS_SPREADS_RESULTS"] = results
+    if results is None:
+        return jsonify({"ok": False, "error": "No scan results available"}), 404
+    return jsonify(results)
+
 
 
 # ── API: 2-Sigma Scans (async) ──────────────────────────────────────
@@ -469,6 +538,8 @@ def scan_watchlist():
             with open("/tmp/scan_debug.log", "a") as f:
                 f.write(f"[{datetime.now()}] Scan started for {len(current_watchlist)} tickers\n")
             df = watchlist_scan(current_watchlist, extended_hours=extended_hours)
+            if not df.empty:
+                df = df[df["Ticker"].isin(current_watchlist)]
             raw_records = df.to_dict(orient="records") if not df.empty else []
             clean_records = sanitize_for_json(raw_records)
             results_data = {
@@ -961,6 +1032,98 @@ def get_logs():
             return f"Error reading log: {e}", 500
     return "Log file not found", 404
 
+# ── Paper Trading API Endpoints ──────────────────────────────────────
+
+@app.route("/api/paper/status", methods=["GET"])
+def paper_status():
+    """Get paper trader status, P&L, and risk limits."""
+    try:
+        from paper_trader import get_paper_trader
+        pt = get_paper_trader()
+        return jsonify(pt.get_status()), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/paper/positions", methods=["GET"])
+def paper_positions():
+    """Get current open paper trading positions."""
+    try:
+        from paper_trader import get_paper_trader
+        pt = get_paper_trader()
+        return jsonify({
+            "open_positions": [
+                {
+                    "id": p.get("id"),
+                    "ticker": p.get("ticker"),
+                    "option_symbol": p.get("option_symbol"),
+                    "type": p.get("type"),
+                    "strike": p.get("strike"),
+                    "entry_price": p.get("entry_price"),
+                    "entry_time": p.get("entry_time"),
+                    "vwap_target": p.get("vwap_target"),
+                    "quantity": p.get("quantity"),
+                    "signal_type": p.get("signal_type"),
+                }
+                for p in pt._open_positions if p.get("status") == "open"
+            ]
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/paper/orders", methods=["GET"])
+def paper_orders():
+    """Get recent paper trading order history from Webull."""
+    try:
+        from paper_trader import get_paper_trader
+        pt = get_paper_trader()
+        orders = pt.get_orders(status="All", count=50)
+        return jsonify({"orders": orders}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/paper/trade-log", methods=["GET"])
+def paper_trade_log():
+    """Get full trade history with P&L from local trade log."""
+    try:
+        from paper_trader import get_paper_trader
+        pt = get_paper_trader()
+        log = pt.get_trade_log()
+        trades = log.get("trades", [])
+
+        # Compute summary stats
+        closed = [t for t in trades if t.get("status") == "closed" and t.get("pnl") is not None]
+        total_pnl = sum(t["pnl"] for t in closed)
+        wins = len([t for t in closed if t["pnl"] > 0])
+        losses = len([t for t in closed if t["pnl"] <= 0])
+
+        return jsonify({
+            "trades": trades,
+            "summary": {
+                "total_trades": len(trades),
+                "closed_trades": len(closed),
+                "open_trades": len([t for t in trades if t.get("status") == "open"]),
+                "total_pnl": round(total_pnl, 2),
+                "wins": wins,
+                "losses": losses,
+                "win_rate": round(wins / max(1, wins + losses) * 100, 1),
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/paper/toggle", methods=["POST"])
+def paper_toggle():
+    """Enable or disable paper trading."""
+    try:
+        from paper_trader import get_paper_trader
+        pt = get_paper_trader()
+        data = request.get_json(silent=True) or {}
+        enabled = data.get("enabled")  # Optional: force a specific state
+        new_state = pt.toggle(enabled=enabled)
+        return jsonify({"enabled": new_state}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # ── Start ────────────────────────────────────────────────────────────
 
 def get_local_ip():
@@ -974,15 +1137,13 @@ def get_local_ip():
         return "localhost"
 
 if __name__ == "__main__":
-    ip = get_local_ip()
     port = 5050
+    local_ip = get_local_ip()
     print("=" * 55)
     print("  📈  STOCK REVERSAL & MOMENTUM SCANNER — WEB SERVER")
     print("=" * 55)
-    print(f"  Local  :  http://localhost:{port}")
-    print(f"  Phone  :  http://{ip}:{port}")
-    print()
-    print("  Open the Phone URL on your phone's browser")
-    print("  (both devices must be on the same Wi-Fi)")
+    print(f"  Local  :  http://127.0.0.1:{port}")
+    print(f"  Phone  :  http://{local_ip}:{port}")
     print("=" * 55)
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+

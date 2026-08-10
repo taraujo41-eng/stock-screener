@@ -6,6 +6,7 @@ import smtplib
 import threading
 import pytz
 import json
+import traceback as tb
 
 def get_ny_timezone():
     try:
@@ -118,6 +119,42 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target):
             f"<b>VWAP Target:</b> ${vwap_target:.2f}"
         )
         send_telegram_notification(tg_msg)
+    
+    # 3. Place Paper Trade (if enabled)
+    try:
+        from paper_trader import get_paper_trader
+        pt = get_paper_trader()
+        if pt.enabled:
+            trade_signal = "bullish" if action == "BUY" else "bearish"
+            result = pt.place_option_order(
+                ticker=ticker,
+                signal_type=trade_signal,
+                last_price=last_price,
+                vwap_target=vwap_target
+            )
+            if result:
+                logger.info(f"📈 Paper trade placed for {ticker}: {result.get('option_symbol', '')} @ ${result.get('entry_price', 0):.2f}")
+                
+                # Send trade notification via same alert method
+                trade_msg = (
+                    f"📈 PAPER TRADE PLACED: {ticker}\n"
+                    f"Option: {result.get('type', '')} ${result.get('strike', '')}\n"
+                    f"Price: ${result.get('entry_price', 0):.2f}\n"
+                    f"Qty: {result.get('quantity', 1)} contract(s)"
+                )
+                if alert_method in ("SMS", "BOTH"):
+                    send_sms_notification(trade_msg)
+                if alert_method in ("TELEGRAM", "BOTH"):
+                    tg_trade = (
+                        f"📈 <b>PAPER TRADE PLACED: {ticker}</b>\n\n"
+                        f"<b>Option:</b> {result.get('type', '')} ${result.get('strike', '')}\n"
+                        f"<b>Price:</b> ${result.get('entry_price', 0):.2f}\n"
+                        f"<b>Qty:</b> {result.get('quantity', 1)} contract(s)"
+                    )
+                    send_telegram_notification(tg_trade)
+    except Exception as e:
+        logger.error(f"Paper trade error for {ticker}: {e}")
+        tb.print_exc()
 
 def evaluate_ticker_process(ticker, df):
     """
@@ -399,7 +436,7 @@ def bot_loop():
             time.sleep(60)
 
 def start_bot_thread():
-    """Starts the bot loop and keep-alive pinger in daemon background threads."""
+    """Starts the bot loop, keep-alive pinger, and paper trader in daemon background threads."""
     # Keep-alive thread — ensures Render doesn't spin down
     ka = threading.Thread(target=_keep_alive_loop, daemon=True)
     ka.start()
@@ -409,4 +446,18 @@ def start_bot_thread():
     t = threading.Thread(target=bot_loop, daemon=True)
     t.start()
     logger.info("3-Sigma background alert bot thread spawned.")
-
+    
+    # Paper trader — authenticate and start position monitor
+    try:
+        from paper_trader import get_paper_trader
+        pt = get_paper_trader()
+        if pt.enabled:
+            if pt.login():
+                pt.start_monitor_thread()
+                logger.info("Paper trader initialized and position monitor started.")
+            else:
+                logger.warning("Paper trader login failed — auto-trading disabled.")
+        else:
+            logger.info("Paper trading is disabled (PAPER_TRADE_ENABLED=false).")
+    except Exception as e:
+        logger.error(f"Failed to initialize paper trader: {e}")

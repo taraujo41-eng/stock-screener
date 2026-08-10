@@ -432,6 +432,15 @@ def _fetch_webull_unofficial_one(ticker, days=180, interval="1d", includePrePost
                 quote = wb_un.get_quote(stock=ticker)
                 if quote:
                     pre_close = float(quote.get("close", pre_close))
+                    p_price = quote.get("pPrice")
+                    if p_price and float(p_price) > 0 and includePrePost == "true":
+                        ext_price = float(p_price)
+                        df.loc[df.index[-1], "Close"] = ext_price
+                        if ext_price > df.loc[df.index[-1], "High"]:
+                            df.loc[df.index[-1], "High"] = ext_price
+                        if ext_price < df.loc[df.index[-1], "Low"]:
+                            df.loc[df.index[-1], "Low"] = ext_price
+                        print(f"  🌙 [Extended Hours] {ticker} live price updated to ${ext_price:.2f}")
             except Exception:
                 pass
                 
