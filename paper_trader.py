@@ -149,17 +149,23 @@ class PaperTrader:
             region = os.getenv("WEBULL_REGION", "us")
 
             if not app_key or not app_secret or app_key == "your_app_key_here":
-                logger.error("[PaperTrader] WEBULL_APP_KEY / WEBULL_APP_SECRET not configured in .env")
-                return False
+                logger.info("[PaperTrader] ℹ️ Webull OpenAPI keys not present in environment. Activating 100% Safe Simulation Mode for paper trading.")
+                self._account_id = "SIMULATED_PAPER_ACCOUNT"
+                self._is_real_paper_account = False
+                self._logged_in = True
+                return True
 
             # Check if we have a valid cached token
             token_file = os.path.join(os.path.dirname(__file__), "conf", "token.txt")
             if not os.path.exists(token_file):
-                logger.error(
-                    "[PaperTrader] No cached token found. Run `python3 paper_trader.py --login` "
-                    "to authenticate via 2FA first."
+                logger.info(
+                    "[PaperTrader] ℹ️ No cached OpenAPI token found on server. "
+                    "Activating 100% Safe Simulation Mode for paper trading."
                 )
-                return False
+                self._account_id = "SIMULATED_PAPER_ACCOUNT"
+                self._is_real_paper_account = False
+                self._logged_in = True
+                return True
 
             # Read and validate token
             with open(token_file, "r") as f:
