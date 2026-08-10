@@ -14,6 +14,7 @@ Data source: Yahoo Finance chart API via data_fetcher.py
 import pandas as pd
 import numpy as np
 import requests
+import threading
 from datetime import datetime, timedelta
 from io import StringIO
 import time
