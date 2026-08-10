@@ -34,7 +34,7 @@ warnings.filterwarnings("ignore")
 
 _webull_unofficial_failures = 0
 _webull_openapi_failures = 0
-_WEBULL_MAX_FAILURES = 5  # After this many consecutive failures, skip for the rest of the scan
+_WEBULL_MAX_FAILURES = 1  # After 1 failure, immediately trip circuit breaker to use Yahoo Finance fallback
 
 def reset_webull_circuit_breaker():
     """Reset the circuit breaker — call at the start of each new scan."""
@@ -764,10 +764,18 @@ def fetch_batch_concurrent(tickers, days=180, max_workers=8,
 
         for future in as_completed(futures):
             completed += 1
+            ticker = futures[future]
+            if on_progress:
+                try:
+                    on_progress(completed, total, ticker)
+                except Exception:
+                    pass
             try:
-                ticker, res = future.result(timeout=20)
+                t, res = future.result(timeout=20)
                 if res is not None:
-                    data[ticker] = res
+                    data[t] = res
+            except Exception as e:
+                print(f"[fetch_batch_concurrent] Error fetching {ticker}: {e}")
                 if on_progress:
                     on_progress(completed, total, ticker)
             except Exception as e:
