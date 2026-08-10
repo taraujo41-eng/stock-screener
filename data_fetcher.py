@@ -475,29 +475,37 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webu
 
     # 1. Try Option B (Unofficial Session — Inherits all real-time quotes subscriptions)
     if not skip_webull and _webull_unofficial_failures < _WEBULL_MAX_FAILURES:
-        wb_un = get_unofficial_client()
-        if wb_un:
-            df = _fetch_webull_unofficial_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
-            if df is not None:
-                _webull_unofficial_failures = 0  # Reset on success
-                return df
-            else:
-                _webull_unofficial_failures += 1
-                if _webull_unofficial_failures >= _WEBULL_MAX_FAILURES:
-                    print(f"[Circuit Breaker] Webull Unofficial failed {_WEBULL_MAX_FAILURES}x consecutively — skipping for rest of scan")
+        try:
+            wb_un = get_unofficial_client()
+            if wb_un:
+                df = _fetch_webull_unofficial_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
+                if df is not None:
+                    _webull_unofficial_failures = 0  # Reset on success
+                    return df
+                else:
+                    _webull_unofficial_failures += 1
+        except Exception as e:
+            print(f"[Webull Unofficial] Error fetching {ticker}: {e}")
+            _webull_unofficial_failures += 1
+            if _webull_unofficial_failures >= _WEBULL_MAX_FAILURES:
+                print(f"[Circuit Breaker] Webull Unofficial failed {_WEBULL_MAX_FAILURES}x consecutively — skipping for rest of scan")
             
     # 2. Try Option A (Official OpenAPI — Requires separate developer subscription toggles)
     if not skip_webull and _webull_openapi_failures < _WEBULL_MAX_FAILURES:
-        wb_openapi = get_webull_client()
-        if wb_openapi:
-            df = _fetch_webull_openapi_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
-            if df is not None:
-                _webull_openapi_failures = 0  # Reset on success
-                return df
-            else:
-                _webull_openapi_failures += 1
-                if _webull_openapi_failures >= _WEBULL_MAX_FAILURES:
-                    print(f"[Circuit Breaker] Webull OpenAPI failed {_WEBULL_MAX_FAILURES}x consecutively — skipping for rest of scan")
+        try:
+            wb_openapi = get_webull_client()
+            if wb_openapi:
+                df = _fetch_webull_openapi_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
+                if df is not None:
+                    _webull_openapi_failures = 0  # Reset on success
+                    return df
+                else:
+                    _webull_openapi_failures += 1
+        except Exception as e:
+            print(f"[Webull OpenAPI] Error fetching {ticker}: {e}")
+            _webull_openapi_failures += 1
+            if _webull_openapi_failures >= _WEBULL_MAX_FAILURES:
+                print(f"[Circuit Breaker] Webull OpenAPI failed {_WEBULL_MAX_FAILURES}x consecutively — skipping for rest of scan")
 
     # 3. Fallback to Yahoo Finance public chart API (100% reliable cloud fallback)
     try:
@@ -927,9 +935,17 @@ def test_connection(ticker="AAPL"):
             diag["webull_openapi_error"] = str(e)
     else:
         diag["webull_openapi_ok"] = False
-        diag["webull_openapi_error"] = "OpenAPI credentials not configured in .env"
+    # 3. Test Yahoo Finance Fallback
+    try:
+        df_yf = _fetch_yahoo_fallback_one(ticker, days=10, interval="1d")
+        diag["yahoo_fallback_ok"] = df_yf is not None and not df_yf.empty
+        if diag["yahoo_fallback_ok"]:
+            diag["yahoo_fallback_rows"] = len(df_yf)
+    except Exception as e:
+        diag["yahoo_fallback_ok"] = False
+        diag["yahoo_fallback_error"] = str(e)
 
-    diag["ok"] = diag["webull_unofficial_ok"] or diag["webull_openapi_ok"]
+    diag["ok"] = diag["webull_unofficial_ok"] or diag["webull_openapi_ok"] or diag.get("yahoo_fallback_ok", False)
     return diag
 
 
