@@ -350,86 +350,92 @@ def bot_loop():
                 logger.info("Market is closed (weekends or outside 9:30 AM - 4:15 PM EST). Bot sleeping for 5 minutes...")
                 time.sleep(300)
                 continue
-                
-            logger.info("--- Starting 3-Sigma Reversal Bot Cycle ---")
-            
-            # 1. Determine tickers to scan
-            tickers_mode = os.getenv("TICKERS_3SIGMA", "ALL").upper().strip()
-            
-            tickers = []
-            if tickers_mode == "ALL":
-                try:
-                    from reversal_scanner import get_us_tickers
-                    tickers = get_us_tickers()
-                except Exception as e:
-                    logger.error(f"Failed to load full US tickers list: {e}")
-            elif tickers_mode == "WATCHLIST":
-                try:
-                    watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
-                    if os.path.exists(watchlist_file):
-                        with open(watchlist_file, "r") as f:
-                            tickers = json.load(f)
-                        logger.info(f"Loaded {len(tickers)} tickers from watchlist.json")
-                except Exception as e:
-                    logger.error(f"Failed to load watchlist.json: {e}")
-            
-            # Fallback if all fails or custom comma-separated list
-            if not tickers:
-                tickers_str = os.getenv("TICKERS_3SIGMA", "AAPL,MSFT,NVDA,SPY,QQQ")
-                if tickers_str.upper() in ("ALL", "WATCHLIST"):
-                    tickers_str = "AAPL,MSFT,NVDA,SPY,QQQ"
-                tickers = [t.strip().upper() for t in tickers_str.split(",") if t.strip()]
-                
-            # Apply liquidity and optionability filters (market cap >= 10B, volume >= 1M)
-            try:
-                from reversal_scanner import prefilter_liquid_optionable
-                tickers = prefilter_liquid_optionable(tickers)
-            except Exception as e:
-                logger.error(f"Failed to apply pre-filter: {e}")
 
-            candle_interval = os.getenv("CANDLE_INTERVAL_3SIGMA", "15m")
-            scan_interval = int(os.getenv("SCAN_INTERVAL_3SIGMA", "60"))
-            
-            # For 3-Sigma scanner, force candle_interval to 1d (daily candles)
-            candle_interval = "1d"
-            
-            # 2. Pre-calculate daily bands
-            precalculate_daily_bands(tickers)
-            
-            logger.info(f"Scanning {len(tickers)} tickers in parallel (Daily candles)...")
-            
-            # 3. Download and compute 15m in parallel
-            results = fetch_batch_concurrent(
-                tickers=tickers,
-                days=15,
-                max_workers=25,
-                interval=candle_interval,
-                includePrePost="false",  # Regular market hours only
-                process_fn=evaluate_ticker_process,
-                skip_webull=False
-            )
-            
-            # 4. Process matches in main thread
-            triggered_count = 0
-            for ticker, res in results.items():
-                if res:
-                    candle_time = res.get('time')
-                    if candle_time and _last_alerts_sent.get(ticker) == candle_time:
-                        continue
-                        
-                    trigger_alerts(
-                        ticker=ticker,
-                        action=res['action'],
-                        signal_type=res['type'],
-                        last_price=res['price'],
-                        vwap_target=res['vwap']
-                    )
-                    if candle_time:
-                        _last_alerts_sent[ticker] = candle_time
-                    triggered_count += 1
+            from reversal_scanner import acquire_scan_lock, release_scan_lock
+            if not acquire_scan_lock("Background-3Sigma-Bot"):
+                logger.info("A user manual scan is currently running — skipping background bot cycle for 60s...")
+                time.sleep(60)
+                continue
+
+            logger.info("--- Starting 3-Sigma Reversal Bot Cycle ---")
+            try:
+                # 1. Determine tickers to scan
+                tickers_mode = os.getenv("TICKERS_3SIGMA", "ALL").upper().strip()
+                
+                tickers = []
+                if tickers_mode == "ALL":
+                    try:
+                        from reversal_scanner import get_us_tickers
+                        tickers = get_us_tickers()
+                    except Exception as e:
+                        logger.error(f"Failed to load full US tickers list: {e}")
+                elif tickers_mode == "WATCHLIST":
+                    try:
+                        watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
+                        if os.path.exists(watchlist_file):
+                            with open(watchlist_file, "r") as f:
+                                tickers = json.load(f)
+                            logger.info(f"Loaded {len(tickers)} tickers from watchlist.json")
+                    except Exception as e:
+                        logger.error(f"Failed to load watchlist.json: {e}")
+                
+                # Fallback if all fails or custom comma-separated list
+                if not tickers:
+                    tickers_str = os.getenv("TICKERS_3SIGMA", "AAPL,MSFT,NVDA,SPY,QQQ")
+                    if tickers_str.upper() in ("ALL", "WATCHLIST"):
+                        tickers_str = "AAPL,MSFT,NVDA,SPY,QQQ"
+                    tickers = [t.strip().upper() for t in tickers_str.split(",") if t.strip()]
                     
-            logger.info(f"--- 3-Sigma Bot Cycle Complete. Triggers found: {triggered_count}. Sleeping for {scan_interval}s ---")
-            time.sleep(scan_interval)
+                # Apply liquidity and optionability filters
+                try:
+                    from reversal_scanner import prefilter_liquid_optionable
+                    tickers = prefilter_liquid_optionable(tickers)
+                except Exception as e:
+                    logger.error(f"Failed to apply pre-filter: {e}")
+
+                candle_interval = os.getenv("CANDLE_INTERVAL_3SIGMA", "15m")
+                scan_interval = int(os.getenv("SCAN_INTERVAL_3SIGMA", "60"))
+                candle_interval = "1d"
+                
+                # 2. Pre-calculate daily bands
+                precalculate_daily_bands(tickers)
+                
+                logger.info(f"Scanning {len(tickers)} tickers in parallel (Daily candles)...")
+                
+                # 3. Download and compute in parallel
+                results = fetch_batch_concurrent(
+                    tickers=tickers,
+                    days=15,
+                    max_workers=25,
+                    interval=candle_interval,
+                    includePrePost="false",
+                    process_fn=evaluate_ticker_process,
+                    skip_webull=False
+                )
+                
+                # 4. Process matches in main thread
+                triggered_count = 0
+                for ticker, res in results.items():
+                    if res:
+                        candle_time = res.get('time')
+                        if candle_time and _last_alerts_sent.get(ticker) == candle_time:
+                            continue
+                            
+                        trigger_alerts(
+                            ticker=ticker,
+                            action=res['action'],
+                            signal_type=res['type'],
+                            last_price=res['price'],
+                            vwap_target=res['vwap']
+                        )
+                        if candle_time:
+                            _last_alerts_sent[ticker] = candle_time
+                        triggered_count += 1
+                        
+                logger.info(f"--- 3-Sigma Bot Cycle Complete. Triggers found: {triggered_count}. Sleeping for {scan_interval}s ---")
+                time.sleep(scan_interval)
+            finally:
+                release_scan_lock()
             
         except Exception as e:
             logger.error(f"General exception in bot_loop: {e}")

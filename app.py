@@ -136,9 +136,24 @@ def save_last_scan(data, filepath=THREE_SIGMA_RESULTS_FILE):
         except Exception as e:
             print(f"Failed to save scan results to {p}: {e}")
 
-# Track whether a full scan is in progress
+# Track whether a scan is in progress (using unified system lock)
+from reversal_scanner import acquire_scan_lock, release_scan_lock
 _scan_lock = threading.Lock()
 _scan_running = False
+
+def _acquire_scan(owner="WebApp"):
+    global _scan_running
+    with _scan_lock:
+        if _scan_running or not acquire_scan_lock(owner):
+            return False
+        _scan_running = True
+        return True
+
+def _release_scan():
+    global _scan_running
+    with _scan_lock:
+        _scan_running = False
+    release_scan_lock()
 
 # ── Static files ─────────────────────────────────────────────────────
 
@@ -159,13 +174,10 @@ def scan_full_progress():
 @app.route("/api/scan/cancel", methods=["POST"])
 def scan_cancel():
     """Force-cancel any stuck/zombie scan and reset the lock."""
-    global _scan_running
-    with _scan_lock:
-        was_running = _scan_running
-        _scan_running = False
+    _release_scan()
     _reset_progress()
     scan_progress["status"] = "idle"
-    return jsonify({"ok": True, "was_running": was_running, "message": "Scan cancelled and lock released"})
+    return jsonify({"ok": True, "message": "Scan cancelled and lock released"})
 
 
 # ── API: 3-Sigma Scans (async) ──────────────────────────────────────
@@ -176,20 +188,15 @@ def _scan_conflict_response():
 @app.route("/api/scan/3sigma", methods=["POST"])
 def scan_3sigma():
     """Start a full market 3-sigma scan in the background."""
-    global _scan_running
-
-    with _scan_lock:
-        if _scan_running:
-            return _scan_conflict_response()
-        _scan_running = True
-        _reset_progress(status="running", mode="3sigma")
-        scan_progress["phase_label"] = "Initiating scan..."
+    if not _acquire_scan("3Sigma-User"):
+        return _scan_conflict_response()
+    _reset_progress(status="running", mode="3sigma")
+    scan_progress["phase_label"] = "Initiating scan..."
 
     req_data = request.get_json(silent=True) or {}
     extended_hours = req_data.get("extended_hours", False)
 
     def _run():
-        global _scan_running
         try:
             et_tz = get_ny_timezone()
             df = three_sigma_full_market_scan(extended_hours=extended_hours)
@@ -210,8 +217,7 @@ def scan_3sigma():
             scan_progress["status"] = "error"
             scan_progress["phase_label"] = traceback.format_exc()
         finally:
-            with _scan_lock:
-                _scan_running = False
+            _release_scan()
 
     threading.Thread(target=_run, daemon=False).start()
     return jsonify({"ok": True, "message": "3-Sigma scan started"})
@@ -232,20 +238,15 @@ def scan_3sigma_results():
 @app.route("/api/scan/options", methods=["POST"])
 def scan_options():
     """Start an Options setup scan on custom watchlist tickers in the background."""
-    global _scan_running
-
-    with _scan_lock:
-        if _scan_running:
-            return _scan_conflict_response()
-        _scan_running = True
-        _reset_progress(status="running", mode="options")
-        scan_progress["phase_label"] = "Initiating Watchlist Options scan..."
+    if not _acquire_scan("Options-User"):
+        return _scan_conflict_response()
+    _reset_progress(status="running", mode="options")
+    scan_progress["phase_label"] = "Initiating Watchlist Options scan..."
 
     req_data = request.get_json(silent=True) or {}
     extended_hours = req_data.get("extended_hours", False)
 
     def _run():
-        global _scan_running
         try:
             et_tz = get_ny_timezone()
             watchlist = load_watchlist()
@@ -267,8 +268,7 @@ def scan_options():
             scan_progress["status"] = "error"
             scan_progress["phase_label"] = traceback.format_exc()
         finally:
-            with _scan_lock:
-                _scan_running = False
+            _release_scan()
 
     threading.Thread(target=_run, daemon=False).start()
     return jsonify({"ok": True, "message": "Options watchlist scan started"})
@@ -288,20 +288,15 @@ def scan_options_results():
 @app.route("/api/scan/options/tight_spreads", methods=["POST"])
 def scan_options_tight_spreads():
     """Start a Tightest Bid-Ask Spread Options scan in the background."""
-    global _scan_running
-
-    with _scan_lock:
-        if _scan_running:
-            return _scan_conflict_response()
-        _scan_running = True
-        _reset_progress(status="running", mode="options_spreads")
-        scan_progress["phase_label"] = "Initiating Tight Spreads Options scan..."
+    if not _acquire_scan("OptionsSpreads-User"):
+        return _scan_conflict_response()
+    _reset_progress(status="running", mode="options_spreads")
+    scan_progress["phase_label"] = "Initiating Tight Spreads Options scan..."
 
     req_data = request.get_json(silent=True) or {}
     use_watchlist = req_data.get("use_watchlist", True)
 
     def _run():
-        global _scan_running
         try:
             et_tz = get_ny_timezone()
             watchlist = load_watchlist()
@@ -326,8 +321,7 @@ def scan_options_tight_spreads():
             scan_progress["status"] = "error"
             scan_progress["phase_label"] = traceback.format_exc()
         finally:
-            with _scan_lock:
-                _scan_running = False
+            _release_scan()
 
     threading.Thread(target=_run, daemon=False).start()
     return jsonify({"ok": True, "message": "Tight Spreads Options scan started"})
@@ -519,19 +513,15 @@ def scan_rsidiv_results():
 @app.route("/api/scan/watchlist", methods=["POST"])
 def scan_watchlist():
     """Start a watchlist reversal scan in the background."""
-    global _scan_running
-    with _scan_lock:
-        if _scan_running:
-            return _scan_conflict_response()
-        _scan_running = True
-        _reset_progress(status="running", mode="watchlist")
-        scan_progress["phase_label"] = "Initiating watchlist scan (all criteria)..."
+    if not _acquire_scan("Watchlist-User"):
+        return _scan_conflict_response()
+    _reset_progress(status="running", mode="watchlist")
+    scan_progress["phase_label"] = "Initiating watchlist scan (all criteria)..."
 
     data = request.get_json() or {}
     extended_hours = data.get("extended_hours", False)
 
     def _run():
-        global _scan_running
         try:
             et_tz = get_ny_timezone()
             current_watchlist = load_watchlist()
@@ -565,8 +555,7 @@ def scan_watchlist():
             scan_progress["status"] = "error"
             scan_progress["phase_label"] = str(e)
         finally:
-            with _scan_lock:
-                _scan_running = False
+            _release_scan()
 
     threading.Thread(target=_run, daemon=False).start()
     return jsonify({"ok": True, "message": "Watchlist scan started (all criteria)"})

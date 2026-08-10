@@ -45,6 +45,23 @@ scan_progress = {
     "eta_seconds": 0,
     "debug_log": [],
 }
+_scan_system_lock = threading.Lock()
+
+def acquire_scan_lock(owner="unknown"):
+    """Acquire global scan lock — ensures ONLY ONE scan runs at any time."""
+    acquired = _scan_system_lock.acquire(blocking=False)
+    if not acquired:
+        return False
+    return True
+
+def release_scan_lock():
+    """Release global scan lock."""
+    if _scan_system_lock.locked():
+        try:
+            _scan_system_lock.release()
+        except RuntimeError:
+            pass
+
 def _reset_progress(status="idle", mode=""):
     scan_progress.update({
         "status": status, "mode": mode, "phase": "", "phase_label": "",
