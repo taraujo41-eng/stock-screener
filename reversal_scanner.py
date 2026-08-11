@@ -67,7 +67,7 @@ def _reset_progress(status="idle", mode=""):
     scan_progress.update({
         "status": status, "mode": mode, "phase": "", "phase_label": "",
         "current": 0, "total": 0, "found": 0,
-        "ticker": "", "pct": 0, "eta_seconds": 0,
+        "ticker": "", "pct": 1 if status == "running" else 0, "eta_seconds": 0,
         "debug_log": [],
     })
 

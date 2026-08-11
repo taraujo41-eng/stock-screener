@@ -701,6 +701,11 @@ function startProgressPolling(scanType = "watchlist") {
       const res = await fetch(`/api/scan/progress?t=${Date.now()}`);
       const p = await res.json();
 
+      // Ignore old progress updates from a different scan mode
+      if (p.mode && p.mode !== scanType && p.status === "running") {
+        return;
+      }
+
       if (p.status === "done" || p.status === "error" || p.status === "idle") {
         if (p.status === "done" || p.status === "idle") {
           document.getElementById("progressPct").textContent = "100%";
