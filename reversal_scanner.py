@@ -3158,7 +3158,8 @@ def watchlist_scan(tickers, extended_hours=False):
     _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
 
     def _on_dl_progress(i, tot, sym):
-        _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=0)
+        pct = int((i / tot) * 30) if tot else 0
+        _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=0, pct=pct)
 
     # Fetch daily data (needed by all analyzers)
     inc_pre_post = "true" if extended_hours else "false"
@@ -3178,7 +3179,7 @@ def watchlist_scan(tickers, extended_hours=False):
 
     for i, sym in enumerate(tickers):
         found_cnt = len(set(stock_results) | set(sigma3_results) | set(sigma2_results))
-        pct = int((i / total) * 100) if total else 100
+        pct = 30 + int((i / total) * 65) if total else 95
         _update_progress("analyzing", f"Analyzing {sym} (all criteria)...", i, total, ticker=sym, found=found_cnt, pct=pct)
         try:
             df = daily_data.get(sym)
@@ -3380,7 +3381,8 @@ def options_watchlist_scan(tickers, extended_hours=False):
     _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
 
     def _on_dl_progress(i, tot, sym):
-        _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=len(results))
+        pct = int((i / tot) * 30) if tot else 0
+        _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=len(results), pct=pct)
 
     inc_pre_post = "true" if extended_hours else "false"
     stock_data = fetch_batch_concurrent(
@@ -3389,7 +3391,8 @@ def options_watchlist_scan(tickers, extended_hours=False):
     )
 
     for i, (sym, df) in enumerate(stock_data.items()):
-        _update_progress("analyzing", f"Analyzing {sym} options...", i, len(stock_data), ticker=sym, found=len(results))
+        pct = 30 + int((i / max(1, len(stock_data))) * 65)
+        _update_progress("analyzing", f"Analyzing {sym} options...", i, len(stock_data), ticker=sym, found=len(results), pct=pct)
         try:
             if df is None or len(df) < 20:
                 continue
