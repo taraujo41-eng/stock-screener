@@ -155,6 +155,10 @@ def _release_scan():
         _scan_running = False
     release_scan_lock()
 
+# Reset scan state to idle on server boot
+_release_scan()
+_reset_progress("idle")
+
 # ── Static files ─────────────────────────────────────────────────────
 
 @app.route("/")
@@ -782,10 +786,8 @@ def watchlist_import_webull():
 
 @app.route("/api/scan/reset", methods=["POST"])
 def scan_reset():
-    """Reset the scan running status to idle."""
-    global _scan_running
-    with _scan_lock:
-        _scan_running = False
+    """Reset the scan running status to idle and release all locks."""
+    _release_scan()
     _reset_progress()
     return jsonify({"ok": True, "message": "Scan status reset to idle"})
 
