@@ -3,6 +3,7 @@ version: '3.8'
 services:
   web:
     build: .
+    image: stock_scanner_app:latest
     container_name: stock_scanner_web
     restart: always
     env_file:
@@ -12,9 +13,11 @@ services:
     command: gunicorn app:app --bind 0.0.0.0:5000 --timeout 600 --workers 2
 
   indicator_bot:
-    build: .
+    image: stock_scanner_app:latest
     container_name: stock_scanner_bot
     restart: always
     env_file:
       - .env
     command: python indicator_bot.py
+    depends_on:
+      - web
