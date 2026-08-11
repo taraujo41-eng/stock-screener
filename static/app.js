@@ -683,6 +683,8 @@ function startProgressPolling(scanType = "watchlist") {
   }
   const wrap = document.getElementById("progressWrap");
   wrap.classList.remove("hidden");
+  document.getElementById("progressPct").textContent = "1%";
+  document.getElementById("progressFill").style.width = "1%";
 
   const btn = document.getElementById(scanType === "options_spreads" ? "scanSpreadsBtn" : "scanBtn");
   btn.classList.add("scan-btn--loading");
@@ -700,7 +702,7 @@ function startProgressPolling(scanType = "watchlist") {
       const p = await res.json();
 
       if (p.status === "done" || p.status === "error" || p.status === "idle") {
-        if (p.status === "done" || (p.status === "idle" && maxSeenPct > 0)) {
+        if (p.status === "done" || p.status === "idle") {
           document.getElementById("progressPct").textContent = "100%";
           document.getElementById("progressFill").style.width = "100%";
         }
