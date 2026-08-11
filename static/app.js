@@ -692,12 +692,18 @@ function startProgressPolling(scanType = "watchlist") {
     clearInterval(pollTimer);
   }
 
+  let maxSeenPct = 0;
+
   pollTimer = setInterval(async () => {
     try {
       const res = await fetch(`/api/scan/progress?t=${Date.now()}`);
       const p = await res.json();
 
       if (p.status === "done" || p.status === "error" || p.status === "idle") {
+        if (p.status === "done" || (p.status === "idle" && maxSeenPct > 0)) {
+          document.getElementById("progressPct").textContent = "100%";
+          document.getElementById("progressFill").style.width = "100%";
+        }
         stopProgressPolling();
 
         if (p.status === "done" || p.status === "idle") {
@@ -726,9 +732,14 @@ function startProgressPolling(scanType = "watchlist") {
         return;
       }
 
+      if (typeof p.pct === "number" && p.pct > maxSeenPct) {
+        maxSeenPct = p.pct;
+      }
+      const displayPct = Math.max(maxSeenPct, p.pct || 0);
+
       document.getElementById("progressPhase").textContent = p.phase_label || "Working...";
-      document.getElementById("progressPct").textContent = `${p.pct}%`;
-      document.getElementById("progressFill").style.width = `${p.pct}%`;
+      document.getElementById("progressPct").textContent = `${displayPct}%`;
+      document.getElementById("progressFill").style.width = `${displayPct}%`;
       document.getElementById("progressDetail").textContent =
         p.found > 0 ? `${p.found} matches found` : "";
       document.getElementById("progressEta").textContent = fmtEta(p.eta_seconds);
