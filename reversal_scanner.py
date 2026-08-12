@@ -228,31 +228,11 @@ def detect_news_catalyst(ticker, lookback_hours=48):
 # =====================================================================
 
 def get_us_tickers():
-    """Fetch comprehensive US stock market ticker universe (SEC 10,000+ US equities + liquid fallbacks)."""
+    """Return the universe of liquid US stocks & ETFs that are optionable with tight spreads (~350-400 tickers)."""
+    watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
     tickers = set()
 
-    # ── Source 1: SEC Company Tickers API (10,000+ US equities) ──
-    try:
-        import urllib.request
-        req = urllib.request.Request(
-            "https://www.sec.gov/files/company_tickers.json",
-            headers={"User-Agent": "StockScanner/1.0 (admin@stockscanner.com)"}
-        )
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-            if data and isinstance(data, dict):
-                for item in data.values():
-                    sym = item.get("ticker")
-                    if sym:
-                        clean = str(sym).strip().upper().replace(".", "-")
-                        if clean and clean.isalpha() and 1 <= len(clean) <= 5:
-                            tickers.add(clean)
-        print(f"  Source (SEC API): loaded {len(tickers)} US market tickers")
-    except Exception as e:
-        print(f"  Source (SEC API): failed ({e})")
-
-    # ── Source 2: Local Watchlist (watchlist.json) ──
-    watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
+    # Load local watchlist
     if os.path.exists(watchlist_file):
         try:
             with open(watchlist_file, "r") as f:
@@ -261,32 +241,36 @@ def get_us_tickers():
                 clean = str(sym).strip().upper()
                 if clean:
                     tickers.add(clean)
-        except Exception as e:
+        except Exception:
             pass
 
-    # ── Fallback: Major S&P 500 / NASDAQ 100 / Russell Liquid Equities & ETFs ──
-    if len(tickers) < 100:
-        fallback_tickers = [
-            "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "BRK-B", "UNH", "LLY",
-            "JNJ", "JPM", "XOM", "V", "PG", "AVGO", "MA", "HD", "CVX", "MRK", "ABBV", "COST",
-            "PEP", "ADBE", "KO", "WMT", "MCD", "CSCO", "BAC", "CRM", "ACN", "TMO", "PFE", "NFLX",
-            "ABT", "AMD", "ORCL", "CMCSA", "DHR", "INTC", "DIS", "CAT", "TXN", "VZ", "AMGN", "NKE",
-            "PM", "LOW", "NEE", "MS", "RTX", "BKNG", "HON", "UNP", "SPGI", "COP", "IBM", "AMAT",
-            "GS", "LMT", "DE", "PLD", "BLK", "NOW", "AXP", "MDLZ", "TJX", "ADP", "ADI", "ISRG",
-            "T", "SYK", "GILD", "MMC", "C", "LRCX", "VRTX", "ZTS", "PGR", "SCHW", "CNE", "EOG",
-            "ETN", "SLB", "MO", "REGN", "BDX", "CB", "GE", "BSX", "PXD", "FI", "PANW", "CI",
-            "LRCX", "DUK", "SO", "ITW", "AON", "MU", "CL", "SHW", "EQIX", "SNPS", "HUM", "WM",
-            "CDNS", "EMR", "USB", "PNC", "CSX", "MCK", "APD", "APH", "ORLY", "MAR", "FDX", "NOP",
-            "TTD", "KTOS", "HL", "UBER", "SPY", "QQQ", "IWM", "DIA", "XLF", "XLE", "XLK", "XLV"
-        ]
-        tickers.update(fallback_tickers)
+    # Curated universe of liquid, optionable US equities & ETFs with tight options spreads
+    liquid_optionable_universe = [
+        # Major Index & Sector ETFs
+        "SPY", "QQQ", "IWM", "DIA", "XLF", "XLE", "XLK", "XLV", "XLI", "XLU", "XLP", "XLY", "XLB", "XOP", "SMH", "GLD", "SLV", "TLT",
+        # Mega-Cap & Large-Cap Option Leaders
+        "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "NFLX", "AVGO", "COST", "PEP", "ADBE", "KO", "WMT", "MCD", "CSCO",
+        "BAC", "CRM", "ACN", "TMO", "PFE", "ABT", "ORCL", "CMCSA", "DHR", "INTC", "DIS", "CAT", "TXN", "VZ", "AMGN", "NKE", "PM", "LOW",
+        "NEE", "MS", "RTX", "BKNG", "HON", "UNP", "SPGI", "COP", "IBM", "AMAT", "GS", "LMT", "DE", "PLD", "BLK", "NOW", "AXP", "MDLZ",
+        "TJX", "ADP", "ADI", "ISRG", "T", "SYK", "GILD", "MMC", "C", "LRCX", "VRTX", "ZTS", "PGR", "SCHW", "EOG", "ETN", "SLB", "MO",
+        "REGN", "BDX", "CB", "GE", "BSX", "PANW", "CI", "DUK", "SO", "ITW", "AON", "MU", "CL", "SHW", "EQIX", "SNPS", "HUM", "WM",
+        "CDNS", "EMR", "USB", "PNC", "CSX", "MCK", "APD", "APH", "ORLY", "MAR", "FDX", "TTD", "KTOS", "HL", "UBER", "UNH", "CVX",
+        "XOM", "JPM", "HD", "AVAV", "OXY", "MSTR", "PLTR", "COIN", "SOFI", "AFRM", "UPST", "SNAP", "PINS", "ROKU", "SQ", "PYPL",
+        "SHOP", "SE", "MELI", "BABA", "PDD", "JD", "BIDU", "NIO", "XPEV", "LI", "RIVN", "LCID", "DKNG", "MGM", "WYNN", "LVS", "MAR",
+        "HLT", "RCL", "CCL", "NCLH", "DAL", "UAL", "AAL", "LUV", "BA", "GD", "NOC", "HII", "F", "GM", "RACE", "RBLX", "U", "AI",
+        "SNOW", "DDOG", "NET", "ZS", "CRWD", "OKTA", "FTNT", "MDB", "TEAM", "HUBS", "TWLO", "DOCU", "ZM", "ASML", "TSM", "ARM",
+        "ON", "NXPI", "MPWR", "KLAC", "MCHP", "MRVL", "QRVO", "SWKS", "WDC", "STX", "TER", "ENTG", "SMTC", "MTSI", "RMBS", "OLED",
+        "HOOD", "IBKR", "SCHW", "WFC", "TFC", "COF", "SYF", "DFS", "LC", "SLM", "VAL", "RIG", "NE", "SD", "RRC", "AR", "SWN",
+        "CNX", "EQT", "CRK", "CHK", "FANG", "DVN", "APA", "MRO", "HES", "HAL", "BKR", "FTI", "NOV", "LNG", "AM", "TRGP", "WMB",
+        "KMI", "ET", "EPD", "MPLX", "PAA", "PSX", "VLO", "MPC", "PBR", "BP", "SHEL", "TTE", "EQNR", "ENB", "TRP", "SU", "CNQ", "CVE"
+    ]
+    tickers.update(liquid_optionable_universe)
 
-    # Exclude non-equity / test symbols
     exclude = {"TRUE", "NONE", "NULL", "CTEST", "NTEST", "ZTEST"}
-    tickers = {t for t in tickers if t not in exclude and t.isalpha() and 1 <= len(t) <= 5}
+    clean_tickers = {t for t in tickers if t not in exclude and t.isalpha() and 1 <= len(t) <= 5}
 
-    print(f"  Final US Stock Market Ticker Count: {len(tickers)}")
-    return sorted(tickers)
+    print(f"  Optionable Tight Spread Ticker Count: {len(clean_tickers)}")
+    return sorted(clean_tickers)
 
 
 
