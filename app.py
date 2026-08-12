@@ -86,7 +86,7 @@ def save_watchlist(tickers):
 user_watchlist = load_watchlist()
 
 def load_last_scan(filepath=THREE_SIGMA_RESULTS_FILE):
-    """Load the last scan results from file."""
+    """Load the last scan results from file (ignores results older than 24 hours)."""
     if not filepath:
         return None
     filename = os.path.basename(filepath)
@@ -99,6 +99,10 @@ def load_last_scan(filepath=THREE_SIGMA_RESULTS_FILE):
     for p in paths_to_check:
         if os.path.exists(p):
             try:
+                # Ignore cached files older than 24 hours so old static files aren't shown
+                mtime = os.path.getmtime(p)
+                if (time.time() - mtime) > 86400:
+                    continue
                 with open(p, "r") as f:
                     data = json.load(f)
                     if data and isinstance(data, dict):
