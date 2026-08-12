@@ -3375,23 +3375,28 @@ def watchlist_scan(tickers, extended_hours=False):
                     "iv": opts_r.get("IV", 0),
                 }
 
-        # Determine highest probability scenario (Bullish vs Bearish) and filter opposing signals
-        bull_signals_list = _parse_signals(base.get("Bullish Signals", "—"))
-        bear_signals_list = _parse_signals(base.get("Bearish Signals", "—"))
-        
-        bull_weight = len(bull_signals_list)
-        bear_weight = len(bear_signals_list)
-        if stock_r:
-            if stock_r.get("Bullish Signals") != "—": bull_weight += 2
-            if stock_r.get("Bearish Signals") != "—": bear_weight += 2
+        # Ensure ticker card presents strictly ONE dominant scenario (Bullish or Bearish)
+        has_bull = base.get("Bullish Signals") and base["Bullish Signals"] != "—"
+        has_bear = base.get("Bearish Signals") and base["Bearish Signals"] != "—"
 
-        if bull_weight >= bear_weight and bull_weight > 0:
-            base["Bearish Signals"] = "—"
+        if has_bull and has_bear:
+            bull_cnt = len(str(base["Bullish Signals"]).split("|"))
+            bear_cnt = len(str(base["Bearish Signals"]).split("|"))
+            if bull_cnt >= bear_cnt:
+                base["Bearish Signals"] = "—"
+                base["Direction"] = "Bullish"
+                if base.get("Option Play") and isinstance(base["Option Play"], dict) and base["Option Play"].get("type") == "PUT":
+                    base["Option Play"]["type"] = "CALL"
+            else:
+                base["Bullish Signals"] = "—"
+                base["Direction"] = "Bearish"
+                if base.get("Option Play") and isinstance(base["Option Play"], dict) and base["Option Play"].get("type") == "CALL":
+                    base["Option Play"]["type"] = "PUT"
+        elif has_bull:
             base["Direction"] = "Bullish"
             if base.get("Option Play") and isinstance(base["Option Play"], dict) and base["Option Play"].get("type") == "PUT":
                 base["Option Play"]["type"] = "CALL"
-        elif bear_weight > bull_weight and bear_weight > 0:
-            base["Bullish Signals"] = "—"
+        elif has_bear:
             base["Direction"] = "Bearish"
             if base.get("Option Play") and isinstance(base["Option Play"], dict) and base["Option Play"].get("type") == "CALL":
                 base["Option Play"]["type"] = "PUT"
