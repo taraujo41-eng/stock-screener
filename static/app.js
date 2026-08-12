@@ -652,6 +652,18 @@ function displayResults(data) {
   }
 
   if (scanData.length === 0) {
+    if (data.timestamp === "Ready" || !data.timestamp) {
+      document.getElementById("results").innerHTML = `
+        <div class="empty-state">
+          <div class="empty-state__icon">📋</div>
+          <div class="empty-state__title">Ready to scan</div>
+          <div class="empty-state__text">Click the purple <b>Scan Watchlist</b> or <b>RSI Divergence</b> button above to scan your watchlist tickers.</div>
+        </div>
+      `;
+      hideAuxUI();
+      return;
+    }
+
     let emptyTitle, emptyText;
     if (isOptions) {
       emptyTitle = "No setups found";
