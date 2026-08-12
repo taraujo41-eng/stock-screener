@@ -472,7 +472,7 @@ def scan_rsidiv():
 
     req_data = request.get_json(silent=True) or {}
     extended_hours = req_data.get("extended_hours", False)
-    use_watchlist = req_data.get("use_watchlist", True)
+    use_watchlist = req_data.get("use_watchlist", False)
 
     def _run():
         global _scan_running

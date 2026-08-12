@@ -821,7 +821,7 @@ async function runScan(scanType = "watchlist") {
   const extHours = document.getElementById("extHoursToggle")?.checked || false;
 
   const endpoint = scanType === "rsidiv" ? "/api/scan/rsidiv" : "/api/scan/watchlist";
-  const payload = scanType === "rsidiv" ? { extended_hours: extHours, use_watchlist: true } : { extended_hours: extHours };
+  const payload = scanType === "rsidiv" ? { extended_hours: extHours, use_watchlist: false } : { extended_hours: extHours };
 
   const maxRetries = 3;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {

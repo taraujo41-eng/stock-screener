@@ -2767,7 +2767,7 @@ def rsi_divergence_full_market_scan(tickers=None, extended_hours=False):
 
             reasons = " | ".join(reasons_list)
 
-            # Options suggestion
+            # Require optionable stock with tight options spread (<=12% bid-ask spread)
             opt_str = "—"
             opt_setup = None
             try:
@@ -2776,6 +2776,10 @@ def rsi_divergence_full_market_scan(tickers=None, extended_hours=False):
                     opt_str = f"{opt_setup['exp']} ${opt_setup['strike']} {opt_setup['type']} (@${opt_setup['mid']:.2f})"
             except Exception:
                 pass
+
+            # Require optionable contract with tight spread for RSI divergence scan results
+            if not opt_setup:
+                continue
 
             # News Catalyst
             news_details = None
