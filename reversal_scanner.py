@@ -86,6 +86,36 @@ def _update_progress(phase, label, current, total, ticker="", found=None, pct=No
         scan_progress["found"] = found
 
 
+def get_ny_timezone():
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo("America/New_York")
+    except ImportError:
+        import pytz
+        return pytz.timezone("America/New_York")
+
+
+def determine_scan_candle_mode(force_extended=False):
+    """
+    Determines candle interval, lookback days, and prepost setting.
+    - Extended/Market hours (Mon-Fri 4:00 AM - 8:00 PM ET): 15-minute candles ("15m"), 30 days, includePrePost="true".
+    - Market closed (nights outside 4:00 AM - 8:00 PM ET, weekends): 1-day candles ("1d"), 280 days, includePrePost="false".
+    """
+    ny_tz = get_ny_timezone()
+    now_et = datetime.now(ny_tz)
+    
+    is_weekday = now_et.weekday() < 5  # Mon=0, ..., Fri=4
+    start_ext = now_et.replace(hour=4, minute=0, second=0, microsecond=0)
+    end_ext = now_et.replace(hour=20, minute=0, second=0, microsecond=0)
+    
+    is_market_active = is_weekday and (start_ext <= now_et <= end_ext)
+    
+    if is_market_active or force_extended:
+        return "15m", 30, "true"
+    else:
+        return "1d", 280, "false"
+
+
 def detect_news_catalyst(ticker, lookback_hours=48):
     """
     Fetch news for a ticker and check if any articles published within lookback_hours
@@ -483,8 +513,8 @@ def compute_macd(series, fast=12, slow=26, signal=9):
 def detect_rsi_divergence(price_series, rsi_series, lookback=20):
     """
     Check for RSI Divergence in the last `lookback` periods.
-    Tightened: requires magnitude >= 5 RSI points, zone thresholds,
-    and swing points at least 5 bars apart.
+    - Bullish Divergence: Price is moving down / making a lower low, but RSI is moving up (higher RSI).
+    - Bearish Divergence: Price is moving up / making a higher high, but RSI is moving down (lower RSI).
     Returns (bull_div, bear_div)
     """
     if len(price_series) < lookback + 2:
@@ -493,11 +523,13 @@ def detect_rsi_divergence(price_series, rsi_series, lookback=20):
     curr_price = float(price_series.iloc[-1])
     curr_rsi = float(rsi_series.iloc[-1])
     
-    # The lookback window (excluding last 2 candles for distinct swing)
-    window_price = price_series.iloc[-(lookback+2):-2]
-    window_rsi = rsi_series.iloc[-(lookback+2):-2]
+    # The lookback window (excluding last candle)
+    window_price = price_series.iloc[-(lookback+2):-1]
+    window_rsi = rsi_series.iloc[-(lookback+2):-1]
     
-    # Find the index position of the swing low/high (must be >= 5 bars from current)
+    if len(window_price) < 5:
+        return False, False
+
     lowest_idx = window_price.values.argmin()
     highest_idx = window_price.values.argmax()
     
@@ -510,26 +542,22 @@ def detect_rsi_divergence(price_series, rsi_series, lookback=20):
     rsi_at_low = float(window_rsi.iloc[lowest_idx])
     rsi_at_high = float(window_rsi.iloc[highest_idx])
 
-    # Bullish Divergence: Price lower low + RSI higher low
-    # Requires: RSI < 35 (true oversold), magnitude >= 3 pts, swing >= 5 bars apart
+    # Bullish Divergence: Price moving down (<= lowest_price * 1.005), RSI moving up (>= rsi_at_low + 2.0)
     rsi_bull_magnitude = curr_rsi - rsi_at_low
     bull_div = (
-        (curr_price < lowest_price_in_window) and
-        (curr_rsi > rsi_at_low) and
-        (rsi_bull_magnitude >= 3) and
-        (curr_rsi < 35) and
-        (bars_from_low >= 5)
+        (curr_price <= lowest_price_in_window * 1.005) and
+        (rsi_bull_magnitude >= 2.0) and
+        (curr_rsi <= 52.0) and
+        (bars_from_low >= 2)
     )
     
-    # Bearish Divergence: Price higher high + RSI lower high
-    # Requires: RSI > 65 (true overbought), magnitude >= 3 pts, swing >= 5 bars apart
+    # Bearish Divergence: Price moving up (>= highest_price * 0.995), RSI moving down (<= rsi_at_high - 2.0)
     rsi_bear_magnitude = rsi_at_high - curr_rsi
     bear_div = (
-        (curr_price > highest_price_in_window) and
-        (curr_rsi < rsi_at_high) and
-        (rsi_bear_magnitude >= 3) and
-        (curr_rsi > 65) and
-        (bars_from_high >= 5)
+        (curr_price >= highest_price_in_window * 0.995) and
+        (rsi_bear_magnitude >= 2.0) and
+        (curr_rsi >= 48.0) and
+        (bars_from_high >= 2)
     )
     
     return bull_div, bear_div
@@ -2530,38 +2558,43 @@ def fifty_two_week_reversal_scan(extended_hours=False):
     return pd.DataFrame(results).sort_values(by="Score", ascending=False).head(20)
 
 
-def rsi_divergence_full_market_scan(extended_hours=False):
-    """Scan all US tickers for daily RSI divergence (bullish/bearish)."""
+def rsi_divergence_full_market_scan(tickers=None, extended_hours=False):
+    """Scan tickers (or full US market) for RSI divergence (bullish/bearish)."""
     _reset_progress(status="running", mode="rsidiv")
     start_time = time.time()
 
-    _update_progress("init", "Loading ticker universe...", 0, 0, pct=0)
-    tickers = get_us_tickers()
-    _update_progress("init", f"Loaded {len(tickers)} tickers, applying liquidity filter...", 0, len(tickers), pct=2)
-    tickers = prefilter_liquid_optionable(tickers)
-    _update_progress("init", f"Pre-filter done: {len(tickers)} liquid tickers. Checking market regime...", 0, len(tickers), pct=5)
+    if tickers:
+        _update_progress("init", f"Loading {len(tickers)} tickers for RSI divergence scan...", 0, len(tickers), pct=2)
+    else:
+        _update_progress("init", "Loading ticker universe...", 0, 0, pct=0)
+        tickers = get_us_tickers()
+        _update_progress("init", f"Loaded {len(tickers)} tickers, applying liquidity filter...", 0, len(tickers), pct=2)
+        tickers = prefilter_liquid_optionable(tickers)
+    
+    _update_progress("init", f"Checking market regime for {len(tickers)} tickers...", 0, len(tickers), pct=5)
     is_market_bullish = check_spy_regime()
 
     results = []
     total = len(tickers)
 
-    # 1. Fetch daily candles (365 days of 1d bars)
+    # Determine candle interval & extended hours based on market timing
+    interval, days, inc_pre_post = determine_scan_candle_mode(extended_hours)
+
     def _on_daily_progress(i, tot, sym):
         pct = int((i / tot) * 85)
-        _update_progress("downloading", f"Downloading daily candles... ({i}/{tot})", i, tot, ticker=sym, found=len(results), pct=pct)
+        _update_progress("downloading", f"Downloading {interval} candles... ({i}/{tot})", i, tot, ticker=sym, found=len(results), pct=pct)
 
-    inc_pre_post = "true" if extended_hours else "false"
     daily_data = fetch_batch_concurrent(
-        tickers, days=365, max_workers=6,
-        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost=inc_pre_post
+        tickers, days=days, max_workers=6,
+        on_progress=_on_daily_progress, delay=0.05, interval=interval, includePrePost=inc_pre_post
     )
 
-    # 2. Analyze daily candles for RSI divergence
+    # 2. Analyze candles for RSI divergence
     for i, (sym, df_daily) in enumerate(daily_data.items()):
         pct = 85 + int((i / len(daily_data)) * 15) if len(daily_data) else 100
         _update_progress("analyzing", f"Analyzing RSI divergence for {sym}...", i, len(daily_data), ticker=sym, found=len(results), pct=pct)
         try:
-            if df_daily is None or len(df_daily) < 50:
+            if df_daily is None or len(df_daily) < 20:
                 continue
 
             curr = df_daily.iloc[-1]
@@ -2569,7 +2602,7 @@ def rsi_divergence_full_market_scan(extended_hours=False):
             
             # Compute RSI
             rsi_series = compute_rsi(df_daily['Close'], 14)
-            if len(rsi_series) < 22:
+            if len(rsi_series) < 15:
                 continue
             rsi_val = float(rsi_series.iloc[-1])
             prev_rsi = float(rsi_series.iloc[-2]) if len(rsi_series) > 1 else rsi_val
@@ -2593,7 +2626,7 @@ def rsi_divergence_full_market_scan(extended_hours=False):
             
             if is_bullish:
                 score += 5
-                reasons_list.append("RSI Divergence")
+                reasons_list.append("Bullish RSI Divergence (Price ↓ RSI ↑)")
                 if rsi_val <= 30:
                     score += 2
                     reasons_list.append(f"RSI Oversold ({rsi_val:.1f})")
@@ -2602,7 +2635,7 @@ def rsi_divergence_full_market_scan(extended_hours=False):
                     reasons_list.append("RSI Bull Hook")
             else:
                 score += 5
-                reasons_list.append("RSI Divergence")
+                reasons_list.append("Bearish RSI Divergence (Price ↑ RSI ↓)")
                 if rsi_val >= 70:
                     score += 2
                     reasons_list.append(f"RSI Overbought ({rsi_val:.1f})")
@@ -3161,11 +3194,11 @@ def watchlist_scan(tickers, extended_hours=False):
         pct = int((i / tot) * 30) if tot else 0
         _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=0, pct=pct)
 
-    # Fetch daily data (needed by all analyzers)
-    inc_pre_post = "true" if extended_hours else "false"
+    # Determine candle interval & extended hours based on market timing
+    interval, days, inc_pre_post = determine_scan_candle_mode(extended_hours)
     daily_data = fetch_batch_concurrent(
-        tickers, days=280, max_workers=4,
-        on_progress=_on_dl_progress, delay=0.05, interval="1d", includePrePost=inc_pre_post
+        tickers, days=days, max_workers=4,
+        on_progress=_on_dl_progress, delay=0.05, interval=interval, includePrePost=inc_pre_post
     )
 
     is_bullish = check_spy_regime()
@@ -3360,6 +3393,8 @@ def watchlist_scan(tickers, extended_hours=False):
     })
 
     print(f"[Done] Watchlist scan (all criteria): {len(merged)} signals in {total_time:.1f}s")
+    if not merged:
+        return pd.DataFrame()
     df = pd.DataFrame(merged).sort_values(by="Score", ascending=False)
     best_df = df[df["Score"] >= 8]
     if len(best_df) < 5:

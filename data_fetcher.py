@@ -60,7 +60,10 @@ def get_unofficial_client():
     env_did = (os.getenv("WEBULL_DID") or "f9s4nk68xjcslox4g2we0xu3zsxdfam0y").strip() or None
     
     try:
-        from webull import webull
+        try:
+            from webull.webull import webull
+        except ImportError:
+            from webull import webull
         wb = webull()
         token_path = os.path.dirname(__file__)
         credentials_file = os.path.join(token_path, "webull_credentials.json")
@@ -509,7 +512,7 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webu
 
     # 3. Fallback to Yahoo Finance public chart API (100% reliable cloud fallback)
     try:
-        df = _fetch_yahoo_fallback_one(ticker, days=days, interval=interval)
+        df = _fetch_yahoo_fallback_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
         if df is not None and len(df) >= 20:
             return df
     except Exception as e:
@@ -520,7 +523,7 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webu
 
 # ── Yahoo Finance Public Chart API Fallback ───────────────────────────
 
-def _fetch_yahoo_fallback_one(ticker, days=180, interval="1d"):
+def _fetch_yahoo_fallback_one(ticker, days=180, interval="1d", includePrePost="false"):
     """
     Fallback data fetcher using yfinance package.
     Zero authentication required, 100% reliable for standard OHLCV bars on cloud platforms.
@@ -530,7 +533,8 @@ def _fetch_yahoo_fallback_one(ticker, days=180, interval="1d"):
         t = yf.Ticker(ticker)
         period = "1y" if interval == "1d" else "1mo"
         yf_intv = "1d" if interval == "1d" else "15m"
-        df = t.history(period=period, interval=yf_intv)
+        prepost_bool = True if (interval != "1d" or includePrePost == "true") else False
+        df = t.history(period=period, interval=yf_intv, prepost=prepost_bool)
         if df is None or df.empty or len(df) < 20:
             return None
             

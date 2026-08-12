@@ -604,14 +604,14 @@ function displayResults(data) {
   document.getElementById("tsValue").textContent = data.timestamp;
 
   const badge = document.getElementById("scanBadge");
-  if (isOptionsSpreads) {
-    badge.textContent = `Watchlist Option Plays`;
+  if (data.mode === "rsidiv") {
+    badge.textContent = `RSI Divergence Scan (${data.count || 0} setups)`;
+    badge.classList.remove("hidden");
+  } else if (data.mode === "watchlist") {
+    badge.textContent = `Watchlist Scan (${data.count || 0} setups)`;
     badge.classList.remove("hidden");
   } else if (data.tickers_scanned) {
     badge.textContent = `Scanned ${data.tickers_scanned.toLocaleString()} tickers`;
-    badge.classList.remove("hidden");
-  } else if (data.mode === "watchlist") {
-    badge.textContent = `Watchlist option plays (all criteria)`;
     badge.classList.remove("hidden");
   } else {
     badge.classList.add("hidden");
@@ -686,7 +686,8 @@ function startProgressPolling(scanType = "watchlist") {
   document.getElementById("progressPct").textContent = "1%";
   document.getElementById("progressFill").style.width = "1%";
 
-  const btn = document.getElementById(scanType === "options_spreads" ? "scanSpreadsBtn" : "scanBtn");
+  const btnId = scanType === "rsidiv" ? "scanRsiDivBtn" : "scanBtn";
+  const btn = document.getElementById(btnId) || document.getElementById("scanBtn");
   btn.classList.add("scan-btn--loading");
   btn.disabled = true;
 
@@ -714,7 +715,7 @@ function startProgressPolling(scanType = "watchlist") {
         stopProgressPolling();
 
         if (p.status === "done" || p.status === "idle") {
-          const resultsUrl = scanType === "options_spreads" ? "/api/scan/options/tight_spreads/results" : "/api/scan/watchlist/results";
+          const resultsUrl = scanType === "rsidiv" ? "/api/scan/rsidiv/results" : "/api/scan/watchlist/results";
           const resData = await fetch(`${resultsUrl}?t=${Date.now()}`);
           const data = await resData.json();
           if (data.ok && data.results && data.results.length > 0) {
@@ -732,9 +733,9 @@ function startProgressPolling(scanType = "watchlist") {
 
         document.getElementById("scanBtn").classList.remove("scan-btn--loading");
         document.getElementById("scanBtn").disabled = false;
-        if (document.getElementById("scanSpreadsBtn")) {
-          document.getElementById("scanSpreadsBtn").classList.remove("scan-btn--loading");
-          document.getElementById("scanSpreadsBtn").disabled = false;
+        if (document.getElementById("scanRsiDivBtn")) {
+          document.getElementById("scanRsiDivBtn").classList.remove("scan-btn--loading");
+          document.getElementById("scanRsiDivBtn").disabled = false;
         }
         return;
       }
@@ -781,7 +782,8 @@ function stopProgressPolling() {
 // ── Main scan ──────────────────────────────────────────────
 
 async function runScan(scanType = "watchlist") {
-  const btn = document.getElementById(scanType === "options_spreads" ? "scanSpreadsBtn" : "scanBtn");
+  const btnId = scanType === "rsidiv" ? "scanRsiDivBtn" : "scanBtn";
+  const btn = document.getElementById(btnId) || document.getElementById("scanBtn");
   btn.classList.add("scan-btn--loading");
   btn.disabled = true;
 
@@ -795,8 +797,8 @@ async function runScan(scanType = "watchlist") {
 
   const extHours = document.getElementById("extHoursToggle")?.checked || false;
 
-  const endpoint = scanType === "options_spreads" ? "/api/scan/options/tight_spreads" : "/api/scan/watchlist";
-  const payload = scanType === "options_spreads" ? { use_watchlist: true } : { extended_hours: extHours };
+  const endpoint = scanType === "rsidiv" ? "/api/scan/rsidiv" : "/api/scan/watchlist";
+  const payload = scanType === "rsidiv" ? { extended_hours: extHours, use_watchlist: true } : { extended_hours: extHours };
 
   const maxRetries = 3;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {

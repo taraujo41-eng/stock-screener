@@ -395,12 +395,11 @@ def bot_loop():
 
                 candle_interval = os.getenv("CANDLE_INTERVAL_3SIGMA", "15m")
                 scan_interval = int(os.getenv("SCAN_INTERVAL_3SIGMA", "60"))
-                candle_interval = "1d"
                 
                 # 2. Pre-calculate daily bands
                 precalculate_daily_bands(tickers)
                 
-                logger.info(f"Scanning {len(tickers)} tickers in parallel (Daily candles)...")
+                logger.info(f"Scanning {len(tickers)} tickers in parallel ({candle_interval} candles)...")
                 
                 # 3. Download and compute in parallel
                 results = fetch_batch_concurrent(
@@ -467,3 +466,14 @@ def start_bot_thread():
             logger.info("Paper trading is disabled (PAPER_TRADE_ENABLED=false).")
     except Exception as e:
         logger.error(f"Failed to initialize paper trader: {e}")
+
+
+if __name__ == "__main__":
+    logger.info("🤖 Starting 3-Sigma Indicator Bot process...")
+    start_bot_thread()
+    try:
+        while True:
+            time.sleep(3600)
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Bot process stopped.")
+

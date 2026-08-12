@@ -472,12 +472,14 @@ def scan_rsidiv():
 
     req_data = request.get_json(silent=True) or {}
     extended_hours = req_data.get("extended_hours", False)
+    use_watchlist = req_data.get("use_watchlist", True)
 
     def _run():
         global _scan_running
         try:
             et_tz = get_ny_timezone()
-            df = rsi_divergence_full_market_scan(extended_hours=extended_hours)
+            tickers = load_watchlist() if use_watchlist else None
+            df = rsi_divergence_full_market_scan(tickers=tickers, extended_hours=extended_hours)
             results_data = {
                 "ok": True,
                 "mode": "rsidiv",
