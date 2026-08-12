@@ -105,8 +105,17 @@ function buildCard(item, index) {
     return str.split(" | ").map(s => s.trim()).filter(s => s);
   };
 
-  const bullish = parseSignals(item["Bullish Signals"]);
-  const bearish = parseSignals(item["Bearish Signals"]);
+  let bullish = parseSignals(item["Bullish Signals"]);
+  let bearish = parseSignals(item["Bearish Signals"]);
+
+  // Show ONLY the single highest probability scenario per ticker card
+  if (bullish.length > 0 && bearish.length > 0) {
+    if (item.Direction === "Bullish" || bullish.length >= bearish.length) {
+      bearish = [];
+    } else {
+      bullish = [];
+    }
+  }
   const patternsList = parsePatterns(item.Patterns);
 
   const rsi = item.RSI;

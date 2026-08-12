@@ -3373,6 +3373,27 @@ def watchlist_scan(tickers, extended_hours=False):
                     "iv": opts_r.get("IV", 0),
                 }
 
+        # Determine highest probability scenario (Bullish vs Bearish) and filter opposing signals
+        bull_signals_list = _parse_signals(base.get("Bullish Signals", "—"))
+        bear_signals_list = _parse_signals(base.get("Bearish Signals", "—"))
+        
+        bull_weight = len(bull_signals_list)
+        bear_weight = len(bear_signals_list)
+        if stock_r:
+            if stock_r.get("Bullish Signals") != "—": bull_weight += 2
+            if stock_r.get("Bearish Signals") != "—": bear_weight += 2
+
+        if bull_weight >= bear_weight and bull_weight > 0:
+            base["Bearish Signals"] = "—"
+            base["Direction"] = "Bullish"
+            if base.get("Option Play") and isinstance(base["Option Play"], dict) and base["Option Play"].get("type") == "PUT":
+                base["Option Play"]["type"] = "CALL"
+        elif bear_weight > bull_weight and bear_weight > 0:
+            base["Bullish Signals"] = "—"
+            base["Direction"] = "Bearish"
+            if base.get("Option Play") and isinstance(base["Option Play"], dict) and base["Option Play"].get("type") == "CALL":
+                base["Option Play"]["type"] = "PUT"
+
         # Recalculate grade based on merged score
         score = base.get("Score", 0)
         if score >= 8:
