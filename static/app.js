@@ -727,7 +727,7 @@ function startProgressPolling(scanType = "watchlist") {
           const resultsUrl = scanType === "rsidiv" ? "/api/scan/rsidiv/results" : "/api/scan/watchlist/results";
           const resData = await fetch(`${resultsUrl}?t=${Date.now()}`);
           const data = await resData.json();
-          if (data.ok && data.results && data.results.length > 0) {
+          if (data.ok) {
             displayResults(data);
           }
         } else if (p.status === "error") {

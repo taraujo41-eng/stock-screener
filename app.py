@@ -514,8 +514,8 @@ def scan_rsidiv_results():
         results = load_last_scan(RSIDIV_RESULTS_FILE)
         if results:
             app.config["LAST_RSIDIV_RESULTS"] = results
-    if results is None:
-        return jsonify({"ok": False, "error": "No scan results available"}), 404
+    if results is None or not isinstance(results, dict):
+        return jsonify({"ok": True, "mode": "rsidiv", "count": 0, "results": [], "timestamp": "Ready"}), 200
     return jsonify(results)
 
 # ── API: Watchlist Scan ─────────────────────────────────────────────
@@ -640,8 +640,8 @@ def scan_watchlist_results():
         if disk_results and disk_results.get("ok"):
             results = disk_results
             app.config["LAST_WATCHLIST_RESULTS"] = results
-    if not results or not isinstance(results, dict) or not results.get("ok"):
-        return jsonify({"ok": False, "error": "No scan results available"}), 404
+    if not results or not isinstance(results, dict):
+        return jsonify({"ok": True, "mode": "watchlist", "count": 0, "results": [], "timestamp": "Ready"}), 200
     return jsonify(results)
 
 @app.route("/api/scan/options/watchlist", methods=["POST"])
