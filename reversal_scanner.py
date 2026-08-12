@@ -30,12 +30,16 @@ from data_fetcher import (
 warnings.filterwarnings("ignore")
 
 # =====================================================================
-# Global progress tracker  (read by the web server)
+# Global progress tracker  (file-backed for cross-process visibility)
 # =====================================================================
 
-scan_progress = {
+import json as _json
+
+_PROGRESS_FILE = "/tmp/scan_progress.json"
+
+_DEFAULT_PROGRESS = {
     "status": "idle",       # idle | running | done | error
-    "mode": "",             # 3sigma | 2sigma | 52w
+    "mode": "",             # 3sigma | 2sigma | 52w | watchlist | rsidiv
     "phase": "",            # fetching_tickers | downloading | analyzing | complete
     "phase_label": "",
     "current": 0,
@@ -46,6 +50,50 @@ scan_progress = {
     "eta_seconds": 0,
     "debug_log": [],
 }
+
+class _SharedProgress(dict):
+    """Dict-like object backed by a JSON file in /tmp for cross-process sharing."""
+
+    def __init__(self):
+        super().__init__(_DEFAULT_PROGRESS)
+        self._lock = threading.Lock()
+        # Load any existing state from file
+        self._load()
+
+    def _load(self):
+        try:
+            with open(_PROGRESS_FILE, "r") as f:
+                data = _json.load(f)
+                if isinstance(data, dict):
+                    super().update(data)
+        except Exception:
+            pass
+
+    def _save(self):
+        try:
+            with open(_PROGRESS_FILE, "w") as f:
+                _json.dump(dict(self), f)
+        except Exception:
+            pass
+
+    def __setitem__(self, key, value):
+        with self._lock:
+            super().__setitem__(key, value)
+            self._save()
+
+    def update(self, *args, **kwargs):
+        with self._lock:
+            super().update(*args, **kwargs)
+            self._save()
+
+    def read(self):
+        """Read fresh state from disk (for the web server progress endpoint)."""
+        with self._lock:
+            self._load()
+            return dict(self)
+
+scan_progress = _SharedProgress()
+
 _scan_system_lock = threading.Lock()
 
 def acquire_scan_lock(owner="unknown"):

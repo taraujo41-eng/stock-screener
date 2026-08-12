@@ -171,8 +171,8 @@ def index():
 
 @app.route("/api/scan/progress", methods=["GET"])
 def scan_full_progress():
-    """Return current progress of the scan."""
-    return jsonify(scan_progress)
+    """Return current progress of the scan (reads from shared file)."""
+    return jsonify(scan_progress.read())
 
 
 @app.route("/api/scan/cancel", methods=["POST"])
