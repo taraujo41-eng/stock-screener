@@ -5,6 +5,7 @@
 let scanData = [];
 let currentFilter = "all";
 let scanMode = "watchlist";
+let currentResultMode = "watchlist";
 let pollTimer = null;
 let hideTimeout = null;
 let userWatchlist = [];
@@ -510,8 +511,8 @@ function buildOptionsSpreadsCard(item, index) {
 
 function renderResults() {
   const el = document.getElementById("results");
-  const isOptionsSpreads = (scanData[0] && scanData[0]["Spread (%)"] !== undefined);
-  const isOptions = (scanData[0] && scanData[0].Direction !== undefined);
+  const isOptionsSpreads = (currentResultMode === "options_spreads");
+  const isOptions = (currentResultMode === "options" || currentResultMode === "options_watchlist");
 
   let filtered = scanData;
   if (isOptionsSpreads) {
@@ -561,8 +562,8 @@ function renderResults() {
 // ── Stats bar ──────────────────────────────────────────────
 
 function updateStats() {
-  const isOptionsSpreads = (scanData[0] && scanData[0]["Spread (%)"] !== undefined);
-  const isOptions = (scanData[0] && scanData[0].Direction !== undefined);
+  const isOptionsSpreads = (currentResultMode === "options_spreads");
+  const isOptions = (currentResultMode === "options" || currentResultMode === "options_watchlist");
 
   if (isOptionsSpreads) {
     const callsCount = scanData.filter(d => d.Type === "CALL").length;
@@ -596,8 +597,11 @@ function updateStats() {
 // ── Display results (shared logic) ─────────────────────────
 
 function displayResults(data) {
-  const isOptionsSpreads = (data.mode === "options_spreads" || (data.results && data.results[0] && data.results[0]["Spread (%)"] !== undefined));
-  const isOptions = (data.results && data.results[0] && data.results[0].Direction !== undefined);
+  // Track the mode from the API so we use the correct card builder
+  currentResultMode = data.mode || "watchlist";
+
+  const isOptionsSpreads = (currentResultMode === "options_spreads");
+  const isOptions = (currentResultMode === "options" || currentResultMode === "options_watchlist");
 
   if (isOptionsSpreads) {
     scanData = (data.results || []).sort((a, b) => (a["Spread (%)"] || 0) - (b["Spread (%)"] || 0));
