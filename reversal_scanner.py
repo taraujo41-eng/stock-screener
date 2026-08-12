@@ -228,12 +228,30 @@ def detect_news_catalyst(ticker, lookback_hours=48):
 # =====================================================================
 
 def get_us_tickers():
-    """Fetch stock and ETF tickers exclusively from user's watchlist.json and Webull watchlists."""
-    from data_fetcher import get_unofficial_client
-    wb = get_unofficial_client()
+    """Fetch comprehensive US stock market ticker universe (SEC 10,000+ US equities + liquid fallbacks)."""
     tickers = set()
 
-    # ── Source 1: Local Watchlist (watchlist.json) ──
+    # ── Source 1: SEC Company Tickers API (10,000+ US equities) ──
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            "https://www.sec.gov/files/company_tickers.json",
+            headers={"User-Agent": "StockScanner/1.0 (admin@stockscanner.com)"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data and isinstance(data, dict):
+                for item in data.values():
+                    sym = item.get("ticker")
+                    if sym:
+                        clean = str(sym).strip().upper().replace(".", "-")
+                        if clean and clean.isalpha() and 1 <= len(clean) <= 5:
+                            tickers.add(clean)
+        print(f"  Source (SEC API): loaded {len(tickers)} US market tickers")
+    except Exception as e:
+        print(f"  Source (SEC API): failed ({e})")
+
+    # ── Source 2: Local Watchlist (watchlist.json) ──
     watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
     if os.path.exists(watchlist_file):
         try:
@@ -243,41 +261,31 @@ def get_us_tickers():
                 clean = str(sym).strip().upper()
                 if clean:
                     tickers.add(clean)
-            print(f"  Source (watchlist.json): loaded {len(tickers)} tickers")
         except Exception as e:
-            print(f"  Source (watchlist.json): failed ({e})")
+            pass
 
-    # ── Source 2: Webull Watchlists ──
-    if wb:
-        try:
-            watchlists = wb.get_watchlists()
-            if watchlists:
-                added_wb = 0
-                for wl in watchlists:
-                    ticker_list = wl.get("tickerList", [])
-                    for t in ticker_list:
-                        template = t.get("template", "").lower()
-                        if template in ("stock", "etf"):
-                            symbol = t.get("symbol")
-                            if symbol:
-                                clean = symbol.strip().upper()
-                                if clean and clean not in tickers:
-                                    tickers.add(clean)
-                                    added_wb += 1
-                if added_wb > 0:
-                    print(f"  Source (Webull Watchlists): +{added_wb} unique tickers")
-        except Exception as e:
-            print(f"  Source (Webull Watchlists): failed ({e})")
-
-    # Fallback if watchlist is completely empty
-    if not tickers:
-        tickers = {"AAPL", "MSFT", "TSLA", "AMZN", "GOOGL", "META", "NVDA", "NFLX", "AMD", "SPY", "QQQ"}
+    # ── Fallback: Major S&P 500 / NASDAQ 100 / Russell Liquid Equities & ETFs ──
+    if len(tickers) < 100:
+        fallback_tickers = [
+            "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "BRK-B", "UNH", "LLY",
+            "JNJ", "JPM", "XOM", "V", "PG", "AVGO", "MA", "HD", "CVX", "MRK", "ABBV", "COST",
+            "PEP", "ADBE", "KO", "WMT", "MCD", "CSCO", "BAC", "CRM", "ACN", "TMO", "PFE", "NFLX",
+            "ABT", "AMD", "ORCL", "CMCSA", "DHR", "INTC", "DIS", "CAT", "TXN", "VZ", "AMGN", "NKE",
+            "PM", "LOW", "NEE", "MS", "RTX", "BKNG", "HON", "UNP", "SPGI", "COP", "IBM", "AMAT",
+            "GS", "LMT", "DE", "PLD", "BLK", "NOW", "AXP", "MDLZ", "TJX", "ADP", "ADI", "ISRG",
+            "T", "SYK", "GILD", "MMC", "C", "LRCX", "VRTX", "ZTS", "PGR", "SCHW", "CNE", "EOG",
+            "ETN", "SLB", "MO", "REGN", "BDX", "CB", "GE", "BSX", "PXD", "FI", "PANW", "CI",
+            "LRCX", "DUK", "SO", "ITW", "AON", "MU", "CL", "SHW", "EQIX", "SNPS", "HUM", "WM",
+            "CDNS", "EMR", "USB", "PNC", "CSX", "MCK", "APD", "APH", "ORLY", "MAR", "FDX", "NOP",
+            "TTD", "KTOS", "HL", "UBER", "SPY", "QQQ", "IWM", "DIA", "XLF", "XLE", "XLK", "XLV"
+        ]
+        tickers.update(fallback_tickers)
 
     # Exclude non-equity / test symbols
     exclude = {"TRUE", "NONE", "NULL", "CTEST", "NTEST", "ZTEST"}
     tickers = {t for t in tickers if t not in exclude and t.isalpha() and 1 <= len(t) <= 5}
 
-    print(f"  Final Watchlist Ticker Count: {len(tickers)}")
+    print(f"  Final US Stock Market Ticker Count: {len(tickers)}")
     return sorted(tickers)
 
 
