@@ -47,7 +47,7 @@ async function loadLastWatchlistScan() {
     const res = await fetch("/api/scan/watchlist/results");
     if (res.ok) {
       const data = await res.json();
-      if (data.ok && data.results) {
+      if (data.ok && data.results && data.results.length > 0) {
         displayResults(data);
         return;
       }
