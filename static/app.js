@@ -706,24 +706,22 @@ function startProgressPolling(scanType = "watchlist") {
 
   let maxSeenPct = 0;
 
+  let pollCount = 0;
   pollTimer = setInterval(async () => {
+    pollCount++;
     try {
       const res = await fetch(`/api/scan/progress?t=${Date.now()}`);
       const p = await res.json();
 
-      // Ignore old progress updates from a different scan mode
-      if (p.mode && p.mode !== scanType && p.status === "running") {
-        return;
-      }
-
-      if (p.status === "done" || p.status === "error" || p.status === "idle") {
-        if (p.status === "done" || p.status === "idle") {
+      // If status is complete, idle, error, or if poll limit reached (90s safety):
+      if (p.status === "done" || p.status === "error" || p.status === "idle" || pollCount > 90) {
+        if (p.status === "done" || p.status === "idle" || pollCount > 90) {
           document.getElementById("progressPct").textContent = "100%";
           document.getElementById("progressFill").style.width = "100%";
         }
         stopProgressPolling();
 
-        if (p.status === "done" || p.status === "idle") {
+        if (p.status === "done" || p.status === "idle" || pollCount > 90) {
           const resultsUrl = scanType === "rsidiv" ? "/api/scan/rsidiv/results" : "/api/scan/watchlist/results";
           const resData = await fetch(`${resultsUrl}?t=${Date.now()}`);
           const data = await resData.json();
