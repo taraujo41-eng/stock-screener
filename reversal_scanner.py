@@ -510,11 +510,12 @@ def compute_macd(series, fast=12, slow=26, signal=9):
     histogram = macd_line - signal_line
     return macd_line, signal_line, histogram
 
-def detect_rsi_divergence(price_series, rsi_series, lookback=20):
+def detect_rsi_divergence(price_series, rsi_series, lookback=10):
     """
-    Check for RSI Divergence in the last `lookback` periods.
-    - Bullish Divergence: Price is moving down / making a lower low, but RSI is moving up (higher RSI).
-    - Bearish Divergence: Price is moving up / making a higher high, but RSI is moving down (lower RSI).
+    Check for fresh RSI Divergence in the last `lookback` periods (default 10 bars).
+    Ensures the anchor swing point is fresh (formed within 2 to 8 bars ago).
+    - Bullish Divergence: Price is making a lower low vs recent 2-8 bar swing low, but RSI is higher.
+    - Bearish Divergence: Price is making a higher high vs recent 2-8 bar swing high, but RSI is lower.
     Returns (bull_div, bear_div)
     """
     if len(price_series) < lookback + 2:
@@ -523,11 +524,11 @@ def detect_rsi_divergence(price_series, rsi_series, lookback=20):
     curr_price = float(price_series.iloc[-1])
     curr_rsi = float(rsi_series.iloc[-1])
     
-    # The lookback window (excluding last candle)
+    # Tight lookback window (last 10 bars)
     window_price = price_series.iloc[-(lookback+2):-1]
     window_rsi = rsi_series.iloc[-(lookback+2):-1]
     
-    if len(window_price) < 5:
+    if len(window_price) < 4:
         return False, False
 
     lowest_idx = window_price.values.argmin()
@@ -536,30 +537,30 @@ def detect_rsi_divergence(price_series, rsi_series, lookback=20):
     bars_from_low = len(window_price) - lowest_idx
     bars_from_high = len(window_price) - highest_idx
     
-    lowest_price_in_window = float(window_price.iloc[lowest_idx])
-    highest_price_in_window = float(window_price.iloc[highest_idx])
+    # Require fresh swing low within 2 to 8 bars ago
+    bull_div = False
+    if 2 <= bars_from_low <= 8:
+        lowest_price_in_window = float(window_price.iloc[lowest_idx])
+        rsi_at_low = float(window_rsi.iloc[lowest_idx])
+        rsi_bull_magnitude = curr_rsi - rsi_at_low
+        bull_div = (
+            (curr_price <= lowest_price_in_window * 1.005) and
+            (rsi_bull_magnitude >= 2.0) and
+            (curr_rsi <= 52.0)
+        )
     
-    rsi_at_low = float(window_rsi.iloc[lowest_idx])
-    rsi_at_high = float(window_rsi.iloc[highest_idx])
+    # Require fresh swing high within 2 to 8 bars ago
+    bear_div = False
+    if 2 <= bars_from_high <= 8:
+        highest_price_in_window = float(window_price.iloc[highest_idx])
+        rsi_at_high = float(window_rsi.iloc[highest_idx])
+        rsi_bear_magnitude = rsi_at_high - curr_rsi
+        bear_div = (
+            (curr_price >= highest_price_in_window * 0.995) and
+            (rsi_bear_magnitude >= 2.0) and
+            (curr_rsi >= 48.0)
+        )
 
-    # Bullish Divergence: Price moving down (<= lowest_price * 1.005), RSI moving up (>= rsi_at_low + 2.0)
-    rsi_bull_magnitude = curr_rsi - rsi_at_low
-    bull_div = (
-        (curr_price <= lowest_price_in_window * 1.005) and
-        (rsi_bull_magnitude >= 2.0) and
-        (curr_rsi <= 52.0) and
-        (bars_from_low >= 2)
-    )
-    
-    # Bearish Divergence: Price moving up (>= highest_price * 0.995), RSI moving down (<= rsi_at_high - 2.0)
-    rsi_bear_magnitude = rsi_at_high - curr_rsi
-    bear_div = (
-        (curr_price >= highest_price_in_window * 0.995) and
-        (rsi_bear_magnitude >= 2.0) and
-        (curr_rsi >= 48.0) and
-        (bars_from_high >= 2)
-    )
-    
     return bull_div, bear_div
 
 # =====================================================================
