@@ -1056,7 +1056,13 @@ def find_best_option(ticker, signal_type, last_price):
                         "exp": datetime.fromtimestamp(exp_ts).strftime("%b %d"),
                         "dte": dte_days,
                         "mid": round(mid, 2),
+                        "bid": round(bid, 2) if bid is not None else round(mid * 0.95, 2),
+                        "ask": round(ask, 2) if ask is not None else round(mid * 1.05, 2),
                         "iv": round(iv * 100, 1),
+                        "volume": vol,
+                        "oi": oi,
+                        "spread_pct": round(spread_pct, 1),
+                        "est_delta": 0.50,
                         "score": score
                     }
             
@@ -1066,14 +1072,21 @@ def find_best_option(ticker, signal_type, last_price):
             # Off-market hours fallback: construct ATM option play contract (30 DTE, ATM strike)
             target_strike = round(last_price, 2)
             target_exp = datetime.now() + timedelta(days=30)
+            mid_val = round(last_price * 0.04, 2)
             best_contract = {
                 "symbol": f"{ticker}{target_exp.strftime('%y%m%d')}{'C' if signal_type == 'bullish' else 'P'}{int(target_strike*100):08d}",
                 "strike": target_strike,
                 "type": "CALL" if signal_type == "bullish" else "PUT",
                 "exp": target_exp.strftime("%b %d"),
                 "dte": 30,
-                "mid": round(last_price * 0.04, 2),
+                "mid": mid_val,
+                "bid": round(mid_val * 0.95, 2),
+                "ask": round(mid_val * 1.05, 2),
                 "iv": 35.0,
+                "volume": 150,
+                "oi": 500,
+                "spread_pct": 5.0,
+                "est_delta": 0.50,
                 "score": 50
             }
 
@@ -1081,14 +1094,21 @@ def find_best_option(ticker, signal_type, last_price):
     except Exception:
         target_strike = round(last_price, 2)
         target_exp = datetime.now() + timedelta(days=30)
+        mid_val = round(last_price * 0.04, 2)
         return {
             "symbol": f"{ticker}{target_exp.strftime('%y%m%d')}{'C' if signal_type == 'bullish' else 'P'}{int(target_strike*100):08d}",
             "strike": target_strike,
             "type": "CALL" if signal_type == "bullish" else "PUT",
             "exp": target_exp.strftime("%b %d"),
             "dte": 30,
-            "mid": round(last_price * 0.04, 2),
+            "mid": mid_val,
+            "bid": round(mid_val * 0.95, 2),
+            "ask": round(mid_val * 1.05, 2),
             "iv": 35.0,
+            "volume": 150,
+            "oi": 500,
+            "spread_pct": 5.0,
+            "est_delta": 0.50,
             "score": 50
         }
 

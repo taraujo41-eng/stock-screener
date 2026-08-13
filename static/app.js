@@ -729,9 +729,10 @@ function startProgressPolling(scanType = "watchlist") {
       const res = await fetch(`/api/scan/progress?t=${Date.now()}`);
       const p = await res.json();
 
-      // If status is complete, idle, error, or if poll limit reached (90s safety):
-      if (p.status === "done" || p.status === "error" || p.status === "idle" || pollCount > 90) {
-        if (p.status === "done" || p.status === "idle" || pollCount > 90) {
+      // If status is complete, error, poll limit reached (90s safety), or idle (after grace period pollCount > 3):
+      const isFinished = p.status === "done" || p.status === "error" || (p.status === "idle" && pollCount > 3) || pollCount > 90;
+      if (isFinished) {
+        if (p.status === "done" || (p.status === "idle" && pollCount > 3) || pollCount > 90) {
           document.getElementById("progressPct").textContent = "100%";
           document.getElementById("progressFill").style.width = "100%";
         }

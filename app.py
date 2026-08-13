@@ -344,25 +344,31 @@ def scan_options_tight_spreads_results():
 
 
 
+# Helper function to get fresh scan results from disk (bypasses multi-worker Gunicorn memory caching)
+def get_fresh_scan_results(config_key, filepath):
+    disk_data = load_last_scan(filepath)
+    if disk_data and isinstance(disk_data, dict) and disk_data.get("ok"):
+        app.config[config_key] = disk_data
+        return disk_data
+    mem_data = app.config.get(config_key)
+    if mem_data and isinstance(mem_data, dict):
+        return mem_data
+    return None
+
 # ── API: 2-Sigma Scans (async) ──────────────────────────────────────
 
 @app.route("/api/scan/2sigma", methods=["POST"])
 def scan_2sigma():
     """Start a full market 2-sigma scan in the background."""
-    global _scan_running
-
-    with _scan_lock:
-        if _scan_running:
-            return _scan_conflict_response()
-        _scan_running = True
-        _reset_progress(status="running", mode="2sigma")
-        scan_progress["phase_label"] = "Initiating scan..."
+    if not _acquire_scan("2Sigma-User"):
+        return _scan_conflict_response()
+    _reset_progress(status="running", mode="2sigma")
+    scan_progress["phase_label"] = "Initiating scan..."
 
     req_data = request.get_json(silent=True) or {}
     extended_hours = req_data.get("extended_hours", False)
 
     def _run():
-        global _scan_running
         try:
             et_tz = get_ny_timezone()
             df = two_sigma_full_market_scan(extended_hours=extended_hours)
@@ -376,6 +382,7 @@ def scan_2sigma():
             app.config["LAST_2SIGMA_RESULTS"] = results_data
             save_last_scan(results_data, TWO_SIGMA_RESULTS_FILE)
             scan_progress["status"] = "done"
+            scan_progress["mode"] = "2sigma"
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -383,19 +390,14 @@ def scan_2sigma():
             scan_progress["status"] = "error"
             scan_progress["phase_label"] = traceback.format_exc()
         finally:
-            with _scan_lock:
-                _scan_running = False
+            _release_scan()
 
     threading.Thread(target=_run, daemon=False).start()
     return jsonify({"ok": True, "message": "2-Sigma scan started"})
 
 @app.route("/api/scan/2sigma/results", methods=["GET"])
 def scan_2sigma_results():
-    results = app.config.get("LAST_2SIGMA_RESULTS")
-    if results is None:
-        results = load_last_scan(TWO_SIGMA_RESULTS_FILE)
-        if results:
-            app.config["LAST_2SIGMA_RESULTS"] = results
+    results = get_fresh_scan_results("LAST_2SIGMA_RESULTS", TWO_SIGMA_RESULTS_FILE)
     if results is None:
         return jsonify({"ok": False, "error": "No scan results available"}), 404
     return jsonify(results)
@@ -405,20 +407,15 @@ def scan_2sigma_results():
 @app.route("/api/scan/52w", methods=["POST"])
 def scan_52w():
     """Start a 52-week high/low reversal scan in the background."""
-    global _scan_running
-
-    with _scan_lock:
-        if _scan_running:
-            return _scan_conflict_response()
-        _scan_running = True
-        _reset_progress(status="running", mode="52w")
-        scan_progress["phase_label"] = "Initiating scan..."
+    if not _acquire_scan("52W-User"):
+        return _scan_conflict_response()
+    _reset_progress(status="running", mode="52w")
+    scan_progress["phase_label"] = "Initiating scan..."
 
     req_data = request.get_json(silent=True) or {}
     extended_hours = req_data.get("extended_hours", False)
 
     def _run():
-        global _scan_running
         try:
             et_tz = get_ny_timezone()
             df = fifty_two_week_reversal_scan(extended_hours=extended_hours)
@@ -432,6 +429,7 @@ def scan_52w():
             app.config["LAST_52W_RESULTS"] = results_data
             save_last_scan(results_data, FIFTY_TWO_WEEK_RESULTS_FILE)
             scan_progress["status"] = "done"
+            scan_progress["mode"] = "52w"
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -439,19 +437,14 @@ def scan_52w():
             scan_progress["status"] = "error"
             scan_progress["phase_label"] = traceback.format_exc()
         finally:
-            with _scan_lock:
-                _scan_running = False
+            _release_scan()
 
     threading.Thread(target=_run, daemon=False).start()
     return jsonify({"ok": True, "message": "52-week reversal scan started"})
 
 @app.route("/api/scan/52w/results", methods=["GET"])
 def scan_52w_results():
-    results = app.config.get("LAST_52W_RESULTS")
-    if results is None:
-        results = load_last_scan(FIFTY_TWO_WEEK_RESULTS_FILE)
-        if results:
-            app.config["LAST_52W_RESULTS"] = results
+    results = get_fresh_scan_results("LAST_52W_RESULTS", FIFTY_TWO_WEEK_RESULTS_FILE)
     if results is None:
         return jsonify({"ok": False, "error": "No scan results available"}), 404
     return jsonify(results)
@@ -461,21 +454,16 @@ def scan_52w_results():
 @app.route("/api/scan/rsidiv", methods=["POST"])
 def scan_rsidiv():
     """Start a full market RSI divergence scan in the background."""
-    global _scan_running
-
-    with _scan_lock:
-        if _scan_running:
-            return _scan_conflict_response()
-        _scan_running = True
-        _reset_progress(status="running", mode="rsidiv")
-        scan_progress["phase_label"] = "Initiating scan..."
+    if not _acquire_scan("RSIDiv-User"):
+        return _scan_conflict_response()
+    _reset_progress(status="running", mode="rsidiv")
+    scan_progress["phase_label"] = "Initiating scan..."
 
     req_data = request.get_json(silent=True) or {}
     extended_hours = req_data.get("extended_hours", False)
     use_watchlist = req_data.get("use_watchlist", False)
 
     def _run():
-        global _scan_running
         try:
             et_tz = get_ny_timezone()
             tickers = load_watchlist() if use_watchlist else None
@@ -490,6 +478,7 @@ def scan_rsidiv():
             app.config["LAST_RSIDIV_RESULTS"] = results_data
             save_last_scan(results_data, RSIDIV_RESULTS_FILE)
             scan_progress["status"] = "done"
+            scan_progress["mode"] = "rsidiv"
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -497,19 +486,14 @@ def scan_rsidiv():
             scan_progress["status"] = "error"
             scan_progress["phase_label"] = traceback.format_exc()
         finally:
-            with _scan_lock:
-                _scan_running = False
+            _release_scan()
 
     threading.Thread(target=_run, daemon=False).start()
     return jsonify({"ok": True, "message": "RSI divergence scan started"})
 
 @app.route("/api/scan/rsidiv/results", methods=["GET"])
 def scan_rsidiv_results():
-    results = app.config.get("LAST_RSIDIV_RESULTS")
-    if results is None:
-        results = load_last_scan(RSIDIV_RESULTS_FILE)
-        if results:
-            app.config["LAST_RSIDIV_RESULTS"] = results
+    results = get_fresh_scan_results("LAST_RSIDIV_RESULTS", RSIDIV_RESULTS_FILE)
     if results is None or not isinstance(results, dict):
         return jsonify({"ok": True, "mode": "rsidiv", "count": 0, "results": [], "timestamp": "Ready"}), 200
     return jsonify(results)
@@ -630,12 +614,7 @@ def debug_files():
 
 @app.route("/api/scan/watchlist/results", methods=["GET"])
 def scan_watchlist_results():
-    results = app.config.get("LAST_WATCHLIST_RESULTS")
-    if not results or not isinstance(results, dict) or not results.get("ok"):
-        disk_results = load_last_scan(WATCHLIST_RESULTS_FILE)
-        if disk_results and disk_results.get("ok"):
-            results = disk_results
-            app.config["LAST_WATCHLIST_RESULTS"] = results
+    results = get_fresh_scan_results("LAST_WATCHLIST_RESULTS", WATCHLIST_RESULTS_FILE)
     if not results or not isinstance(results, dict):
         return jsonify({"ok": True, "mode": "watchlist", "count": 0, "results": [], "timestamp": "Ready"}), 200
     return jsonify(results)
