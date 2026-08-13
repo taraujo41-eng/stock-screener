@@ -141,6 +141,14 @@ class PaperTrader:
             return True
 
         try:
+            # Monkey-patch: the unofficial `webull` package (0.6.1) doesn't expose
+            # __version__, but the OpenAPI SDK's ApiClient.default_user_agent() does
+            # __import__('webull.core').__version__ which returns the top-level `webull`
+            # module and crashes with AttributeError. Inject it before importing the SDK.
+            import webull as _webull_mod
+            if not hasattr(_webull_mod, '__version__'):
+                _webull_mod.__version__ = '0.6.1'
+
             from webull.core.client import ApiClient
             from webull.trade.trade_client import TradeClient
 
