@@ -43,10 +43,65 @@ if not logger.handlers:
 _daily_bands_map = {}
 # Track the date when daily bands were calculated to cache results
 _daily_bands_last_date = None
-# Global state to keep track of sent alerts: {ticker: last_alerted_candle_timestamp}
-_last_alerts_sent = {}
-# Global state to keep track of last self-ping timestamp (Render keep-alive)
-_last_self_ping_time = 0
+# Daily alert cooldown: {ticker: {"direction": "BUY"|"SELL", "date": "YYYY-MM-DD", "price": float}}
+_ALERTED_TODAY_FILE = os.path.join(os.path.dirname(__file__), "alerted_today.json")
+_alerted_today = {}
+_alerted_today_lock = threading.Lock()
+
+def _load_alerted_today():
+    """Load daily alert state from disk (survives container restarts)."""
+    global _alerted_today
+    try:
+        if os.path.exists(_ALERTED_TODAY_FILE):
+            with open(_ALERTED_TODAY_FILE, "r") as f:
+                _alerted_today = json.load(f)
+            logger.info(f"Loaded {len(_alerted_today)} alerted tickers from disk.")
+    except Exception as e:
+        logger.warning(f"Could not load alerted_today.json: {e}")
+        _alerted_today = {}
+
+def _save_alerted_today():
+    """Persist daily alert state to disk."""
+    try:
+        with open(_ALERTED_TODAY_FILE, "w") as f:
+            json.dump(_alerted_today, f, indent=2)
+    except Exception as e:
+        logger.warning(f"Could not save alerted_today.json: {e}")
+
+def _purge_old_alerts():
+    """Remove entries from previous trading days so tickers can alert again."""
+    global _alerted_today
+    ny_tz = get_ny_timezone()
+    today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
+    stale = [t for t, info in _alerted_today.items() if info.get("date") != today_str]
+    if stale:
+        for t in stale:
+            del _alerted_today[t]
+        _save_alerted_today()
+        logger.info(f"Purged {len(stale)} stale alert entries from previous days.")
+
+def _already_alerted_today(ticker, direction):
+    """Check if this ticker+direction already fired today. Direction flip is allowed."""
+    ny_tz = get_ny_timezone()
+    today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
+    info = _alerted_today.get(ticker)
+    if not info:
+        return False
+    return info.get("date") == today_str and info.get("direction") == direction
+
+def _record_alert(ticker, direction, price):
+    """Record that this ticker+direction alerted today."""
+    ny_tz = get_ny_timezone()
+    today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
+    _alerted_today[ticker] = {
+        "direction": direction,
+        "date": today_str,
+        "price": price,
+    }
+    _save_alerted_today()
+
+# Load persisted state on module import
+_load_alerted_today()
 
 def send_sms_notification(message):
     """Sends a text message alert using Yahoo SMTP and mobile carrier SMS gateway."""
@@ -307,39 +362,7 @@ def is_market_hours():
         logger.error(f"Error checking market hours: {e}")
         return True  # Default to True on exception to ensure we don't block bot permanently
 
-def _do_self_ping(label="self-ping"):
-    """Send an HTTP request to our own /api/ping to keep Render alive."""
-    global _last_self_ping_time
-    self_url = os.getenv("RENDER_EXTERNAL_URL") or os.getenv("SELF_PING_URL")
-    if not self_url:
-        return
-    try:
-        import requests
-        ping_url = f"{self_url.rstrip('/')}/api/ping"
-        requests.get(ping_url, timeout=10)
-        _last_self_ping_time = time.time()
-        logger.info(f"Keep-alive {label} sent: {ping_url}")
-    except Exception as e:
-        logger.warning(f"Keep-alive {label} failed: {e}")
 
-def _keep_alive_loop():
-    """
-    Independent keep-alive thread that pings every 4 minutes during market hours
-    and every 12 minutes during off-hours. This runs separately from the bot loop
-    so even if the bot loop is busy scanning, pings still fire on schedule.
-    """
-    logger.info("Keep-alive thread started.")
-    while True:
-        try:
-            if is_market_hours():
-                _do_self_ping(label="market-hours")
-                time.sleep(240)   # 4 minutes — well under Render's 15-min spin-down
-            else:
-                _do_self_ping(label="off-hours")
-                time.sleep(720)   # 12 minutes — keeps container warm for morning
-        except Exception as e:
-            logger.warning(f"Keep-alive loop error: {e}")
-            time.sleep(60)
 
 def bot_loop():
     logger.info("Starting background 3-Sigma alert bot loop...")
@@ -412,12 +435,15 @@ def bot_loop():
                     skip_webull=False
                 )
                 
-                # 4. Process matches in main thread
+                # 4. Process matches — skip tickers already alerted today (same direction)
+                _purge_old_alerts()  # clear stale entries from previous days
                 triggered_count = 0
+                skipped_count = 0
                 for ticker, res in results.items():
                     if res:
-                        candle_time = res.get('time')
-                        if candle_time and _last_alerts_sent.get(ticker) == candle_time:
+                        direction = res['action']  # "BUY" or "SELL"
+                        if _already_alerted_today(ticker, direction):
+                            skipped_count += 1
                             continue
                             
                         trigger_alerts(
@@ -427,11 +453,10 @@ def bot_loop():
                             last_price=res['price'],
                             vwap_target=res['vwap']
                         )
-                        if candle_time:
-                            _last_alerts_sent[ticker] = candle_time
+                        _record_alert(ticker, direction, res['price'])
                         triggered_count += 1
                         
-                logger.info(f"--- 3-Sigma Bot Cycle Complete. Triggers found: {triggered_count}. Sleeping for {scan_interval}s ---")
+                logger.info(f"--- 3-Sigma Bot Cycle Complete. New alerts: {triggered_count}, Suppressed (already alerted today): {skipped_count}. Sleeping for {scan_interval}s ---")
                 time.sleep(scan_interval)
             finally:
                 release_scan_lock()
@@ -441,11 +466,7 @@ def bot_loop():
             time.sleep(60)
 
 def start_bot_thread():
-    """Starts the bot loop, keep-alive pinger, and paper trader in daemon background threads."""
-    # Keep-alive thread — ensures Render doesn't spin down
-    ka = threading.Thread(target=_keep_alive_loop, daemon=True)
-    ka.start()
-    logger.info("Keep-alive background thread spawned.")
+    """Starts the bot loop and paper trader in daemon background threads."""
     
     # Main bot loop thread — runs scans during market hours
     t = threading.Thread(target=bot_loop, daemon=True)
