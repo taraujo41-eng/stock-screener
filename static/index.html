@@ -29,87 +29,172 @@
       <p class="header__subtitle" id="headerSubtitle">Reversal & RSI Divergence Scanner</p>
     </header>
 
-    <!-- Scanner description -->
-    <div class="mode-info">
-      <p class="mode-desc" id="modeDesc">Scans your watchlist on 15m candles with extended hours during active market, or daily candles when closed.</p>
-      <button class="edit-link" id="editWatchlistBtn" onclick="openWatchlistModal()">⚙️ Edit Watchlist</button>
-    </div>
-
-    <!-- Extended Hours Toggle -->
-    <div class="ext-hours-wrap" id="extHoursWrap">
-      <label class="ext-hours-label">
-        <input type="checkbox" id="extHoursToggle" class="ext-hours-checkbox">
-        <span class="ext-hours-slider"></span>
-        <span class="ext-hours-text">🌙 Include Extended Hours</span>
-      </label>
-    </div>
-
-    <!-- Scan Buttons -->
-    <div style="display: flex; gap: 10px; width: 100%; margin-bottom: 16px;">
-      <button class="scan-btn" id="scanBtn" onclick="runScan('watchlist')" style="flex: 1;">
-        <div class="scan-btn__spinner"></div>
-        <span class="scan-btn__text">📋 Scan Watchlist</span>
+    <!-- Navigation Tabs (Scanner vs Paper Trader) -->
+    <div class="main-tabs">
+      <button class="main-tab main-tab--active" id="tabScannerBtn" onclick="switchMainTab('scanner')">
+        🔎 Reversal Scanner
       </button>
-      <button class="scan-btn" id="scanRsiDivBtn" onclick="runScan('rsidiv')" style="flex: 1; background: linear-gradient(135deg, #6366f1, #818cf8);">
-        <div class="scan-btn__spinner"></div>
-        <span class="scan-btn__text">📊 RSI Divergence</span>
+      <button class="main-tab" id="tabPaperBtn" onclick="switchMainTab('paper')">
+        💼 Paper Trader <span class="tab-badge" id="paperBadge">0</span>
       </button>
     </div>
 
-    <!-- Progress bar (full scan only) -->
-    <div class="progress-wrap hidden" id="progressWrap">
-      <div class="progress-header">
-        <span class="progress-phase" id="progressPhase">Initializing...</span>
-        <span class="progress-pct" id="progressPct">0%</span>
+    <!-- SCANNER VIEW -->
+    <div id="scannerView">
+      <!-- Scanner description -->
+      <div class="mode-info">
+        <p class="mode-desc" id="modeDesc">Scans your watchlist on 15m candles with extended hours during active market, or daily candles when closed.</p>
+        <button class="edit-link" id="editWatchlistBtn" onclick="openWatchlistModal()">⚙️ Edit Watchlist</button>
       </div>
-      <div class="progress-bar">
-        <div class="progress-bar__fill" id="progressFill" style="width: 0%"></div>
+
+      <!-- Extended Hours Toggle -->
+      <div class="ext-hours-wrap" id="extHoursWrap">
+        <label class="ext-hours-label">
+          <input type="checkbox" id="extHoursToggle" class="ext-hours-checkbox">
+          <span class="ext-hours-slider"></span>
+          <span class="ext-hours-text">🌙 Include Extended Hours</span>
+        </label>
       </div>
-      <div class="progress-footer">
-        <span class="progress-detail" id="progressDetail"></span>
-        <span class="progress-eta" id="progressEta"></span>
+
+      <!-- Scan Buttons -->
+      <div style="display: flex; gap: 10px; width: 100%; margin-bottom: 16px;">
+        <button class="scan-btn" id="scanBtn" onclick="runScan('watchlist')" style="flex: 1;">
+          <div class="scan-btn__spinner"></div>
+          <span class="scan-btn__text">📋 Scan Watchlist</span>
+        </button>
+        <button class="scan-btn" id="scanRsiDivBtn" onclick="runScan('rsidiv')" style="flex: 1; background: linear-gradient(135deg, #6366f1, #818cf8);">
+          <div class="scan-btn__spinner"></div>
+          <span class="scan-btn__text">📊 RSI Divergence</span>
+        </button>
+      </div>
+
+      <!-- Progress bar (full scan only) -->
+      <div class="progress-wrap hidden" id="progressWrap">
+        <div class="progress-header">
+          <span class="progress-phase" id="progressPhase">Initializing...</span>
+          <span class="progress-pct" id="progressPct">0%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-bar__fill" id="progressFill" style="width: 0%"></div>
+        </div>
+        <div class="progress-footer">
+          <span class="progress-detail" id="progressDetail"></span>
+          <span class="progress-eta" id="progressEta"></span>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats hidden" id="statsBar">
+        <div class="stat">
+          <div class="stat__value stat__value--accent" id="statTotal">0</div>
+          <div class="stat__label">Signals</div>
+        </div>
+        <div class="stat">
+          <div class="stat__value stat__value--green" id="statBull">0</div>
+          <div class="stat__label">Bullish</div>
+        </div>
+        <div class="stat">
+          <div class="stat__value stat__value--red" id="statBear">0</div>
+          <div class="stat__label">Bearish</div>
+        </div>
+      </div>
+
+      <!-- Timestamp -->
+      <div class="timestamp hidden" id="timestamp">
+        Last scan: <span id="tsValue"></span>
+      </div>
+
+      <!-- Scan info badge -->
+      <div class="scan-badge hidden" id="scanBadge"></div>
+
+      <!-- Filter tabs -->
+      <div class="filters hidden" id="filters">
+        <button class="filter-btn filter-btn--active" data-filter="all" onclick="setFilter('all', this)">All</button>
+        <button class="filter-btn" data-filter="bullish" onclick="setFilter('bullish', this)">🟢 Bullish</button>
+        <button class="filter-btn" data-filter="bearish" onclick="setFilter('bearish', this)">🔴 Bearish</button>
+        <button class="filter-btn" data-filter="both" onclick="setFilter('both', this)">⚡ Both</button>
+      </div>
+
+      <!-- Results -->
+      <div id="results">
+        <div class="empty-state" id="emptyState">
+          <div class="empty-state__icon">🔎</div>
+          <div class="empty-state__title">Ready to scan</div>
+          <div class="empty-state__text">Choose a mode above and tap scan<br>to find reversal setups</div>
+        </div>
       </div>
     </div>
 
-    <!-- Stats -->
-    <div class="stats hidden" id="statsBar">
-      <div class="stat">
-        <div class="stat__value stat__value--accent" id="statTotal">0</div>
-        <div class="stat__label">Signals</div>
-      </div>
-      <div class="stat">
-        <div class="stat__value stat__value--green" id="statBull">0</div>
-        <div class="stat__label">Bullish</div>
-      </div>
-      <div class="stat">
-        <div class="stat__value stat__value--red" id="statBear">0</div>
-        <div class="stat__label">Bearish</div>
-      </div>
-    </div>
+    <!-- PAPER TRADER VIEW -->
+    <div id="paperTraderView" class="hidden">
+      
+      <!-- Account Performance Summary Header -->
+      <div class="paper-summary-card">
+        <div class="paper-summary-header">
+          <div class="paper-summary-title">
+            <span class="paper-summary-icon">🤖</span>
+            <div>
+              <h3>3-Sigma Auto-Trader</h3>
+              <span class="paper-mode-badge" id="paperModeText">Simulation Mode</span>
+            </div>
+          </div>
+          <div class="paper-toggle-wrap">
+            <label class="ext-hours-label" style="margin:0;">
+              <input type="checkbox" id="paperToggleBtn" onchange="togglePaperTrading(this.checked)" checked>
+              <span class="ext-hours-slider"></span>
+            </label>
+          </div>
+        </div>
 
-    <!-- Timestamp -->
-    <div class="timestamp hidden" id="timestamp">
-      Last scan: <span id="tsValue"></span>
-    </div>
-
-    <!-- Scan info badge -->
-    <div class="scan-badge hidden" id="scanBadge"></div>
-
-    <!-- Filter tabs -->
-    <div class="filters hidden" id="filters">
-      <button class="filter-btn filter-btn--active" data-filter="all" onclick="setFilter('all', this)">All</button>
-      <button class="filter-btn" data-filter="bullish" onclick="setFilter('bullish', this)">🟢 Bullish</button>
-      <button class="filter-btn" data-filter="bearish" onclick="setFilter('bearish', this)">🔴 Bearish</button>
-      <button class="filter-btn" data-filter="both" onclick="setFilter('both', this)">⚡ Both</button>
-    </div>
-
-    <!-- Results -->
-    <div id="results">
-      <div class="empty-state" id="emptyState">
-        <div class="empty-state__icon">🔎</div>
-        <div class="empty-state__title">Ready to scan</div>
-        <div class="empty-state__text">Choose a mode above and tap scan<br>to find reversal setups</div>
+        <div class="paper-kpi-grid">
+          <div class="paper-kpi">
+            <span class="paper-kpi__label">Account Net Liq</span>
+            <span class="paper-kpi__val" id="paperNetLiq">$100,000.00</span>
+          </div>
+          <div class="paper-kpi">
+            <span class="paper-kpi__label">Realized P&L</span>
+            <span class="paper-kpi__val" id="paperTotalPnl">$0.00</span>
+          </div>
+          <div class="paper-kpi">
+            <span class="paper-kpi__label">Win Rate</span>
+            <span class="paper-kpi__val" id="paperWinRate">0.0%</span>
+          </div>
+          <div class="paper-kpi">
+            <span class="paper-kpi__label">Open Positions</span>
+            <span class="paper-kpi__val" id="paperOpenCount">0</span>
+          </div>
+        </div>
       </div>
+
+      <!-- Section: Open Positions -->
+      <div class="paper-section">
+        <div class="paper-section-title">
+          <span>🟢 Active Open Positions</span>
+          <button class="refresh-sm-btn" onclick="fetchPaperData()">🔄 Refresh</button>
+        </div>
+        <div id="paperOpenPositionsList">
+          <div class="empty-state">
+            <div class="empty-state__icon">💼</div>
+            <div class="empty-state__title">No Open Positions</div>
+            <div class="empty-state__text">When 3-Sigma reversal signals fire during market hours, paper trades will automatically appear here!</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Section: Trade Log & History -->
+      <div class="paper-section" style="margin-top: 24px;">
+        <div class="paper-section-title">
+          <span>📜 Trade History Log</span>
+        </div>
+        <div id="paperTradeLogList">
+          <div class="empty-state">
+            <div class="empty-state__icon">📋</div>
+            <div class="empty-state__title">No Trade History Yet</div>
+            <div class="empty-state__text">Completed paper trades with entry/exit prices and realized P&L will log here.</div>
+          </div>
+        </div>
+      </div>
+
     </div>
 
   </div>

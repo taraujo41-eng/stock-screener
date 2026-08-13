@@ -1056,12 +1056,34 @@ def paper_positions():
                     "vwap_target": p.get("vwap_target"),
                     "quantity": p.get("quantity"),
                     "signal_type": p.get("signal_type"),
+                    "instrument_id": p.get("instrument_id"),
                 }
                 for p in pt._open_positions if p.get("status") == "open"
             ]
         }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route("/api/paper/close-position", methods=["POST"])
+def paper_close_position():
+    """Manually close an open paper trade position."""
+    try:
+        from paper_trader import get_paper_trader
+        pt = get_paper_trader()
+        data = request.get_json(silent=True) or {}
+        trade_id = data.get("trade_id")
+        if not trade_id:
+            return jsonify({"error": "trade_id required"}), 400
+
+        matching = [p for p in pt._open_positions if str(p.get("id")) == str(trade_id) and p.get("status") == "open"]
+        if not matching:
+            return jsonify({"error": f"Open trade #{trade_id} not found"}), 404
+
+        success = pt.close_position(matching[0], reason="Manual Close (Web App)")
+        return jsonify({"ok": success, "trade_id": trade_id}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route("/api/paper/orders", methods=["GET"])
 def paper_orders():

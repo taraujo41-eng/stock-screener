@@ -1209,3 +1209,262 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+/* ============================================================
+   Paper Trader Dashboard & Main Tab Switching
+   ============================================================ */
+
+let currentMainTab = "scanner";
+let paperPollTimer = null;
+
+function switchMainTab(tab) {
+  currentMainTab = tab;
+  const scannerView = document.getElementById("scannerView");
+  const paperView = document.getElementById("paperTraderView");
+  const scannerBtn = document.getElementById("tabScannerBtn");
+  const paperBtn = document.getElementById("tabPaperBtn");
+
+  if (tab === "paper") {
+    if (scannerView) scannerView.classList.add("hidden");
+    if (paperView) paperView.classList.remove("hidden");
+    if (scannerBtn) scannerBtn.classList.remove("main-tab--active");
+    if (paperBtn) paperBtn.classList.add("main-tab--active");
+    fetchPaperData();
+    if (!paperPollTimer) {
+      paperPollTimer = setInterval(fetchPaperData, 10000);
+    }
+  } else {
+    if (paperView) paperView.classList.add("hidden");
+    if (scannerView) scannerView.classList.remove("hidden");
+    if (paperBtn) paperBtn.classList.remove("main-tab--active");
+    if (scannerBtn) scannerBtn.classList.add("main-tab--active");
+    if (paperPollTimer) {
+      clearInterval(paperPollTimer);
+      paperPollTimer = null;
+    }
+  }
+}
+
+async function fetchPaperData() {
+  try {
+    // 1. Fetch Paper Status
+    const resStatus = await fetch("/api/paper/status");
+    if (resStatus.ok) {
+      const data = await resStatus.json();
+      updatePaperStatusUI(data);
+    }
+
+    // 2. Fetch Open Positions
+    const resPos = await fetch("/api/paper/positions");
+    if (resPos.ok) {
+      const data = await resPos.json();
+      renderPaperOpenPositions(data.open_positions || []);
+    }
+
+    // 3. Fetch Trade Log
+    const resLog = await fetch("/api/paper/trade-log");
+    if (resLog.ok) {
+      const data = await resLog.json();
+      renderPaperTradeLog(data);
+    }
+  } catch (e) {
+    console.error("Error fetching paper data:", e);
+  }
+}
+
+function updatePaperStatusUI(data) {
+  const status = data.status || {};
+  const risk = data.risk_limits || {};
+
+  const netLiqEl = document.getElementById("paperNetLiq");
+  const modeTextEl = document.getElementById("paperModeText");
+  const toggleBtn = document.getElementById("paperToggleBtn");
+
+  if (netLiqEl && status.total_net_liquidation_value) {
+    const val = parseFloat(status.total_net_liquidation_value);
+    netLiqEl.textContent = `$${val.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
+
+  if (modeTextEl && status.mode) {
+    modeTextEl.textContent = status.mode;
+  }
+
+  if (toggleBtn && typeof risk.enabled === "boolean") {
+    toggleBtn.checked = risk.enabled;
+  }
+}
+
+function renderPaperOpenPositions(positions) {
+  const container = document.getElementById("paperOpenPositionsList");
+  const badge = document.getElementById("paperBadge");
+  const openCountEl = document.getElementById("paperOpenCount");
+
+  if (badge) badge.textContent = positions.length;
+  if (openCountEl) openCountEl.textContent = positions.length;
+
+  if (!container) return;
+
+  if (!positions || positions.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state__icon">💼</div>
+        <div class="empty-state__title">No Open Positions</div>
+        <div class="empty-state__text">When 3-Sigma reversal signals fire during market hours, paper trades will automatically appear here!</div>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = positions.map(p => `
+    <div class="paper-card">
+      <div class="paper-card__top">
+        <div>
+          <span class="paper-card__symbol">${p.ticker}</span>
+          <span style="font-size: 0.8rem; color: #94a3b8; margin-left: 8px;">${p.option_symbol || ''}</span>
+        </div>
+        <span class="paper-card__type ${p.type === 'CALL' ? 'paper-card__type--call' : 'paper-card__type--put'}">
+          ${p.type || 'OPTION'}
+        </span>
+      </div>
+
+      <div class="paper-card__details">
+        <div>
+          <span class="paper-card__stat-label">Strike</span>
+          <span class="paper-card__stat-val">$${p.strike || '—'}</span>
+        </div>
+        <div>
+          <span class="paper-card__stat-label">Entry Price</span>
+          <span class="paper-card__stat-val">$${(p.entry_price || 0).toFixed(2)}</span>
+        </div>
+        <div>
+          <span class="paper-card__stat-label">VWAP Target</span>
+          <span class="paper-card__stat-val">$${p.vwap_target ? p.vwap_target.toFixed(2) : '—'}</span>
+        </div>
+      </div>
+
+      <div class="paper-card__bottom">
+        <span style="font-size: 0.75rem; color: #64748b;">Qty: ${p.quantity || 1} contract(s)</span>
+        <button class="paper-close-btn" onclick="closePaperPosition('${p.id}')">
+          🛑 Close Position
+        </button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function renderPaperTradeLog(data) {
+  const container = document.getElementById("paperTradeLogList");
+  const summary = data.summary || {};
+  const trades = data.trades || [];
+
+  const totalPnlEl = document.getElementById("paperTotalPnl");
+  const winRateEl = document.getElementById("paperWinRate");
+
+  if (totalPnlEl) {
+    const pnl = summary.total_pnl || 0;
+    const sign = pnl >= 0 ? "+" : "";
+    totalPnlEl.textContent = `${sign}$${pnl.toFixed(2)}`;
+    totalPnlEl.style.color = pnl >= 0 ? "var(--green)" : "var(--red)";
+  }
+
+  if (winRateEl) {
+    winRateEl.textContent = `${summary.win_rate || 0}%`;
+  }
+
+  if (!container) return;
+
+  const closed = trades.filter(t => t.status === "closed");
+  if (closed.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state__icon">📋</div>
+        <div class="empty-state__title">No Trade History Yet</div>
+        <div class="empty-state__text">Completed paper trades with entry/exit prices and realized P&L will log here.</div>
+      </div>
+    `;
+    return;
+  }
+
+  // Show newest closed trades first
+  closed.sort((a, b) => new Date(b.exit_time || 0) - new Date(a.exit_time || 0));
+
+  container.innerHTML = closed.map(t => {
+    const pnl = t.pnl || 0;
+    const pnlColor = pnl >= 0 ? "var(--green)" : "var(--red)";
+    const sign = pnl >= 0 ? "+" : "";
+    return `
+      <div class="paper-card" style="opacity: 0.9;">
+        <div class="paper-card__top">
+          <div>
+            <span class="paper-card__symbol">${t.ticker}</span>
+            <span style="font-size: 0.8rem; color: #94a3b8; margin-left: 8px;">${t.type} $${t.strike}</span>
+          </div>
+          <span style="font-size: 0.95rem; font-weight: 700; color: ${pnlColor}; font-family: 'JetBrains Mono', monospace;">
+            ${sign}$${pnl.toFixed(2)}
+          </span>
+        </div>
+
+        <div class="paper-card__details">
+          <div>
+            <span class="paper-card__stat-label">Entry / Exit</span>
+            <span class="paper-card__stat-val">$${(t.entry_price || 0).toFixed(2)} / $${(t.exit_price || 0).toFixed(2)}</span>
+          </div>
+          <div>
+            <span class="paper-card__stat-label">Reason</span>
+            <span class="paper-card__stat-val" style="color: #cbd5e1;">${t.exit_reason || 'Closed'}</span>
+          </div>
+          <div>
+            <span class="paper-card__stat-label">Exit Time</span>
+            <span class="paper-card__stat-val" style="font-size: 0.7rem;">${t.exit_time ? t.exit_time.slice(11,16) : '—'}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function closePaperPosition(tradeId) {
+  if (!confirm(`Are you sure you want to close position #${tradeId}?`)) return;
+
+  try {
+    const res = await fetch("/api/paper/close-position", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trade_id: tradeId })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      alert("Position closed successfully!");
+      fetchPaperData();
+    } else {
+      alert(`Error closing position: ${data.error || "Failed"}`);
+    }
+  } catch (e) {
+    alert(`Error: ${e.message}`);
+  }
+}
+
+async function togglePaperTrading(enabled) {
+  try {
+    await fetch("/api/paper/toggle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: enabled })
+    });
+    fetchPaperData();
+  } catch (e) {
+    console.error("Error toggling paper trader:", e);
+  }
+}
+
+// Fetch paper badge count on page load
+document.addEventListener("DOMContentLoaded", () => {
+  fetch("/api/paper/positions")
+    .then(r => r.json())
+    .then(d => {
+      const badge = document.getElementById("paperBadge");
+      if (badge && d.open_positions) badge.textContent = d.open_positions.length;
+    })
+    .catch(() => {});
+});
+
+
