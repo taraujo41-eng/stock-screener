@@ -229,15 +229,49 @@ class PaperTrader:
             # Find paper trading account
             account_list = accounts if isinstance(accounts, list) else accounts.get("data", accounts.get("accounts", []))
             self._is_real_paper_account = False
-            
-            for acc in account_list:
-                acc_type = acc.get("account_type", acc.get("accountType", "")).upper()
-                acc_label = acc.get("account_label", "").upper()
-                if "PAPER" in acc_type or "SIMULATION" in acc_type or "DEMO" in acc_type or "PAPER" in acc_label:
-                    self._account_id = acc.get("account_id", acc.get("secAccountId"))
+
+            # Log every account for debugging
+            for i, acc in enumerate(account_list):
+                logger.info(
+                    f"[PaperTrader] Account[{i}]: id={acc.get('account_id')} "
+                    f"number={acc.get('account_number')} "
+                    f"type={acc.get('account_type')} "
+                    f"label={acc.get('account_label')}"
+                )
+
+            # Priority 1: Explicit PAPER_ACCOUNT_ID from .env (account_id or account_number)
+            explicit_id = os.getenv("PAPER_ACCOUNT_ID", "").strip()
+            if explicit_id:
+                # Match by account_id or account_number
+                for acc in account_list:
+                    if acc.get("account_id") == explicit_id or acc.get("account_number") == explicit_id:
+                        self._account_id = acc.get("account_id", acc.get("secAccountId"))
+                        self._is_real_paper_account = True
+                        logger.info(
+                            f"[PaperTrader] ✅ Matched explicit PAPER_ACCOUNT_ID={explicit_id} → "
+                            f"account_id={self._account_id} ({acc.get('account_type')})"
+                        )
+                        break
+                if not self._is_real_paper_account:
+                    # Account not in API list — use the explicit ID directly
+                    # (Webull may not list paper accounts but still accept orders on them)
+                    self._account_id = explicit_id
                     self._is_real_paper_account = True
-                    logger.info(f"[PaperTrader] Found Webull paper account: {self._account_id}")
-                    break
+                    logger.warning(
+                        f"[PaperTrader] ⚠️ PAPER_ACCOUNT_ID={explicit_id} not found in API account list. "
+                        f"Using it directly — orders may fail if the ID is wrong."
+                    )
+
+            # Priority 2: Auto-detect by account type/label keywords
+            if not self._is_real_paper_account:
+                for acc in account_list:
+                    acc_type = acc.get("account_type", acc.get("accountType", "")).upper()
+                    acc_label = acc.get("account_label", "").upper()
+                    if "PAPER" in acc_type or "SIMULATION" in acc_type or "DEMO" in acc_type or "PAPER" in acc_label:
+                        self._account_id = acc.get("account_id", acc.get("secAccountId"))
+                        self._is_real_paper_account = True
+                        logger.info(f"[PaperTrader] Found Webull paper account: {self._account_id}")
+                        break
             
             if not self._is_real_paper_account:
                 # Webull OpenAPI is connected to a LIVE account.
@@ -248,7 +282,8 @@ class PaperTrader:
                     live_acc = account_list[0].get("account_id", account_list[0].get("secAccountId"))
                     logger.warning(
                         f"[PaperTrader] 🛡️ SAFETY PROTECTION ACTIVE: Account '{live_acc}' is a LIVE account ({account_list[0].get('account_type', 'LIVE')}). "
-                        f"Real orders are BLOCKED. Paper trading running in 100% SAFE SIMULATION MODE with real-time market data."
+                        f"Real orders are BLOCKED. Paper trading running in 100% SAFE SIMULATION MODE with real-time market data. "
+                        f"Set PAPER_ACCOUNT_ID in .env to target your paper account explicitly."
                     )
                 self._account_id = "SIMULATED_PAPER_ACCOUNT"
                 self._is_real_paper_account = False
