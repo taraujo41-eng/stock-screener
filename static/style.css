@@ -1906,4 +1906,103 @@ body {
   color: #ffffff;
 }
 
+/* ── Live Status Banner ── */
+.paper-live-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 0.82rem;
+  color: #86efac;
+  font-weight: 600;
+}
+
+.paper-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 10px var(--green);
+  animation: live-pulse 1.8s infinite;
+}
+
+@keyframes live-pulse {
+  0% { transform: scale(0.9); opacity: 0.8; box-shadow: 0 0 4px var(--green); }
+  50% { transform: scale(1.3); opacity: 1; box-shadow: 0 0 14px var(--green); }
+  100% { transform: scale(0.9); opacity: 0.8; box-shadow: 0 0 4px var(--green); }
+}
+
+/* ── Floating Trade Toast Notifications ── */
+.trade-toast-container {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: none;
+  max-width: 380px;
+  width: calc(100% - 40px);
+}
+
+.trade-toast {
+  pointer-events: auto;
+  background: rgba(17, 24, 39, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.6), 0 0 20px rgba(99, 102, 241, 0.25);
+  color: var(--text-primary);
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  animation: slideInToast 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.trade-toast:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 35px rgba(0,0,0,0.8), 0 0 25px rgba(99, 102, 241, 0.4);
+}
+
+@keyframes slideInToast {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.trade-toast__icon {
+  font-size: 1.5rem;
+}
+
+.trade-toast__content {
+  flex: 1;
+}
+
+.trade-toast__title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #a5b4fc;
+  margin-bottom: 2px;
+}
+
+.trade-toast__desc {
+  font-size: 0.8rem;
+  color: #cbd5e1;
+  line-height: 1.35;
+}
+
+.trade-toast__time {
+  font-size: 0.7rem;
+  color: #64748b;
+  margin-top: 4px;
+}
+
+
 

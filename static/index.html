@@ -35,7 +35,7 @@
         🔎 Reversal Scanner
       </button>
       <button class="main-tab" id="tabPaperBtn" onclick="switchMainTab('paper')">
-        💼 Paper Trader <span class="tab-badge" id="paperBadge">0</span>
+        🤖 3-Sigma Auto Trader <span class="tab-badge" id="paperBadge">0</span>
       </button>
     </div>
 
@@ -125,17 +125,23 @@
       </div>
     </div>
 
-    <!-- PAPER TRADER VIEW -->
+    <!-- 3-SIGMA AUTO TRADER SIMULATOR VIEW -->
     <div id="paperTraderView" class="hidden">
       
+      <!-- Live Status Banner -->
+      <div class="paper-live-banner">
+        <div class="paper-live-dot"></div>
+        <span class="paper-live-text">Live 3.0-Sigma A+ Auto-Trader Bot Active — Scanning 287 Stocks</span>
+      </div>
+
       <!-- Account Performance Summary Header -->
       <div class="paper-summary-card">
         <div class="paper-summary-header">
           <div class="paper-summary-title">
-            <span class="paper-summary-icon">🤖</span>
+            <span class="paper-summary-icon">⚡</span>
             <div>
-              <h3>3-Sigma Auto-Trader</h3>
-              <span class="paper-mode-badge" id="paperModeText">Simulation Mode</span>
+              <h3>3-Sigma Auto Trader Simulator</h3>
+              <span class="paper-mode-badge" id="paperModeText">🛡️ 100% Safe Local Simulation Mode</span>
             </div>
           </div>
           <div class="paper-toggle-wrap">
@@ -176,7 +182,7 @@
           <div class="empty-state">
             <div class="empty-state__icon">💼</div>
             <div class="empty-state__title">No Open Positions</div>
-            <div class="empty-state__text">When 3-Sigma reversal signals fire during market hours, paper trades will automatically appear here!</div>
+            <div class="empty-state__text">When 3-Sigma A+ reversal signals fire during market hours, paper trades will automatically appear here!</div>
           </div>
         </div>
       </div>
@@ -198,6 +204,9 @@
     </div>
 
   </div>
+
+  <!-- Toast Notification Container -->
+  <div id="tradeToastContainer" class="trade-toast-container"></div>
 
   <!-- News Details Modal Overlay -->
   <div class="modal-overlay hidden" id="newsModal">

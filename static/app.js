@@ -1217,6 +1217,9 @@ document.addEventListener("keydown", (e) => {
 let currentMainTab = "scanner";
 let paperPollTimer = null;
 
+let knownTradeIds = new Set();
+let isInitialTradeLoad = true;
+
 function switchMainTab(tab) {
   currentMainTab = tab;
   const scannerView = document.getElementById("scannerView");
@@ -1230,19 +1233,47 @@ function switchMainTab(tab) {
     if (scannerBtn) scannerBtn.classList.remove("main-tab--active");
     if (paperBtn) paperBtn.classList.add("main-tab--active");
     fetchPaperData();
-    if (!paperPollTimer) {
-      paperPollTimer = setInterval(fetchPaperData, 10000);
-    }
   } else {
     if (paperView) paperView.classList.add("hidden");
     if (scannerView) scannerView.classList.remove("hidden");
     if (paperBtn) paperBtn.classList.remove("main-tab--active");
     if (scannerBtn) scannerBtn.classList.add("main-tab--active");
-    if (paperPollTimer) {
-      clearInterval(paperPollTimer);
-      paperPollTimer = null;
-    }
   }
+}
+
+function showTradeToast(trade) {
+  const container = document.getElementById("tradeToastContainer");
+  if (!container) return;
+
+  const toast = document.createElement("div");
+  toast.className = "trade-toast";
+  toast.onclick = () => {
+    switchMainTab("paper");
+    toast.remove();
+  };
+
+  const actionEmoji = trade.type === "CALL" ? "🟢" : "🔴";
+  toast.innerHTML = `
+    <div class="trade-toast__icon">🚀</div>
+    <div class="trade-toast__content">
+      <div class="trade-toast__title">New 3-Sigma Trade Placed</div>
+      <div class="trade-toast__desc">
+        ${actionEmoji} <strong>${trade.ticker}</strong> ${trade.type} $${trade.strike} @ $${(trade.entry_price || 0).toFixed(2)}<br>
+        <span style="color: #94a3b8; font-size: 0.75rem;">Target VWAP: $${trade.vwap_target ? trade.vwap_target.toFixed(2) : '—'}</span>
+      </div>
+      <div class="trade-toast__time">Just now • Tap to view simulator</div>
+    </div>
+  `;
+
+  container.appendChild(toast);
+
+  // Auto remove after 7 seconds
+  setTimeout(() => {
+    if (toast.parentNode) {
+      toast.style.animation = "slideInToast 0.3s reverse";
+      setTimeout(() => toast.remove(), 280);
+    }
+  }, 7000);
 }
 
 async function fetchPaperData() {
@@ -1258,7 +1289,18 @@ async function fetchPaperData() {
     const resPos = await fetch("/api/paper/positions");
     if (resPos.ok) {
       const data = await resPos.json();
-      renderPaperOpenPositions(data.open_positions || []);
+      const positions = data.open_positions || [];
+      renderPaperOpenPositions(positions);
+
+      // Check for new trades to show toast
+      positions.forEach(p => {
+        if (!knownTradeIds.has(p.id)) {
+          knownTradeIds.add(p.id);
+          if (!isInitialTradeLoad) {
+            showTradeToast(p);
+          }
+        }
+      });
     }
 
     // 3. Fetch Trade Log
@@ -1266,7 +1308,15 @@ async function fetchPaperData() {
     if (resLog.ok) {
       const data = await resLog.json();
       renderPaperTradeLog(data);
+
+      (data.trades || []).forEach(t => {
+        if (!knownTradeIds.has(t.id)) {
+          knownTradeIds.add(t.id);
+        }
+      });
     }
+
+    isInitialTradeLoad = false;
   } catch (e) {
     console.error("Error fetching paper data:", e);
   }
@@ -1286,7 +1336,7 @@ function updatePaperStatusUI(data) {
   }
 
   if (modeTextEl && status.mode) {
-    modeTextEl.textContent = status.mode;
+    modeTextEl.textContent = `🛡️ ${status.mode}`;
   }
 
   if (toggleBtn && typeof risk.enabled === "boolean") {
@@ -1309,47 +1359,55 @@ function renderPaperOpenPositions(positions) {
       <div class="empty-state">
         <div class="empty-state__icon">💼</div>
         <div class="empty-state__title">No Open Positions</div>
-        <div class="empty-state__text">When 3-Sigma reversal signals fire during market hours, paper trades will automatically appear here!</div>
+        <div class="empty-state__text">When 3-Sigma A+ reversal signals fire during market hours, paper trades will automatically appear here!</div>
       </div>
     `;
     return;
   }
 
-  container.innerHTML = positions.map(p => `
-    <div class="paper-card">
-      <div class="paper-card__top">
-        <div>
-          <span class="paper-card__symbol">${p.ticker}</span>
-          <span style="font-size: 0.8rem; color: #94a3b8; margin-left: 8px;">${p.option_symbol || ''}</span>
+  container.innerHTML = positions.map(p => {
+    const isCall = p.type === 'CALL';
+    const typeClass = isCall ? 'paper-card__type--call' : 'paper-card__type--put';
+    const entryTimeStr = p.entry_time ? p.entry_time.slice(11, 16) : '—';
+    
+    return `
+      <div class="paper-card">
+        <div class="paper-card__top">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="paper-card__symbol">${p.ticker}</span>
+            <span class="paper-card__type ${typeClass}">
+              ${p.type || 'OPTION'} $${p.strike || ''}
+            </span>
+          </div>
+          <span style="font-size: 0.75rem; color: #38bdf8; background: rgba(56, 189, 248, 0.12); padding: 3px 8px; border-radius: 6px; font-weight: 600;">
+            🟢 MONITORED
+          </span>
         </div>
-        <span class="paper-card__type ${p.type === 'CALL' ? 'paper-card__type--call' : 'paper-card__type--put'}">
-          ${p.type || 'OPTION'}
-        </span>
-      </div>
 
-      <div class="paper-card__details">
-        <div>
-          <span class="paper-card__stat-label">Strike</span>
-          <span class="paper-card__stat-val">$${p.strike || '—'}</span>
+        <div class="paper-card__details">
+          <div>
+            <span class="paper-card__stat-label">Entry Price</span>
+            <span class="paper-card__stat-val">$${(p.entry_price || 0).toFixed(2)}</span>
+          </div>
+          <div>
+            <span class="paper-card__stat-label">Target VWAP</span>
+            <span class="paper-card__stat-val" style="color: var(--green);">$${p.vwap_target ? p.vwap_target.toFixed(2) : '—'}</span>
+          </div>
+          <div>
+            <span class="paper-card__stat-label">Entry Time</span>
+            <span class="paper-card__stat-val" style="font-size: 0.75rem;">${entryTimeStr} ET</span>
+          </div>
         </div>
-        <div>
-          <span class="paper-card__stat-label">Entry Price</span>
-          <span class="paper-card__stat-val">$${(p.entry_price || 0).toFixed(2)}</span>
-        </div>
-        <div>
-          <span class="paper-card__stat-label">VWAP Target</span>
-          <span class="paper-card__stat-val">$${p.vwap_target ? p.vwap_target.toFixed(2) : '—'}</span>
-        </div>
-      </div>
 
-      <div class="paper-card__bottom">
-        <span style="font-size: 0.75rem; color: #64748b;">Qty: ${p.quantity || 1} contract(s)</span>
-        <button class="paper-close-btn" onclick="closePaperPosition('${p.id}')">
-          🛑 Close Position
-        </button>
+        <div class="paper-card__bottom">
+          <span style="font-size: 0.75rem; color: #94a3b8;">Contract: <strong style="color: #cbd5e1;">${p.option_symbol || 'Standard'}</strong> (${p.quantity || 1}x)</span>
+          <button class="paper-close-btn" onclick="closePaperPosition('${p.id}')">
+            🛑 Close Position
+          </button>
+        </div>
       </div>
-    </div>
-  `).join("");
+    `;
+  }).join("");
 }
 
 function renderPaperTradeLog(data) {
@@ -1368,7 +1426,7 @@ function renderPaperTradeLog(data) {
   }
 
   if (winRateEl) {
-    winRateEl.textContent = `${summary.win_rate || 0}%`;
+    winRateEl.textContent = `${summary.win_rate || 0}% (${summary.wins || 0}W / ${summary.losses || 0}L)`;
   }
 
   if (!container) return;
@@ -1392,30 +1450,40 @@ function renderPaperTradeLog(data) {
     const pnl = t.pnl || 0;
     const pnlColor = pnl >= 0 ? "var(--green)" : "var(--red)";
     const sign = pnl >= 0 ? "+" : "";
+    const pnlPct = t.entry_price ? ((pnl / (t.entry_price * 100)) * 100).toFixed(1) : "0.0";
+    const exitTimeStr = t.exit_time ? t.exit_time.slice(11, 16) : '—';
+    const reasonBadge = t.exit_reason === 'take_profit' ? '🎯 Take Profit @ VWAP' : 
+                        t.exit_reason === 'stop_loss' ? '🛑 Stop Loss' : (t.exit_reason || 'Closed');
+
     return `
-      <div class="paper-card" style="opacity: 0.9;">
+      <div class="paper-card" style="opacity: 0.95;">
         <div class="paper-card__top">
-          <div>
+          <div style="display: flex; align-items: center; gap: 8px;">
             <span class="paper-card__symbol">${t.ticker}</span>
-            <span style="font-size: 0.8rem; color: #94a3b8; margin-left: 8px;">${t.type} $${t.strike}</span>
+            <span style="font-size: 0.8rem; color: #94a3b8;">${t.type} $${t.strike}</span>
           </div>
-          <span style="font-size: 0.95rem; font-weight: 700; color: ${pnlColor}; font-family: 'JetBrains Mono', monospace;">
-            ${sign}$${pnl.toFixed(2)}
-          </span>
+          <div style="text-align: right;">
+            <span style="font-size: 0.95rem; font-weight: 800; color: ${pnlColor}; font-family: 'JetBrains Mono', monospace;">
+              ${sign}$${pnl.toFixed(2)}
+            </span>
+            <span style="display: block; font-size: 0.72rem; color: ${pnlColor}; font-weight: 600;">
+              (${sign}${pnlPct}%)
+            </span>
+          </div>
         </div>
 
         <div class="paper-card__details">
           <div>
-            <span class="paper-card__stat-label">Entry / Exit</span>
-            <span class="paper-card__stat-val">$${(t.entry_price || 0).toFixed(2)} / $${(t.exit_price || 0).toFixed(2)}</span>
+            <span class="paper-card__stat-label">Entry → Exit</span>
+            <span class="paper-card__stat-val">$${(t.entry_price || 0).toFixed(2)} → $${(t.exit_price || 0).toFixed(2)}</span>
           </div>
           <div>
-            <span class="paper-card__stat-label">Reason</span>
-            <span class="paper-card__stat-val" style="color: #cbd5e1;">${t.exit_reason || 'Closed'}</span>
+            <span class="paper-card__stat-label">Exit Reason</span>
+            <span class="paper-card__stat-val" style="color: #cbd5e1; font-size: 0.75rem;">${reasonBadge}</span>
           </div>
           <div>
-            <span class="paper-card__stat-label">Exit Time</span>
-            <span class="paper-card__stat-val" style="font-size: 0.7rem;">${t.exit_time ? t.exit_time.slice(11,16) : '—'}</span>
+            <span class="paper-card__stat-label">Closed Time</span>
+            <span class="paper-card__stat-val" style="font-size: 0.75rem;">${exitTimeStr} ET</span>
           </div>
         </div>
       </div>
@@ -1457,15 +1525,11 @@ async function togglePaperTrading(enabled) {
   }
 }
 
-// Fetch paper badge count on page load
+// Continuous Background Polling for live auto-trader simulator updates (every 4s)
 document.addEventListener("DOMContentLoaded", () => {
-  fetch("/api/paper/positions")
-    .then(r => r.json())
-    .then(d => {
-      const badge = document.getElementById("paperBadge");
-      if (badge && d.open_positions) badge.textContent = d.open_positions.length;
-    })
-    .catch(() => {});
+  fetchPaperData();
+  setInterval(fetchPaperData, 4000);
 });
+
 
 

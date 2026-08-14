@@ -1,4 +1,10 @@
+import os
 import sys
+
+# Ensure process runs in script's directory so config/tokens are found
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(_APP_DIR)
+sys.path.insert(0, _APP_DIR)
 
 import pandas as pd
 import numpy as np

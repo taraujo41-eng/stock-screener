@@ -13,3 +13,6 @@ last_orb_scan.json
 conf/
 *.log*
 last_*_scan.json
+alerted_today.json
+scan_progress.json
+trade_log.json

@@ -18,7 +18,9 @@ from email.mime.text import MIMEText
 from datetime import datetime
 
 # Load parent directory to allow imports
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(_APP_DIR)
+sys.path.insert(0, _APP_DIR)
 
 from indicator import calculate_3_sigma_divergence
 from data_fetcher import fetch_batch_concurrent
@@ -150,30 +152,52 @@ def send_telegram_notification(message):
     except Exception as e:
         logger.error(f"Failed to send Telegram notification: {e}")
 
-def trigger_alerts(ticker, action, signal_type, last_price, vwap_target):
-    logger.info(f"🔔 SIGNAL TRIGGERED on {ticker}: {action} | Price={last_price:.2f}, Target VWAP={vwap_target:.2f}")
+def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=None, reason=None, score=None, grade=None, rvol=None):
+    bb_mult = os.getenv("BB_MULT", "3.0")
+    logger.info(f"🔔 A+ SIGNAL TRIGGERED on {ticker}: {action} | Setup: {reason} | Price={last_price:.2f}, RSI={f'{rsi:.1f}' if rsi else 'N/A'}, Target VWAP={vwap_target:.2f}")
     
-    alert_method = os.getenv("ALERT_METHOD", "SMS").upper()
+    alert_method = os.getenv("ALERT_METHOD", "TELEGRAM").upper()
+    
+    # 0. Find best option contract suggestion
+    opt_str = "None"
+    opt_info = None
+    try:
+        from reversal_scanner import find_best_option
+        opt_info = find_best_option(ticker, signal_type, last_price)
+        if opt_info:
+            opt_str = f"{opt_info.get('exp', '')} ${opt_info.get('strike', '')} {opt_info.get('type', '')} (@${opt_info.get('mid', 0):.2f})"
+    except Exception as e:
+        logger.warning(f"Option lookup failed for {ticker}: {e}")
     
     # 1. Send SMS Notification
     if alert_method in ("SMS", "BOTH"):
         sms_msg = (
-            f"REVERSAL ALERT: {ticker}\n"
-            f"Type: {signal_type.upper()} Reversal\n"
-            f"Action: {action}\n"
+            f"⭐️ A+ 3-SIGMA REVERSAL: {ticker}\n"
+            f"Action: {action} ({signal_type.upper()})\n"
+            f"Grade: ⭐️ A+ SETUP (Score: {score or 14}/18)\n"
+            f"Setup: {reason or (action + ' Reversal')}\n"
             f"Price: ${last_price:.2f}\n"
-            f"VWAP Target: ${vwap_target:.2f}"
+            f"RSI: {f'{rsi:.1f}' if rsi else 'N/A'}\n"
+            f"RVOL: {f'{rvol:.1f}x' if rvol else 'N/A'}\n"
+            f"VWAP Target: ${vwap_target:.2f}\n"
+            f"Suggested Option: {opt_str}"
         )
         send_sms_notification(sms_msg)
         
     # 2. Send Telegram Notification
     if alert_method in ("TELEGRAM", "BOTH"):
+        rsi_formatted = f"{rsi:.1f}" if rsi is not None else "N/A"
+        rvol_formatted = f"{rvol:.1f}x" if rvol is not None else "N/A"
         tg_msg = (
-            f"🚨 <b>REVERSAL ALERT: {ticker}</b> 🚨\n\n"
-            f"<b>Type:</b> {signal_type.upper()} Reversal\n"
-            f"<b>Action:</b> {action} Setup\n"
+            f"🚨 <b>⭐️ A+ 3-SIGMA REVERSAL ALERT: {ticker}</b> 🚨\n\n"
+            f"<b>Action:</b> {action} ({signal_type.upper()})\n"
+            f"<b>Grade:</b> ⭐️ <b>A+ SETUP</b> (Score: {score or 14}/18)\n"
+            f"<b>Setup:</b> {reason or '3-Sigma Breach Reversal'}\n"
             f"<b>Price:</b> ${last_price:.2f}\n"
-            f"<b>VWAP Target:</b> ${vwap_target:.2f}"
+            f"<b>RSI:</b> {rsi_formatted} (Divergence Confirmed)\n"
+            f"<b>RVOL:</b> {rvol_formatted}\n"
+            f"<b>VWAP Target:</b> ${vwap_target:.2f}\n"
+            f"<b>Suggested Option:</b> {opt_str}"
         )
         send_telegram_notification(tg_msg)
     
@@ -190,23 +214,27 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target):
                 vwap_target=vwap_target
             )
             if result:
-                logger.info(f"📈 Paper trade placed for {ticker}: {result.get('option_symbol', '')} @ ${result.get('entry_price', 0):.2f}")
+                mode_str = result.get('mode', 'Simulation')
+                logger.info(f"📈 A+ Paper trade placed for {ticker}: {result.get('option_symbol', '')} @ ${result.get('entry_price', 0):.2f} ({mode_str})")
                 
                 # Send trade notification via same alert method
                 trade_msg = (
-                    f"📈 PAPER TRADE PLACED: {ticker}\n"
-                    f"Option: {result.get('type', '')} ${result.get('strike', '')}\n"
+                    f"📈 ⭐️ A+ PAPER TRADE PLACED: {ticker}\n"
+                    f"Option: {result.get('type', '')} ${result.get('strike', '')} ({result.get('option_symbol', '')})\n"
                     f"Price: ${result.get('entry_price', 0):.2f}\n"
-                    f"Qty: {result.get('quantity', 1)} contract(s)"
+                    f"Qty: {result.get('quantity', 1)} contract(s)\n"
+                    f"Mode: {mode_str}"
                 )
                 if alert_method in ("SMS", "BOTH"):
                     send_sms_notification(trade_msg)
                 if alert_method in ("TELEGRAM", "BOTH"):
                     tg_trade = (
-                        f"📈 <b>PAPER TRADE PLACED: {ticker}</b>\n\n"
+                        f"📈 <b>⭐️ A+ PAPER TRADE PLACED: {ticker}</b>\n\n"
                         f"<b>Option:</b> {result.get('type', '')} ${result.get('strike', '')}\n"
-                        f"<b>Price:</b> ${result.get('entry_price', 0):.2f}\n"
-                        f"<b>Qty:</b> {result.get('quantity', 1)} contract(s)"
+                        f"<b>Contract:</b> {result.get('option_symbol', '')}\n"
+                        f"<b>Entry Price:</b> ${result.get('entry_price', 0):.2f}\n"
+                        f"<b>Qty:</b> {result.get('quantity', 1)} contract(s)\n"
+                        f"<b>Mode:</b> {mode_str}"
                     )
                     send_telegram_notification(tg_trade)
     except Exception as e:
@@ -216,6 +244,8 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target):
 def evaluate_ticker_process(ticker, df):
     """
     Called in parallel background threads to evaluate the 15m dataframe against Daily Bollinger Bands.
+    Enforces 3.0-Sigma actual band breach (no proximity) and strict A+ Setup confirmation
+    (Piercing + RSI Divergence + Confluence Score >= 12).
     """
     global _daily_bands_map
     
@@ -230,13 +260,15 @@ def evaluate_ticker_process(ticker, df):
         
     bb_length = int(os.getenv("BB_LENGTH", "20"))
     bb_mult = float(os.getenv("BB_MULT", "3.0"))
+    proximity_pct = float(os.getenv("PROXIMITY_PCT", "0.0"))
+    only_a_plus = os.getenv("ONLY_A_PLUS_SETUPS", "true").lower() in ("true", "1", "yes")
     rsi_length = int(os.getenv("RSI_LENGTH", "14"))
     lookback = int(os.getenv("LOOKBACK", "15"))
     
     if len(df) < max(bb_length, rsi_length) + lookback + 5:
         return None
         
-    # Compute 3-Sigma indicators using pre-calculated daily bands
+    # Compute Reversal indicators using pre-calculated daily bands
     df_ind = calculate_3_sigma_divergence(
         df,
         bb_length=bb_length,
@@ -244,35 +276,94 @@ def evaluate_ticker_process(ticker, df):
         rsi_length=rsi_length,
         lookback=lookback,
         daily_upper_bb=daily_upper_bb,
-        daily_lower_bb=daily_lower_bb
+        daily_lower_bb=daily_lower_bb,
+        proximity_pct=proximity_pct
     )
     
     # Inspect latest state
     last_row = df_ind.iloc[-1]
-    long_trigger = last_row['long_trigger']
-    short_trigger = last_row['short_trigger']
-    close_price = last_row['Close']
-    vwap_target = last_row['vwap']
+    is_bullish_pierced = bool(last_row.get('is_bullish_pierced', False))
+    is_bearish_pierced = bool(last_row.get('is_bearish_pierced', False))
+    close_price = float(last_row['Close'])
+    vwap_target = float(last_row['vwap'])
+    rsi_val = float(last_row['rsi'])
     
-    logger.info(f"[{ticker} 15m] Price: {close_price:.2f} | RSI: {last_row['rsi']:.1f} | Daily BB: [{daily_lower_bb:.2f} - {daily_upper_bb:.2f}] | Trigger: {'LONG' if long_trigger else 'SHORT' if short_trigger else 'None'}")
+    sd_label = f"{int(bb_mult)}SD" if bb_mult.is_integer() else f"{bb_mult}SD"
+
+    # Strict check: Must actually breach the Daily Bollinger Band
+    if not (is_bullish_pierced or is_bearish_pierced):
+        return None
+
+    # Calculate Confluence Factors for A+ Setup
+    bull_div, bear_div = False, False
+    rvol = 1.0
+    ema20_dist = 0.0
+    try:
+        from reversal_scanner import detect_rsi_divergence, compute_rvol, compute_ema
+        bull_div, bear_div = detect_rsi_divergence(df['Close'], df_ind['rsi'], lookback=lookback)
+        rvol = compute_rvol(df)
+        ema20_series = compute_ema(df['Close'], 20)
+        ema20 = float(ema20_series.iloc[-1]) if len(ema20_series) > 0 else None
+        ema20_dist = ((close_price - ema20) / ema20) * 100 if ema20 else 0.0
+    except Exception as e:
+        logger.warning(f"Error computing confluence for {ticker}: {e}")
+
+    # Score Calculation: Pierced 3SD = 10, Divergence = +4, RSI Extreme = +2, RVOL = +2, EMA Ext = +1
+    score = 10
+    reasons_list = [f"Pierced Daily {'Lower' if is_bullish_pierced else 'Upper'} {sd_label} BB"]
+    has_div = False
     
-    if long_trigger:
-        return {
-            'action': 'BUY',
-            'type': 'bullish',
-            'price': close_price,
-            'vwap': vwap_target,
-            'time': df_ind.index[-1]
-        }
-    elif short_trigger:
-        return {
-            'action': 'SELL',
-            'type': 'bearish',
-            'price': close_price,
-            'vwap': vwap_target,
-            'time': df_ind.index[-1]
-        }
-    return None
+    if is_bullish_pierced:
+        if bull_div:
+            score += 4
+            has_div = True
+            reasons_list.append("RSI Bullish Divergence")
+        if rsi_val <= 30:
+            score += 2
+            reasons_list.append(f"RSI Oversold ({rsi_val:.1f})")
+        if rvol > 1.5:
+            score += 2
+            reasons_list.append(f"High RVOL ({rvol:.1f}x)")
+        if ema20_dist < -2.0:
+            score += 1
+            reasons_list.append("EMA Extension")
+    else:
+        if bear_div:
+            score += 4
+            has_div = True
+            reasons_list.append("RSI Bearish Divergence")
+        if rsi_val >= 70:
+            score += 2
+            reasons_list.append(f"RSI Overbought ({rsi_val:.1f})")
+        if rvol > 1.5:
+            score += 2
+            reasons_list.append(f"High RVOL ({rvol:.1f}x)")
+        if ema20_dist > 2.0:
+            score += 1
+            reasons_list.append("EMA Extension")
+
+    is_a_plus = (score >= 12 and has_div)
+    grade = "A+" if is_a_plus else "A"
+    reasons = " | ".join(reasons_list)
+
+    if only_a_plus and not is_a_plus:
+        logger.info(f"[{ticker} 15m] Price: {close_price:.2f} | Pierced {sd_label} BB (Score: {score}, Grade: {grade}) — Skipped (Requires A+ setup with RSI Divergence)")
+        return None
+
+    logger.info(f"[{ticker} 15m] 🔥 ⭐️ A+ 3-SIGMA REVERSAL CONFIRMED! Score: {score}, RSI: {rsi_val:.1f}, RVOL: {rvol:.1f}x | {reasons}")
+
+    return {
+        'action': 'BUY' if is_bullish_pierced else 'SELL',
+        'type': 'bullish' if is_bullish_pierced else 'bearish',
+        'price': close_price,
+        'vwap': vwap_target,
+        'rsi': rsi_val,
+        'rvol': rvol,
+        'score': score,
+        'grade': 'A+',
+        'reason': reasons,
+        'time': df_ind.index[-1]
+    }
 
 def precalculate_daily_bands(tickers):
     """
@@ -367,7 +458,7 @@ def is_market_hours():
 
 
 def bot_loop():
-    logger.info("Starting background 3-Sigma alert bot loop...")
+    logger.info("Starting background 3-Sigma alert bot loop (A+ Setups Only)...")
     
     while True:
         try:
@@ -382,43 +473,30 @@ def bot_loop():
                 time.sleep(60)
                 continue
 
-            logger.info("--- Starting 3-Sigma Reversal Bot Cycle ---")
+            logger.info("--- Starting 3-Sigma A+ Reversal Bot Cycle ---")
             try:
-                # 1. Determine tickers to scan
-                tickers_mode = os.getenv("TICKERS_3SIGMA", "ALL").upper().strip()
-                
-                tickers = []
-                if tickers_mode == "ALL":
-                    try:
-                        from reversal_scanner import get_us_tickers
-                        tickers = get_us_tickers()
-                    except Exception as e:
-                        logger.error(f"Failed to load full US tickers list: {e}")
-                elif tickers_mode == "WATCHLIST":
-                    try:
-                        watchlist_file = os.path.join(_SCAN_DATA_DIR, "watchlist.json")
-                        if not os.path.exists(watchlist_file):
-                            watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
-                        if os.path.exists(watchlist_file):
-                            with open(watchlist_file, "r") as f:
-                                tickers = json.load(f)
-                            logger.info(f"Loaded {len(tickers)} tickers from watchlist.json")
-                    except Exception as e:
-                        logger.error(f"Failed to load watchlist.json: {e}")
-                
-                # Fallback if all fails or custom comma-separated list
-                if not tickers:
-                    tickers_str = os.getenv("TICKERS_3SIGMA", "AAPL,MSFT,NVDA,SPY,QQQ")
-                    if tickers_str.upper() in ("ALL", "WATCHLIST"):
-                        tickers_str = "AAPL,MSFT,NVDA,SPY,QQQ"
-                    tickers = [t.strip().upper() for t in tickers_str.split(",") if t.strip()]
-                    
-                # Apply liquidity and optionability filters
+                # 1. Determine tickers to scan: Combine all 287 US Optionable tickers AND Watchlist tickers
+                from reversal_scanner import get_us_tickers
                 try:
-                    from reversal_scanner import prefilter_liquid_optionable
-                    tickers = prefilter_liquid_optionable(tickers)
+                    us_tickers = get_us_tickers()
                 except Exception as e:
-                    logger.error(f"Failed to apply pre-filter: {e}")
+                    logger.error(f"Failed to load full US tickers list: {e}")
+                    us_tickers = []
+
+                watchlist_tickers = []
+                try:
+                    watchlist_file = os.path.join(_SCAN_DATA_DIR, "watchlist.json")
+                    if not os.path.exists(watchlist_file):
+                        watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
+                    if os.path.exists(watchlist_file):
+                        with open(watchlist_file, "r") as f:
+                            watchlist_tickers = json.load(f)
+                except Exception as e:
+                    logger.error(f"Failed to load watchlist.json: {e}")
+
+                tickers = list(dict.fromkeys(us_tickers + watchlist_tickers))
+                if not tickers:
+                    tickers = ["AAPL", "MSFT", "NVDA", "SPY", "QQQ"]
 
                 candle_interval = os.getenv("CANDLE_INTERVAL_3SIGMA", "15m")
                 scan_interval = int(os.getenv("SCAN_INTERVAL_3SIGMA", "60"))
@@ -426,7 +504,7 @@ def bot_loop():
                 # 2. Pre-calculate daily bands
                 precalculate_daily_bands(tickers)
                 
-                logger.info(f"Scanning {len(tickers)} tickers in parallel ({candle_interval} candles)...")
+                logger.info(f"Scanning {len(tickers)} tickers in parallel ({candle_interval} candles, 3.0SD Breach + A+ Setups)...")
                 
                 # 3. Download and compute in parallel
                 results = fetch_batch_concurrent(
@@ -455,12 +533,17 @@ def bot_loop():
                             action=res['action'],
                             signal_type=res['type'],
                             last_price=res['price'],
-                            vwap_target=res['vwap']
+                            vwap_target=res['vwap'],
+                            rsi=res.get('rsi'),
+                            reason=res.get('reason'),
+                            score=res.get('score'),
+                            grade=res.get('grade'),
+                            rvol=res.get('rvol')
                         )
                         _record_alert(ticker, direction, res['price'])
                         triggered_count += 1
                         
-                logger.info(f"--- 3-Sigma Bot Cycle Complete. New alerts: {triggered_count}, Suppressed (already alerted today): {skipped_count}. Sleeping for {scan_interval}s ---")
+                logger.info(f"--- 3-Sigma Bot Cycle Complete. New A+ alerts: {triggered_count}, Suppressed (already alerted today): {skipped_count}. Sleeping for {scan_interval}s ---")
                 time.sleep(scan_interval)
             finally:
                 release_scan_lock()

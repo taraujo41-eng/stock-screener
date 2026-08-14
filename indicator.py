@@ -38,10 +38,11 @@ def pandas_valuewhen(condition, source, occurrence=1):
     shifted = source_true.shift(occurrence).reindex(condition.index)
     return shifted.ffill()
 
-def calculate_3_sigma_divergence(df, bb_length=20, bb_mult=3.0, rsi_length=14, lookback=15, daily_upper_bb=None, daily_lower_bb=None):
+def calculate_3_sigma_divergence(df, bb_length=20, bb_mult=2.0, rsi_length=14, lookback=15, daily_upper_bb=None, daily_lower_bb=None, proximity_pct=0.015):
     """
     Executes Mind In Money Reversal Pro indicator logic on the input DataFrame.
     If daily_upper_bb and daily_lower_bb are passed, it checks 15m prices against these daily bands.
+    Supports proximity detection (near-miss setups within proximity_pct of the band).
     """
     if len(df) < max(bb_length, rsi_length) + lookback + 5:
         df_res = df.copy()
@@ -52,6 +53,8 @@ def calculate_3_sigma_divergence(df, bb_length=20, bb_mult=3.0, rsi_length=14, l
         df_res['rsi'] = np.nan
         df_res['long_trigger'] = False
         df_res['short_trigger'] = False
+        df_res['is_pierced'] = False
+        df_res['is_near'] = False
         return df_res
 
     df_res = df.copy()
@@ -105,10 +108,23 @@ def calculate_3_sigma_divergence(df, bb_length=20, bb_mult=3.0, rsi_length=14, l
         (close_0 < close_1)
     )
     
-    df_res['long_trigger'] = (close_0 <= lower_bb)
-    df_res['short_trigger'] = (close_0 >= upper_bb)
+    # 1. Direct piercing check
+    is_bullish_pierced = (close_0 <= lower_bb)
+    is_bearish_pierced = (close_0 >= upper_bb)
     
-    df_res['long_trigger'] = df_res['long_trigger'].fillna(False).astype(bool)
-    df_res['short_trigger'] = df_res['short_trigger'].fillna(False).astype(bool)
+    # 2. Proximity detection (within proximity_pct of the band)
+    if proximity_pct and proximity_pct > 0:
+        is_bullish_near = (~is_bullish_pierced) & (close_0 <= lower_bb * (1.0 + proximity_pct))
+        is_bearish_near = (~is_bearish_pierced) & (close_0 >= upper_bb * (1.0 - proximity_pct))
+    else:
+        is_bullish_near = pd.Series(False, index=df_res.index)
+        is_bearish_near = pd.Series(False, index=df_res.index)
+        
+    df_res['long_trigger'] = (is_bullish_pierced | is_bullish_near).fillna(False).astype(bool)
+    df_res['short_trigger'] = (is_bearish_pierced | is_bearish_near).fillna(False).astype(bool)
+    df_res['is_bullish_pierced'] = is_bullish_pierced.fillna(False).astype(bool)
+    df_res['is_bearish_pierced'] = is_bearish_pierced.fillna(False).astype(bool)
+    df_res['is_bullish_near'] = is_bullish_near.fillna(False).astype(bool)
+    df_res['is_bearish_near'] = is_bearish_near.fillna(False).astype(bool)
     
     return df_res
