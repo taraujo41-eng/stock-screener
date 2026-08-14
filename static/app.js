@@ -1523,13 +1523,6 @@ function renderPaperTradeLog(data) {
     `;
   }).join("");
 }
-            <span class="paper-card__stat-val" style="font-size: 0.75rem;">${exitTimeStr} ET</span>
-          </div>
-        </div>
-      </div>
-    `;
-  }).join("");
-}
 
 async function closePaperPosition(tradeId) {
   if (!confirm(`Are you sure you want to close position #${tradeId}?`)) return;
