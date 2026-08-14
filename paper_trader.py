@@ -582,6 +582,7 @@ class PaperTrader:
                 "stock_price_at_entry": last_price,
                 "quantity": self.max_contracts,
                 "dte": best["dte"],
+                "expiration": best.get("exp", ""),
                 "status": "open",
                 "exit_price": None,
                 "exit_time": None,

@@ -1043,6 +1043,8 @@ def paper_positions():
                     "option_symbol": p.get("option_symbol"),
                     "type": p.get("type"),
                     "strike": p.get("strike"),
+                    "expiration": p.get("expiration") or p.get("exp"),
+                    "dte": p.get("dte"),
                     "entry_price": p.get("entry_price"),
                     "entry_time": p.get("entry_time"),
                     "vwap_target": p.get("vwap_target"),

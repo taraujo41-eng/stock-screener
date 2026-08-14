@@ -1344,6 +1344,22 @@ function updatePaperStatusUI(data) {
   }
 }
 
+function formatOptionExp(p) {
+  if (p.expiration) return p.expiration;
+  if (p.exp) return p.exp;
+  const sym = p.option_symbol || '';
+  const match = sym.match(/^[A-Z]+(\d{2})(\d{2})(\d{2})[CP]/);
+  if (match) {
+    const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const m = parseInt(match[2], 10) - 1;
+    const d = match[3];
+    if (m >= 0 && m < 12) {
+      return `${months[m]} ${d}`;
+    }
+  }
+  return p.dte ? `${p.dte} DTE` : '—';
+}
+
 function renderPaperOpenPositions(positions) {
   const container = document.getElementById("paperOpenPositionsList");
   const badge = document.getElementById("paperBadge");
@@ -1369,14 +1385,18 @@ function renderPaperOpenPositions(positions) {
     const isCall = p.type === 'CALL';
     const typeClass = isCall ? 'paper-card__type--call' : 'paper-card__type--put';
     const entryTimeStr = p.entry_time ? p.entry_time.slice(11, 16) : '—';
+    const expStr = formatOptionExp(p);
     
     return `
       <div class="paper-card">
         <div class="paper-card__top">
-          <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             <span class="paper-card__symbol">${p.ticker}</span>
             <span class="paper-card__type ${typeClass}">
               ${p.type || 'OPTION'} $${p.strike || ''}
+            </span>
+            <span style="font-size: 0.75rem; color: #a78bfa; background: rgba(167, 139, 250, 0.12); padding: 3px 8px; border-radius: 6px; font-weight: 600; border: 1px solid rgba(167, 139, 250, 0.25);">
+              📅 Exp: ${expStr} ${p.dte ? `(${p.dte} DTE)` : ''}
             </span>
           </div>
           <span style="font-size: 0.75rem; color: #38bdf8; background: rgba(56, 189, 248, 0.12); padding: 3px 8px; border-radius: 6px; font-weight: 600;">
@@ -1384,10 +1404,14 @@ function renderPaperOpenPositions(positions) {
           </span>
         </div>
 
-        <div class="paper-card__details">
+        <div class="paper-card__details" style="grid-template-columns: repeat(4, 1fr);">
           <div>
             <span class="paper-card__stat-label">Entry Price</span>
             <span class="paper-card__stat-val">$${(p.entry_price || 0).toFixed(2)}</span>
+          </div>
+          <div>
+            <span class="paper-card__stat-label">Expiration</span>
+            <span class="paper-card__stat-val" style="color: #c4b5fd; font-weight: 700;">${expStr}</span>
           </div>
           <div>
             <span class="paper-card__stat-label">Target VWAP</span>
@@ -1400,7 +1424,7 @@ function renderPaperOpenPositions(positions) {
         </div>
 
         <div class="paper-card__bottom">
-          <span style="font-size: 0.75rem; color: #94a3b8;">Contract: <strong style="color: #cbd5e1;">${p.option_symbol || 'Standard'}</strong> (${p.quantity || 1}x)</span>
+          <span style="font-size: 0.75rem; color: #94a3b8;">Contract: <strong style="color: #cbd5e1; font-family: 'JetBrains Mono', monospace;">${p.option_symbol || 'Standard'}</strong> (${p.quantity || 1}x)</span>
           <button class="paper-close-btn" onclick="closePaperPosition('${p.id}')">
             🛑 Close Position
           </button>
@@ -1454,13 +1478,17 @@ function renderPaperTradeLog(data) {
     const exitTimeStr = t.exit_time ? t.exit_time.slice(11, 16) : '—';
     const reasonBadge = t.exit_reason === 'take_profit' ? '🎯 Take Profit @ VWAP' : 
                         t.exit_reason === 'stop_loss' ? '🛑 Stop Loss' : (t.exit_reason || 'Closed');
+    const expStr = formatOptionExp(t);
 
     return `
       <div class="paper-card" style="opacity: 0.95;">
         <div class="paper-card__top">
-          <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             <span class="paper-card__symbol">${t.ticker}</span>
             <span style="font-size: 0.8rem; color: #94a3b8;">${t.type} $${t.strike}</span>
+            <span style="font-size: 0.72rem; color: #a78bfa; background: rgba(167, 139, 250, 0.12); padding: 2px 6px; border-radius: 4px;">
+              📅 Exp: ${expStr}
+            </span>
           </div>
           <div style="text-align: right;">
             <span style="font-size: 0.95rem; font-weight: 800; color: ${pnlColor}; font-family: 'JetBrains Mono', monospace;">
@@ -1483,6 +1511,18 @@ function renderPaperTradeLog(data) {
           </div>
           <div>
             <span class="paper-card__stat-label">Closed Time</span>
+            <span class="paper-card__stat-val" style="font-size: 0.75rem;">${exitTimeStr} ET</span>
+          </div>
+        </div>
+
+        <div class="paper-card__bottom">
+          <span style="font-size: 0.75rem; color: #94a3b8;">Contract: <strong style="color: #cbd5e1; font-family: 'JetBrains Mono', monospace;">${t.option_symbol || 'Standard'}</strong> (${t.quantity || 1}x)</span>
+          <span style="font-size: 0.72rem; color: #64748b;">ID #${t.id}</span>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
             <span class="paper-card__stat-val" style="font-size: 0.75rem;">${exitTimeStr} ET</span>
           </div>
         </div>
