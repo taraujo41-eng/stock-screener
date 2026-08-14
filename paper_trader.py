@@ -56,7 +56,8 @@ def get_ny_timezone():
 
 # ── Config ──────────────────────────────────────────────────────────────
 
-TRADE_LOG_FILE = os.path.join(os.path.dirname(__file__), "trade_log.json")
+_SCAN_DATA_DIR = os.environ.get("SCAN_DATA_DIR", os.path.dirname(__file__))
+TRADE_LOG_FILE = os.path.join(_SCAN_DATA_DIR, "trade_log.json")
 
 def _cfg(key, default, cast=str):
     """Read a config value from .env with type casting."""

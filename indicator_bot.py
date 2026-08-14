@@ -26,6 +26,7 @@ from data_fetcher import fetch_batch_concurrent
 # Set up local log file
 logger = logging.getLogger("3sigma_bot")
 logger.setLevel(logging.INFO)
+logger.propagate = False  # Prevent duplicate log lines from root logger propagation
 
 # Make sure we don't duplicate handlers if script is reloaded
 if not logger.handlers:
@@ -44,7 +45,8 @@ _daily_bands_map = {}
 # Track the date when daily bands were calculated to cache results
 _daily_bands_last_date = None
 # Daily alert cooldown: {ticker: {"direction": "BUY"|"SELL", "date": "YYYY-MM-DD", "price": float}}
-_ALERTED_TODAY_FILE = os.path.join(os.path.dirname(__file__), "alerted_today.json")
+_SCAN_DATA_DIR = os.environ.get("SCAN_DATA_DIR", os.path.dirname(__file__))
+_ALERTED_TODAY_FILE = os.path.join(_SCAN_DATA_DIR, "alerted_today.json")
 _alerted_today = {}
 _alerted_today_lock = threading.Lock()
 
@@ -394,7 +396,9 @@ def bot_loop():
                         logger.error(f"Failed to load full US tickers list: {e}")
                 elif tickers_mode == "WATCHLIST":
                     try:
-                        watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
+                        watchlist_file = os.path.join(_SCAN_DATA_DIR, "watchlist.json")
+                        if not os.path.exists(watchlist_file):
+                            watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
                         if os.path.exists(watchlist_file):
                             with open(watchlist_file, "r") as f:
                                 tickers = json.load(f)

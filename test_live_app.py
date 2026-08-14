@@ -1,8 +1,8 @@
 import requests
 import time
 import json
-
-BASE_URL = "https://stock-screener-has6.onrender.com"
+import os
+BASE_URL = os.environ.get("SCANNER_URL", "http://localhost:5000")
 
 def run_test(name, start_endpoint, results_endpoint, payload):
     print(f"\n--- Testing {name} ---")

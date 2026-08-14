@@ -34,7 +34,7 @@ warnings.filterwarnings("ignore")
 
 _webull_unofficial_failures = 0
 _webull_openapi_failures = 0
-_WEBULL_MAX_FAILURES = 1  # After 1 failure, immediately trip circuit breaker to use Yahoo Finance fallback
+_WEBULL_MAX_FAILURES = 5  # After 5 consecutive failures, trip circuit breaker to use Yahoo Finance fallback
 
 def reset_webull_circuit_breaker():
     """Reset the circuit breaker — call at the start of each new scan."""
@@ -165,8 +165,8 @@ def get_webull_client():
 
     import sys
     if not has_credentials:
-        if os.getenv("RENDER") or not (sys.stdin and sys.stdin.isatty()):
-            print("[Webull OpenAPI] Skipping Webull OpenAPI client in cloud/non-interactive environment to prevent hangs.")
+        if not (sys.stdin and sys.stdin.isatty()):
+            print("[Webull OpenAPI] Skipping Webull OpenAPI client in non-interactive environment (no credentials configured).")
             _webull_client = None
             _webull_initialized = True
             return None
@@ -531,8 +531,9 @@ def _fetch_yahoo_fallback_one(ticker, days=180, interval="1d", includePrePost="f
     try:
         import yfinance as yf
         t = yf.Ticker(ticker)
-        period = "1y" if interval == "1d" else "1mo"
-        yf_intv = "1d" if interval == "1d" else "15m"
+        # Map intervals and periods correctly for all modes
+        interval_map = {"1d": ("1d", "1y"), "5m": ("5m", "5d"), "15m": ("15m", "1mo"), "30m": ("30m", "1mo"), "60m": ("60m", "1mo")}
+        yf_intv, period = interval_map.get(interval, ("1d", "1y"))
         prepost_bool = True if (interval != "1d" or includePrePost == "true") else False
         df = t.history(period=period, interval=yf_intv, prepost=prepost_bool)
         if df is None or df.empty or len(df) < 20:
@@ -722,7 +723,9 @@ def fetch_batch(tickers, days=180, delay=0.05, on_progress=None, interval="1d", 
             on_progress(i, total, ticker)
 
         df = fetch_one(ticker, days=days, interval=interval, includePrePost=includePrePost, skip_webull=skip_webull)
-        if df is not None and len(df) >= 50:
+        # Use lower minimum for intraday intervals (15m/5m/30m) where fewer bars are expected
+        min_rows = 20 if interval in ("5m", "15m", "30m", "60m") else 50
+        if df is not None and len(df) >= min_rows:
             data[ticker] = df
 
         if delay > 0 and i < total - 1:

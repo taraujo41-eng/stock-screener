@@ -6,13 +6,15 @@ services:
     restart: always
     env_file:
       - .env
+    environment:
+      - SCAN_DATA_DIR=/app/scan_data
+      - SKIP_BOT_THREAD=true
     ports:
       - "5000:5000"
     volumes:
       - ./conf:/app/conf
-      - ./trade_log.json:/app/trade_log.json
-      - ./alerted_today.json:/app/alerted_today.json
-    command: gunicorn app:app --bind 0.0.0.0:5000 --timeout 600 --workers 2
+      - scan_data:/app/scan_data
+    command: gunicorn app:app --bind 0.0.0.0:5000 --timeout 600 --workers 1 --threads 4
 
   indicator_bot:
     image: stock_scanner_app:latest
@@ -20,10 +22,14 @@ services:
     restart: always
     env_file:
       - .env
+    environment:
+      - SCAN_DATA_DIR=/app/scan_data
     volumes:
       - ./conf:/app/conf
-      - ./trade_log.json:/app/trade_log.json
-      - ./alerted_today.json:/app/alerted_today.json
+      - scan_data:/app/scan_data
     command: python indicator_bot.py
     depends_on:
       - web
+
+volumes:
+  scan_data:

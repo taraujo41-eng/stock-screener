@@ -44,23 +44,31 @@ def add_header(r):
     return r
 
 # ── Start 3-Sigma Background Alerting Bot ──────────────────────────────
-try:
-    from indicator_bot import start_bot_thread
-    start_bot_thread()
-except Exception as e:
-    print(f"Error starting background indicator bot: {e}")
+# Skip bot thread in web container when a dedicated indicator_bot container handles it
+_skip_bot = os.environ.get("SKIP_BOT_THREAD", "").lower() in ("1", "true", "yes")
+if _skip_bot:
+    print("[STARTUP] SKIP_BOT_THREAD is set — bot thread handled by dedicated container")
+else:
+    try:
+        from indicator_bot import start_bot_thread
+        start_bot_thread()
+    except Exception as e:
+        print(f"Error starting background indicator bot: {e}")
 
 # ── Scan Persistence ───────────────────────────────────────────────────
+# Use SCAN_DATA_DIR env var for Docker volume persistence; falls back to app directory for local dev
+SCAN_DATA_DIR = os.environ.get("SCAN_DATA_DIR", os.path.dirname(__file__))
+os.makedirs(SCAN_DATA_DIR, exist_ok=True)
 
-THREE_SIGMA_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_3sigma_scan.json")
-TWO_SIGMA_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_2sigma_scan.json")
-FIFTY_TWO_WEEK_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_52w_scan.json")
-RSIDIV_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_rsidiv_scan.json")
-OPTIONS_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_options_scan.json")
-OPTIONS_SPREADS_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_options_spreads_scan.json")
-WATCHLIST_FILE = os.path.join(os.path.dirname(__file__), "watchlist.json")
-WATCHLIST_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_watchlist_scan.json")
-OPTIONS_WATCHLIST_RESULTS_FILE = os.path.join(os.path.dirname(__file__), "last_options_watchlist_scan.json")
+THREE_SIGMA_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_3sigma_scan.json")
+TWO_SIGMA_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_2sigma_scan.json")
+FIFTY_TWO_WEEK_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_52w_scan.json")
+RSIDIV_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_rsidiv_scan.json")
+OPTIONS_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_options_scan.json")
+OPTIONS_SPREADS_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_options_spreads_scan.json")
+WATCHLIST_FILE = os.path.join(SCAN_DATA_DIR, "watchlist.json")
+WATCHLIST_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_watchlist_scan.json")
+OPTIONS_WATCHLIST_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_options_watchlist_scan.json")
 
 DEFAULT_WATCHLIST = ["AAPL", "MSFT", "TSLA", "AMZN", "GOOGL", "META", "NVDA", "NFLX", "AMD", "SPY", "QQQ"]
 
@@ -90,11 +98,11 @@ def load_last_scan(filepath=THREE_SIGMA_RESULTS_FILE):
     if not filepath:
         return None
     filename = os.path.basename(filepath)
+    # Check the configured path first, then fallbacks for backward compatibility
     paths_to_check = [
-        os.path.join("/tmp", filename),
         filepath,
+        os.path.join(SCAN_DATA_DIR, filename),
         os.path.join(os.path.dirname(__file__), filename),
-        os.path.join(os.getcwd(), filename)
     ]
     for p in paths_to_check:
         if os.path.exists(p):
@@ -128,13 +136,11 @@ def sanitize_for_json(obj):
 def save_last_scan(data, filepath=THREE_SIGMA_RESULTS_FILE):
     """Save the scan results to file for persistence."""
     data = sanitize_for_json(data)
-    paths_to_save = [filepath, os.path.join("/tmp", os.path.basename(filepath))]
-    for p in paths_to_save:
-        try:
-            with open(p, "w") as f:
-                json.dump(data, f, indent=2)
-        except Exception as e:
-            print(f"Failed to save scan results to {p}: {e}")
+    try:
+        with open(filepath, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception as e:
+        print(f"Failed to save scan results to {filepath}: {e}")
 
 # Track whether a scan is in progress (using unified system lock)
 from reversal_scanner import acquire_scan_lock, release_scan_lock
@@ -1133,9 +1139,12 @@ def get_local_ip():
 if __name__ == "__main__":
     port = 5050
     local_ip = get_local_ip()
+    et_tz = get_ny_timezone()
+    startup_time = datetime.now(et_tz).strftime("%Y-%m-%d %I:%M:%S %p ET")
     print("=" * 55)
     print("  📈  STOCK REVERSAL & MOMENTUM SCANNER — WEB SERVER")
     print("=" * 55)
+    print(f"  Started:  {startup_time}")
     print(f"  Local  :  http://127.0.0.1:{port}")
     print(f"  Phone  :  http://{local_ip}:{port}")
     print("=" * 55)

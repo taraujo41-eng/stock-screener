@@ -33,9 +33,8 @@ warnings.filterwarnings("ignore")
 # Global progress tracker  (file-backed for cross-process visibility)
 # =====================================================================
 
-import json as _json
-
-_PROGRESS_FILE = "/tmp/scan_progress.json"
+_SCAN_DATA_DIR = os.environ.get("SCAN_DATA_DIR", os.path.dirname(__file__))
+_PROGRESS_FILE = os.path.join(_SCAN_DATA_DIR, "scan_progress.json")
 
 _DEFAULT_PROGRESS = {
     "status": "idle",       # idle | running | done | error
@@ -228,8 +227,9 @@ def detect_news_catalyst(ticker, lookback_hours=48):
 # =====================================================================
 
 def get_us_tickers():
-    """Return the universe of liquid US stocks & ETFs that are optionable with tight spreads (~350-400 tickers)."""
-    watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
+    watchlist_file = os.path.join(_SCAN_DATA_DIR, "watchlist.json")
+    if not os.path.exists(watchlist_file):
+        watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
     tickers = set()
 
     # Load local watchlist
@@ -1612,9 +1612,7 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
 
 # =====================================================================
 # IV Rank Tracker  (DIY — logs ATM IV per ticker per day)
-# =====================================================================
-
-IV_HISTORY_FILE = os.path.join(os.path.dirname(__file__), "iv_history.json")
+IV_HISTORY_FILE = os.path.join(_SCAN_DATA_DIR, "iv_history.json")
 _IV_MAX_ENTRIES = 252  # 1 trading year
 
 def _load_iv_history():
