@@ -1034,6 +1034,7 @@ def paper_positions():
     try:
         from paper_trader import get_paper_trader
         pt = get_paper_trader()
+        positions = pt.get_open_positions()
         return jsonify({
             "open_positions": [
                 {
@@ -1049,7 +1050,7 @@ def paper_positions():
                     "signal_type": p.get("signal_type"),
                     "instrument_id": p.get("instrument_id"),
                 }
-                for p in pt._open_positions if p.get("status") == "open"
+                for p in positions if p.get("status") == "open"
             ]
         }), 200
     except Exception as e:
@@ -1066,7 +1067,8 @@ def paper_close_position():
         if not trade_id:
             return jsonify({"error": "trade_id required"}), 400
 
-        matching = [p for p in pt._open_positions if str(p.get("id")) == str(trade_id) and p.get("status") == "open"]
+        positions = pt.get_open_positions()
+        matching = [p for p in positions if str(p.get("id")) == str(trade_id) and p.get("status") == "open"]
         if not matching:
             return jsonify({"error": f"Open trade #{trade_id} not found"}), 404
 

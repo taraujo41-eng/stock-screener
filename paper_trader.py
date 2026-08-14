@@ -602,7 +602,12 @@ class PaperTrader:
             logger.error(f"[PaperTrader] ❌ Error placing option order for {ticker}: {e}")
             import traceback
             traceback.print_exc()
-            return None
+    def get_open_positions(self):
+        """Return all open positions dynamically reloaded from disk."""
+        with self._lock:
+            self._trade_log = _load_trade_log()
+            self._open_positions = [t for t in self._trade_log.get("trades", []) if t.get("status") == "open"]
+            return list(self._open_positions)
 
     # ── Position Management / Exits ─────────────────────────────────
 
