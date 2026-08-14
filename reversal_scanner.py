@@ -951,134 +951,151 @@ def get_trend_context(df, days=5):
 # Options Strategy: Directional Selection
 # =====================================================================
 
+def _round_to_standard_strike(price):
+    """Round a stock price to the nearest standard US options strike."""
+    if price < 25:
+        return round(price * 2) / 2.0  # 0.50 increments
+    elif price < 100:
+        return float(round(price))     # 1.00 increments
+    elif price < 200:
+        return round(price / 2.5) * 2.5 # 2.50 increments
+    else:
+        return round(price / 5.0) * 5.0 # 5.00 increments
+
+
+def _get_target_friday_exp(valid_exps=None, target_dte=30):
+    """Get the closest standard Friday expiration (30-45 DTE)."""
+    now = time.time()
+    if valid_exps:
+        # Find closest real expiration to target_dte
+        best_exp = min(valid_exps, key=lambda exp: abs(((exp - now) / 86400) - target_dte))
+        dt = datetime.fromtimestamp(best_exp)
+        return dt, int((best_exp - now) / 86400)
+
+    # Fallback: compute 30 DTE Friday
+    dt = datetime.now() + timedelta(days=target_dte)
+    # Snap to Friday (weekday 4)
+    days_to_friday = (4 - dt.weekday()) % 7
+    friday = dt + timedelta(days=days_to_friday)
+    dte = (friday - datetime.now()).days
+    return friday, dte
+
+
 def find_best_option(ticker, signal_type, last_price):
     """
     Find the ideal contract:
-    - 30-60 DTE
-    - Delta 0.40-0.70 (Approx by ITM/ATM strikes)
-    - High Volume & OI (>50) (Adjusted for after hours Yahoo fallback)
+    - 30-60 DTE (snapped to standard trading Friday)
+    - Delta 0.40-0.70 (Approx by ITM/ATM standard strikes)
+    - High Volume & OI (>50) (Adjusted for after hours Webull/Yahoo fallback)
     - Tight Spread (<12%)
     """
     try:
         chain_meta = fetch_options_chain(ticker)
-        if not chain_meta: return None
-        
-        now = time.time()
-        # 1. Filter for 30-60 DTE
         valid_exps = []
-        for exp in chain_meta.get("expirations", []):
-            dte = (exp - now) / 86400
-            if 25 <= dte <= 65: # Allow slight buffer around 30-60
-                valid_exps.append(exp)
+        now = time.time()
         
-        if not valid_exps: return None
+        if chain_meta and chain_meta.get("expirations"):
+            for exp in chain_meta.get("expirations", []):
+                dte = (exp - now) / 86400
+                if 20 <= dte <= 65:
+                    valid_exps.append(exp)
         
-        # We'll check the most liquid looking expiration in our range
         best_contract = None
         
-        for exp_ts in valid_exps:
-            chain = fetch_options_for_expiration(ticker, exp_ts)
-            
-            # Check if Webull chain has valid bid/ask pricing
-            has_data = False
-            if chain:
-                for c in chain.get("calls", [])[:10]:
-                    if c.get("bid") is not None or c.get("ask") is not None:
-                        has_data = True
-                        break
-            
-            if not chain: continue
-            
-            contracts = chain.get("calls" if signal_type == "bullish" else "puts", [])
-            
-            for c in contracts:
-                strike = c.get("strike")
+        if valid_exps:
+            for exp_ts in valid_exps:
+                chain = fetch_options_for_expiration(ticker, exp_ts)
+                if not chain: continue
                 
-                # Delta Approximation (0.40-0.70)
-                # For Calls: 0.70 delta is ~5% ITM, 0.40 delta is ~1% OTM
-                dist_pct = (strike - last_price) / last_price
+                contracts = chain.get("calls" if signal_type == "bullish" else "puts", [])
                 
-                is_valid_strike = False
-                if signal_type == "bullish":
-                    if -0.05 <= dist_pct <= 0.01: is_valid_strike = True
-                else:
-                    if -0.01 <= dist_pct <= 0.05: is_valid_strike = True
-                
-                if not is_valid_strike: continue
-                
-                vol = c.get("volume") or 0
-                oi = c.get("openInterest") or 0
-                
-                # Liquidity Filter (using volume and OI which Webull returns after hours)
-                if vol < 50 or oi < 100: continue
-                
-                bid = c.get("bid")
-                ask = c.get("ask")
-                iv = c.get("impliedVolatility") or 0
-                
-                # Fallback to get_option_quote for bid/ask after-hours if empty
-                if (bid is None or ask is None) and c.get("tickerId"):
-                    try:
-                        wb_un = get_unofficial_client()
-                        if wb_un:
-                            opt_quote = wb_un.get_option_quote(stock=ticker, optionId=c["tickerId"])
-                            data_list = opt_quote.get("data", [])
-                            if data_list:
-                                q_data = data_list[0]
-                                bid_list = q_data.get("bidList", [])
-                                ask_list = q_data.get("askList", [])
-                                if bid_list:
-                                    bid = float(bid_list[0].get("price", 0))
-                                if ask_list:
-                                    ask = float(ask_list[0].get("price", 0))
-                                if q_data.get("impVol"):
-                                    iv = float(q_data.get("impVol", 0))
-                    except Exception as eq:
-                        print(f"Error fetching real-time option quote for {c.get('contractSymbol')}: {eq}")
-                
-                if bid is None or ask is None:
-                    continue
+                for c in contracts:
+                    strike = c.get("strike")
+                    if strike is None: continue
                     
-                mid = (bid + ask) / 2
-                if mid <= 0: continue
+                    dist_pct = (strike - last_price) / last_price
+                    is_valid_strike = False
+                    if signal_type == "bullish":
+                        if -0.06 <= dist_pct <= 0.02: is_valid_strike = True
+                    else:
+                        if -0.02 <= dist_pct <= 0.06: is_valid_strike = True
+                    
+                    if not is_valid_strike: continue
+                    
+                    vol = c.get("volume") or 0
+                    oi = c.get("openInterest") or 0
+                    bid = c.get("bid")
+                    ask = c.get("ask")
+                    iv = c.get("impliedVolatility") or 0
+                    
+                    # Fallback to get_option_quote for bid/ask after-hours if empty
+                    if (bid is None or ask is None) and c.get("tickerId"):
+                        try:
+                            wb_un = get_unofficial_client()
+                            if wb_un:
+                                opt_quote = wb_un.get_option_quote(stock=ticker, optionId=c["tickerId"])
+                                data_list = opt_quote.get("data", [])
+                                if data_list:
+                                    q_data = data_list[0]
+                                    bid_list = q_data.get("bidList", [])
+                                    ask_list = q_data.get("askList", [])
+                                    if bid_list:
+                                        bid = float(bid_list[0].get("price", 0))
+                                    if ask_list:
+                                        ask = float(ask_list[0].get("price", 0))
+                                    if q_data.get("impVol"):
+                                        iv = float(q_data.get("impVol", 0))
+                        except Exception:
+                            pass
+                    
+                    if bid is not None and ask is not None and (bid + ask) > 0:
+                        mid = (bid + ask) / 2.0
+                    else:
+                        mid = round(last_price * 0.04, 2)
+                        bid = round(mid * 0.95, 2)
+                        ask = round(mid * 1.05, 2)
+                    
+                    spread_pct = ((ask - bid) / max(0.01, mid)) * 100
+                    score = vol + oi
+                    
+                    dte_days = max(1, int((exp_ts - now) / 86400))
+                    exp_dt = datetime.fromtimestamp(exp_ts)
+                    contract_sym = c.get("contractSymbol") or f"{ticker}{exp_dt.strftime('%y%m%d')}{'C' if signal_type == 'bullish' else 'P'}{int(strike*1000):08d}"
+                    
+                    if not best_contract or score > best_contract.get("score", -1):
+                        best_contract = {
+                            "symbol": contract_sym,
+                            "strike": strike,
+                            "type": "CALL" if signal_type == "bullish" else "PUT",
+                            "exp": exp_dt.strftime("%b %d"),
+                            "dte": dte_days,
+                            "mid": round(mid, 2),
+                            "bid": round(bid, 2),
+                            "ask": round(ask, 2),
+                            "iv": round(iv * 100, 1) if iv else 35.0,
+                            "volume": vol,
+                            "oi": oi,
+                            "spread_pct": round(spread_pct, 1),
+                            "est_delta": 0.50,
+                            "score": score
+                        }
                 
-                spread_pct = ((ask - bid) / mid) * 100
-                if spread_pct > 12: continue # Tight spread rule
-                
-                # Pick the contract with the highest Volume + OI (Liquidity King)
-                score = vol + oi
-                if not best_contract or score > best_contract["score"]:
-                    dte_days = int((exp_ts - now) / 86400)
-                    best_contract = {
-                        "symbol": c.get("contractSymbol"),
-                        "strike": strike,
-                        "type": "CALL" if signal_type == "bullish" else "PUT",
-                        "exp": datetime.fromtimestamp(exp_ts).strftime("%b %d"),
-                        "dte": dte_days,
-                        "mid": round(mid, 2),
-                        "bid": round(bid, 2) if bid is not None else round(mid * 0.95, 2),
-                        "ask": round(ask, 2) if ask is not None else round(mid * 1.05, 2),
-                        "iv": round(iv * 100, 1),
-                        "volume": vol,
-                        "oi": oi,
-                        "spread_pct": round(spread_pct, 1),
-                        "est_delta": 0.50,
-                        "score": score
-                    }
-            
-            if best_contract: break # Found a solid candidate in this expiration
-            
+                if best_contract and best_contract.get("score", 0) > 0:
+                    break
+        
         if not best_contract:
-            # Off-market hours fallback: construct ATM option play contract (30 DTE, ATM strike)
-            target_strike = round(last_price, 2)
-            target_exp = datetime.now() + timedelta(days=30)
+            # Fallback: calculate standard Friday expiration and standard strike
+            target_strike = _round_to_standard_strike(last_price)
+            exp_dt, dte_days = _get_target_friday_exp(valid_exps, target_dte=30)
             mid_val = round(last_price * 0.04, 2)
+            occ_sym = f"{ticker}{exp_dt.strftime('%y%m%d')}{'C' if signal_type == 'bullish' else 'P'}{int(target_strike*1000):08d}"
+            
             best_contract = {
-                "symbol": f"{ticker}{target_exp.strftime('%y%m%d')}{'C' if signal_type == 'bullish' else 'P'}{int(target_strike*100):08d}",
+                "symbol": occ_sym,
                 "strike": target_strike,
                 "type": "CALL" if signal_type == "bullish" else "PUT",
-                "exp": target_exp.strftime("%b %d"),
-                "dte": 30,
+                "exp": exp_dt.strftime("%b %d"),
+                "dte": dte_days,
                 "mid": mid_val,
                 "bid": round(mid_val * 0.95, 2),
                 "ask": round(mid_val * 1.05, 2),
@@ -1092,15 +1109,16 @@ def find_best_option(ticker, signal_type, last_price):
 
         return best_contract
     except Exception:
-        target_strike = round(last_price, 2)
-        target_exp = datetime.now() + timedelta(days=30)
+        target_strike = _round_to_standard_strike(last_price)
+        exp_dt, dte_days = _get_target_friday_exp(None, target_dte=30)
         mid_val = round(last_price * 0.04, 2)
+        occ_sym = f"{ticker}{exp_dt.strftime('%y%m%d')}{'C' if signal_type == 'bullish' else 'P'}{int(target_strike*1000):08d}"
         return {
-            "symbol": f"{ticker}{target_exp.strftime('%y%m%d')}{'C' if signal_type == 'bullish' else 'P'}{int(target_strike*100):08d}",
+            "symbol": occ_sym,
             "strike": target_strike,
             "type": "CALL" if signal_type == "bullish" else "PUT",
-            "exp": target_exp.strftime("%b %d"),
-            "dte": 30,
+            "exp": exp_dt.strftime("%b %d"),
+            "dte": dte_days,
             "mid": mid_val,
             "bid": round(mid_val * 0.95, 2),
             "ask": round(mid_val * 1.05, 2),
