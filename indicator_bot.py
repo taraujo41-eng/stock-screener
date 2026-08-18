@@ -467,13 +467,16 @@ def bot_loop():
                 time.sleep(300)
                 continue
 
-            from reversal_scanner import acquire_scan_lock, release_scan_lock
+            from reversal_scanner import acquire_scan_lock, release_scan_lock, scan_progress, _reset_progress, _update_progress
             if not acquire_scan_lock("Background-3Sigma-Bot"):
                 logger.info("A user manual scan is currently running — skipping background bot cycle for 60s...")
                 time.sleep(60)
                 continue
 
             logger.info("--- Starting 3-Sigma A+ Reversal Bot Cycle ---")
+            _reset_progress(status="running", mode="3sigma_bot")
+            scan_progress["phase_label"] = "Initiating 3-Sigma Bot scan..."
+
             try:
                 # 1. Determine tickers to scan: Combine all 287 US Optionable tickers AND Watchlist tickers
                 from reversal_scanner import get_us_tickers
@@ -502,10 +505,16 @@ def bot_loop():
                 scan_interval = int(os.getenv("SCAN_INTERVAL_3SIGMA", "60"))
                 
                 # 2. Pre-calculate daily bands
+                _update_progress("init", "Pre-calculating daily bands...", 0, len(tickers), pct=5)
                 precalculate_daily_bands(tickers)
                 
                 logger.info(f"Scanning {len(tickers)} tickers in parallel ({candle_interval} candles, 3.0SD Breach + A+ Setups)...")
-                
+                _update_progress("downloading", f"Downloading candles for {len(tickers)} tickers...", 0, len(tickers), pct=10)
+
+                def _on_bot_dl_progress(i, tot, sym):
+                    pct = 10 + int((i / max(1, tot)) * 85)
+                    _update_progress("downloading", f"3-Sigma Bot scanning {sym} ({i}/{tot})...", i, tot, ticker=sym, pct=pct)
+
                 # 3. Download and compute in parallel
                 results = fetch_batch_concurrent(
                     tickers=tickers,
@@ -514,6 +523,7 @@ def bot_loop():
                     interval=candle_interval,
                     includePrePost="false",
                     process_fn=evaluate_ticker_process,
+                    on_progress=_on_bot_dl_progress,
                     skip_webull=False
                 )
                 
@@ -521,8 +531,25 @@ def bot_loop():
                 _purge_old_alerts()  # clear stale entries from previous days
                 triggered_count = 0
                 skipped_count = 0
+                all_signals = []
+
                 for ticker, res in results.items():
                     if res:
+                        all_signals.append({
+                            "Ticker": ticker,
+                            "Direction": "Bullish" if res['action'] == "BUY" else "Bearish",
+                            "Last Price": res['price'],
+                            "RSI": res.get('rsi', 50),
+                            "Score": res.get('score', 0),
+                            "Grade": res.get('grade', 'B'),
+                            "Bullish Signals": res['type'] if res['action'] == "BUY" else "—",
+                            "Bearish Signals": res['type'] if res['action'] == "SELL" else "—",
+                            "Patterns": res.get('reason', ''),
+                            "RVOL": res.get('rvol', 1.0),
+                            "Entry": res['price'],
+                            "Profit Target": res['vwap'],
+                        })
+
                         direction = res['action']  # "BUY" or "SELL"
                         if _already_alerted_today(ticker, direction):
                             skipped_count += 1
@@ -542,11 +569,33 @@ def bot_loop():
                         )
                         _record_alert(ticker, direction, res['price'])
                         triggered_count += 1
-                        
+
+                # Save 3-sigma scan results for web UI persistence
+                try:
+                    ny_tz = get_ny_timezone()
+                    save_file = os.path.join(_SCAN_DATA_DIR, "last_3sigma_scan.json")
+                    with open(save_file, "w") as f:
+                        json.dump({
+                            "ok": True,
+                            "mode": "3sigma",
+                            "timestamp": datetime.now(ny_tz).strftime("%b %d, %Y  %I:%M %p"),
+                            "count": len(all_signals),
+                            "results": all_signals
+                        }, f, indent=2)
+                except Exception as save_err:
+                    logger.warning(f"Could not save 3sigma bot results: {save_err}")
+
+                scan_progress.update({
+                    "status": "done",
+                    "phase": "complete",
+                    "phase_label": f"3-Sigma Bot cycle complete — {triggered_count} new alerts",
+                    "pct": 100
+                })
                 logger.info(f"--- 3-Sigma Bot Cycle Complete. New A+ alerts: {triggered_count}, Suppressed (already alerted today): {skipped_count}. Sleeping for {scan_interval}s ---")
-                time.sleep(scan_interval)
             finally:
                 release_scan_lock()
+
+            time.sleep(scan_interval)
             
         except Exception as e:
             logger.error(f"General exception in bot_loop: {e}")

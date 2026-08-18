@@ -729,16 +729,16 @@ function startProgressPolling(scanType = "watchlist") {
       const res = await fetch(`/api/scan/progress?t=${Date.now()}`);
       const p = await res.json();
 
-      // If status is complete, error, poll limit reached (90s safety), or idle (after grace period pollCount > 3):
-      const isFinished = p.status === "done" || p.status === "error" || (p.status === "idle" && pollCount > 3) || pollCount > 90;
+      // If status is complete, error, poll limit reached (120s safety), or idle after grace period (pollCount > 10):
+      const isFinished = p.status === "done" || p.status === "error" || (p.status === "idle" && pollCount > 10) || pollCount > 120;
       if (isFinished) {
-        if (p.status === "done" || (p.status === "idle" && pollCount > 3) || pollCount > 90) {
+        if (p.status === "done" || (p.status === "idle" && pollCount > 10) || pollCount > 120) {
           document.getElementById("progressPct").textContent = "100%";
           document.getElementById("progressFill").style.width = "100%";
         }
         stopProgressPolling();
 
-        if (p.status === "done" || p.status === "idle" || pollCount > 90) {
+        if (p.status === "done" || p.status === "idle" || pollCount > 120) {
           const resultsUrl = scanType === "rsidiv" ? "/api/scan/rsidiv/results" : "/api/scan/watchlist/results";
           const resData = await fetch(`${resultsUrl}?t=${Date.now()}`);
           const data = await resData.json();
@@ -769,7 +769,7 @@ function startProgressPolling(scanType = "watchlist") {
       }
       const displayPct = Math.max(maxSeenPct, p.pct || 0);
 
-      document.getElementById("progressPhase").textContent = p.phase_label || "Working...";
+      document.getElementById("progressPhase").textContent = p.phase_label || "Scanning market...";
       document.getElementById("progressPct").textContent = `${displayPct}%`;
       document.getElementById("progressFill").style.width = `${displayPct}%`;
       document.getElementById("progressDetail").textContent =

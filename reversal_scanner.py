@@ -51,7 +51,7 @@ _DEFAULT_PROGRESS = {
 }
 
 class _SharedProgress(dict):
-    """Dict-like object backed by a JSON file in /tmp for cross-process sharing."""
+    """Dict-like object backed by a JSON file for cross-process sharing."""
 
     def __init__(self):
         super().__init__(_DEFAULT_PROGRESS)
@@ -61,17 +61,20 @@ class _SharedProgress(dict):
 
     def _load(self):
         try:
-            with open(_PROGRESS_FILE, "r") as f:
-                data = _json.load(f)
-                if isinstance(data, dict):
-                    super().update(data)
+            if os.path.exists(_PROGRESS_FILE) and os.path.getsize(_PROGRESS_FILE) > 0:
+                with open(_PROGRESS_FILE, "r") as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        super().update(data)
         except Exception:
             pass
 
     def _save(self):
         try:
-            with open(_PROGRESS_FILE, "w") as f:
-                _json.dump(dict(self), f)
+            tmp_file = _PROGRESS_FILE + ".tmp"
+            with open(tmp_file, "w") as f:
+                json.dump(dict(self), f)
+            os.replace(tmp_file, _PROGRESS_FILE)
         except Exception:
             pass
 
@@ -550,11 +553,11 @@ def compute_macd(series, fast=12, slow=26, signal=9):
     histogram = macd_line - signal_line
     return macd_line, signal_line, histogram
 
-def detect_rsi_divergence(price_series, rsi_series, lookback=20, max_anchor_age=None):
+def detect_rsi_divergence(price_series, rsi_series, lookback=10, max_anchor_age=8):
     """
-    Check for RSI Divergence in the last `lookback` periods.
-    - If max_anchor_age is set (e.g. 8), enforces fresh swing anchor points for the RSI Divergence Tab.
-    - Otherwise (Watchlist Tab), uses standard swing divergence detection across the lookback window.
+    Check for RSI Divergence in the last `lookback` periods (default: 10 trading days).
+    - Uses max_anchor_age=8 to enforce fresh swing anchor points within the last 8 periods.
+    - Catches real-time divergences as the current candle (Day 0) is completing the swing.
     Returns (bull_div, bear_div)
     """
     if len(price_series) < lookback + 2:
@@ -1299,8 +1302,8 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
             (prior_pos_bars >= 3)
         )
 
-        # 9. RSI Divergence (already tightened in detector)
-        bull_div, bear_div = detect_rsi_divergence(df['Close'], rsi_series, lookback=20)
+        # 9. RSI Divergence (10-day window, max 8-day anchor age)
+        bull_div, bear_div = detect_rsi_divergence(df['Close'], rsi_series, lookback=10, max_anchor_age=8)
 
         # 10. Rubber Band Extension (20 SMA)
         sma20_series = compute_sma(df['Close'], 20)
@@ -1744,7 +1747,7 @@ def _analyze_options_setup(sym, df, iv_history):
             bull_catalyst += 2; bull_reasons.append("Candle Pattern")
         if rsi_val < 40:
             bull_catalyst += 1; bull_reasons.append(f"RSI {rsi_val:.0f}")
-        bull_div, bear_div = detect_rsi_divergence(df['Close'], rsi_series, lookback=20)
+        bull_div, bear_div = detect_rsi_divergence(df['Close'], rsi_series, lookback=10, max_anchor_age=8)
         if bull_div:
             bull_catalyst += 2; bull_reasons.append("RSI Divergence")
         if float(macd_hist.iloc[-1]) > 0 and float(macd_hist.iloc[-2]) < 0:
@@ -2166,7 +2169,7 @@ def _analyze_3sigma_setup(sym, df_15m, df_daily, is_market_bullish=True, std_dev
         rsi_val = float(rsi_series.iloc[-1])
         rvol = compute_rvol(df_eval)
         adr_pct = compute_adr_pct(df_eval, 14)
-        bull_div, bear_div = detect_rsi_divergence(df_eval['Close'], rsi_series, lookback=20)
+        bull_div, bear_div = detect_rsi_divergence(df_eval['Close'], rsi_series, lookback=10, max_anchor_age=8)
         
         try:
             squeeze_on, _, _ = detect_squeeze(df_eval)
@@ -2491,8 +2494,8 @@ def fifty_two_week_reversal_scan(extended_hours=False):
             rsi_bull_hook = prev_rsi < 30 <= rsi_val
             rsi_bear_hook = prev_rsi > 70 >= rsi_val
             
-            # RSI Divergence detection
-            bull_div, bear_div = detect_rsi_divergence(df_daily['Close'], rsi_series, lookback=20)
+            # RSI Divergence detection (10-day window, max 8-day anchor age)
+            bull_div, bear_div = detect_rsi_divergence(df_daily['Close'], rsi_series, lookback=10, max_anchor_age=8)
             
             # Confirmations score & tags
             score = 10
@@ -2681,12 +2684,14 @@ def rsi_divergence_full_market_scan(tickers=None, extended_hours=False):
     results = []
     total = len(tickers)
 
-    # Determine candle interval & extended hours based on market timing
-    interval, days, inc_pre_post = determine_scan_candle_mode(extended_hours)
+    # Locked to Daily candles ('1d', 280 days) for catching 10-trading-day swing divergences
+    interval = "1d"
+    days = 280
+    inc_pre_post = "true" if extended_hours else "false"
 
     def _on_daily_progress(i, tot, sym):
         pct = int((i / tot) * 85)
-        _update_progress("downloading", f"Downloading {interval} candles... ({i}/{tot})", i, tot, ticker=sym, found=len(results), pct=pct)
+        _update_progress("downloading", f"Downloading daily candles... ({i}/{tot})", i, tot, ticker=sym, found=len(results), pct=pct)
 
     daily_data = fetch_batch_concurrent(
         tickers, days=days, max_workers=6,
@@ -3302,11 +3307,13 @@ def watchlist_scan(tickers, extended_hours=False):
         pct = int((i / tot) * 30) if tot else 0
         _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=0, pct=pct)
 
-    # Determine candle interval & extended hours based on market timing
-    interval, days, inc_pre_post = determine_scan_candle_mode(extended_hours)
+    # Locked to Daily candles ('1d', 280 days) for evaluating multi-day macro indicators & 10-day divergence
+    interval = "1d"
+    days = 280
+    inc_pre_post = "true" if extended_hours else "false"
     daily_data = fetch_batch_concurrent(
-        tickers, days=days, max_workers=4,
-        on_progress=_on_dl_progress, delay=0.05, interval=interval, includePrePost=inc_pre_post
+        tickers, days=days, max_workers=20,
+        on_progress=_on_dl_progress, delay=0.01, interval=interval, includePrePost=inc_pre_post
     )
 
     is_bullish = check_spy_regime()
