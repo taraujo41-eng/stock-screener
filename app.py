@@ -84,7 +84,24 @@ def load_watchlist():
         try:
             with open(WATCHLIST_FILE, "r") as f:
                 data = json.load(f)
-                return data if isinstance(data, list) else DEFAULT_WATCHLIST[:]
+                if isinstance(data, list) and len(data) > 0:
+                    return data
+        except Exception:
+            pass
+    # Fallback to repo root watchlist.json
+    base_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
+    if os.path.exists(base_file):
+        try:
+            with open(base_file, "r") as f:
+                data = json.load(f)
+                if isinstance(data, list) and len(data) > 0:
+                    # Save to SCAN_DATA_DIR for persistence
+                    try:
+                        with open(WATCHLIST_FILE, "w") as out:
+                            json.dump(data, out, indent=2)
+                    except Exception:
+                        pass
+                    return data
         except Exception:
             pass
     return DEFAULT_WATCHLIST[:]
