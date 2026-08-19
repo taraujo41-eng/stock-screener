@@ -3500,21 +3500,46 @@ def watchlist_scan(tickers, extended_hours=False):
             if bull_cnt >= bear_cnt:
                 base["Bearish Signals"] = "—"
                 base["Direction"] = "Bullish"
-                if base.get("Option Play") and isinstance(base["Option Play"], dict) and base["Option Play"].get("type") == "PUT":
-                    base["Option Play"]["type"] = "CALL"
             else:
                 base["Bullish Signals"] = "—"
                 base["Direction"] = "Bearish"
-                if base.get("Option Play") and isinstance(base["Option Play"], dict) and base["Option Play"].get("type") == "CALL":
-                    base["Option Play"]["type"] = "PUT"
         elif has_bull:
             base["Direction"] = "Bullish"
-            if base.get("Option Play") and isinstance(base["Option Play"], dict) and base["Option Play"].get("type") == "PUT":
-                base["Option Play"]["type"] = "CALL"
         elif has_bear:
             base["Direction"] = "Bearish"
-            if base.get("Option Play") and isinstance(base["Option Play"], dict) and base["Option Play"].get("type") == "CALL":
-                base["Option Play"]["type"] = "PUT"
+        else:
+            base["Direction"] = "Bullish"
+
+        final_dir = base.get("Direction", "Bullish")
+        last_price = float(base.get("Last Price", 0))
+
+        # Recalculate Trade Levels (Entry, Stop Loss, Profit Target) matching the dominant direction
+        df_sym = daily_data.get(sym)
+        atr_val = 0.05 * last_price
+        if df_sym is not None and len(df_sym) > 0:
+            atr_series = compute_atr(df_sym, 14)
+            if len(atr_series) > 0 and not np.isnan(atr_series.iloc[-1]):
+                atr_val = float(atr_series.iloc[-1])
+
+        base["Entry"] = round(last_price, 2)
+        if final_dir == "Bullish":
+            base["Stop Loss"] = round(last_price - 2.0 * atr_val, 2)
+            base["Profit Target"] = round(last_price + 4.0 * atr_val, 2)
+            # Ensure Option Play is an authentic CALL contract
+            if not base.get("Option Play") or base["Option Play"].get("type") != "CALL":
+                opt_play = find_best_option(sym, "bullish", last_price)
+                if opt_play:
+                    base["Option Play"] = opt_play
+                    base["Suggested Option"] = f"{opt_play['exp']} ${opt_play['strike']} CALL (@${opt_play['mid']}, IV: {opt_play['iv']}%)"
+        else:
+            base["Stop Loss"] = round(last_price + 2.0 * atr_val, 2)
+            base["Profit Target"] = round(last_price - 4.0 * atr_val, 2)
+            # Ensure Option Play is an authentic PUT contract
+            if not base.get("Option Play") or base["Option Play"].get("type") != "PUT":
+                opt_play = find_best_option(sym, "bearish", last_price)
+                if opt_play:
+                    base["Option Play"] = opt_play
+                    base["Suggested Option"] = f"{opt_play['exp']} ${opt_play['strike']} PUT (@${opt_play['mid']}, IV: {opt_play['iv']}%)"
 
         # Recalculate grade based on merged score
         score = base.get("Score", 0)
