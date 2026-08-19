@@ -3325,11 +3325,10 @@ def watchlist_scan(tickers, extended_hours=False):
     # Collect results keyed by ticker for merging
     stock_results = {}    # ticker -> dict  (from _analyze_stock)
     sigma3_results = {}   # ticker -> dict  (from _analyze_3sigma_setup std=3)
-    sigma2_results = {}   # ticker -> dict  (from _analyze_3sigma_setup std=2)
     options_results = {}  # ticker -> dict  (from _analyze_options_setup)
 
     for i, sym in enumerate(tickers):
-        found_cnt = len(set(stock_results) | set(sigma3_results) | set(sigma2_results))
+        found_cnt = len(set(stock_results) | set(sigma3_results))
         pct = 30 + int((i / total) * 65) if total else 95
         _update_progress("analyzing", f"Analyzing {sym} (all criteria)...", i, total, ticker=sym, found=found_cnt, pct=pct)
         try:
@@ -3353,15 +3352,7 @@ def watchlist_scan(tickers, extended_hours=False):
             except Exception as e:
                 print(f"  [watchlist] 3-sigma error for {sym}: {e}")
 
-            # 3. 2-Sigma Bollinger Band analysis
-            try:
-                r = _analyze_3sigma_setup(sym, None, df, is_market_bullish=is_bullish, std_dev_mult=2.0)
-                if r:
-                    sigma2_results[sym] = r
-            except Exception as e:
-                print(f"  [watchlist] 2-sigma error for {sym}: {e}")
-
-            # 4. Options setup analysis
+            # 3. Options setup analysis
             try:
                 r = _analyze_options_setup(sym, df, iv_history)
                 if r:
@@ -3376,17 +3367,16 @@ def watchlist_scan(tickers, extended_hours=False):
     _save_iv_history(iv_history)
 
     # ── Merge all results per ticker ────────────────────────────
-    all_tickers_with_signals = set(stock_results) | set(sigma3_results) | set(sigma2_results) | set(options_results)
+    all_tickers_with_signals = set(stock_results) | set(sigma3_results) | set(options_results)
     merged = []
 
     for sym in all_tickers_with_signals:
         stock_r = stock_results.get(sym)
         s3_r = sigma3_results.get(sym)
-        s2_r = sigma2_results.get(sym)
         opts_r = options_results.get(sym)
 
-        # Use stock result as the base if available, otherwise use first available sigma result
-        base = stock_r or s3_r or s2_r
+        # Use stock result as the base if available, otherwise use 3-sigma result
+        base = stock_r or s3_r
         if base is None and opts_r is not None:
             # Only options signal — still include it as a stock-style card
             # Build a minimal base from the options result
@@ -3455,19 +3445,6 @@ def watchlist_scan(tickers, extended_hours=False):
             # Merge Option Play if not already present
             if not base.get("Option Play") and s3_r.get("Option Play"):
                 base["Option Play"] = s3_r["Option Play"]
-
-        # Merge 2-sigma signals into base
-        if s2_r and s2_r is not base:
-            base["Bullish Signals"] = _merge_signal_str(base.get("Bullish Signals", "—"), s2_r.get("Bullish Signals", "—"), "2σ")
-            base["Bearish Signals"] = _merge_signal_str(base.get("Bearish Signals", "—"), s2_r.get("Bearish Signals", "—"), "2σ")
-            base["Patterns"] = _merge_patterns(base.get("Patterns", "—"), s2_r.get("Patterns", "—"))
-            base["Score"] = max(base.get("Score", 0), s2_r.get("Score", 0))
-            if not base.get("Stop Loss") and s2_r.get("Stop Loss"):
-                base["Stop Loss"] = s2_r["Stop Loss"]
-                base["Entry"] = s2_r.get("Entry")
-                base["Profit Target"] = s2_r.get("Profit Target")
-            if not base.get("Option Play") and s2_r.get("Option Play"):
-                base["Option Play"] = s2_r["Option Play"]
 
         # Merge options exhaustion signals
         if opts_r:
