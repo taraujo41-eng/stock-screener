@@ -2331,17 +2331,18 @@ def three_sigma_full_market_scan(extended_hours=False):
     is_market_bullish = check_spy_regime()
 
     results = []
-    total = len(tickers)
+    # Dynamic timeframe: 15m when market is open / extended hours, 1d when market is closed
+    interval, days, inc_pre_post = determine_scan_candle_mode(force_extended=extended_hours)
+    _timeframe_label = "15-Minute" if interval == "15m" else "Daily"
 
-    # Daily progress callback
+    # Progress callback
     def _on_daily_progress(i, tot, sym):
-        pct = int((i / tot) * 80)
-        _update_progress("downloading", f"Downloading daily candles... ({i}/{tot})", i, tot, ticker=sym, pct=pct)
+        pct = int((i / tot) * 80) if tot else 0
+        _update_progress("downloading", f"Downloading {_timeframe_label} candles... ({i}/{tot})", i, tot, ticker=sym, pct=pct)
 
-    inc_pre_post = "true" if extended_hours else "false"
     daily_data = fetch_batch_concurrent(
-        tickers, days=45, max_workers=6,
-        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost=inc_pre_post
+        tickers, days=days, max_workers=6,
+        on_progress=_on_daily_progress, delay=0.05, interval=interval, includePrePost=inc_pre_post
     )
 
     for i, sym in enumerate(tickers):
@@ -2387,15 +2388,18 @@ def two_sigma_full_market_scan(extended_hours=False):
     results = []
     total = len(tickers)
 
-    # Daily progress callback
-    def _on_daily_progress(i, tot, sym):
-        pct = int((i / tot) * 80)
-        _update_progress("downloading", f"Downloading daily candles... ({i}/{tot})", i, tot, ticker=sym, pct=pct)
+    # Dynamic timeframe: 15m when market is open / extended hours, 1d when market is closed
+    interval, days, inc_pre_post = determine_scan_candle_mode(force_extended=extended_hours)
+    _timeframe_label = "15-Minute" if interval == "15m" else "Daily"
 
-    inc_pre_post = "true" if extended_hours else "false"
+    # Progress callback
+    def _on_daily_progress(i, tot, sym):
+        pct = int((i / tot) * 80) if tot else 0
+        _update_progress("downloading", f"Downloading {_timeframe_label} candles... ({i}/{tot})", i, tot, ticker=sym, pct=pct)
+
     daily_data = fetch_batch_concurrent(
-        tickers, days=45, max_workers=6,
-        on_progress=_on_daily_progress, delay=0.05, interval="1d", includePrePost=inc_pre_post
+        tickers, days=days, max_workers=6,
+        on_progress=_on_daily_progress, delay=0.05, interval=interval, includePrePost=inc_pre_post
     )
 
     for i, sym in enumerate(tickers):
@@ -2683,15 +2687,14 @@ def rsi_divergence_full_market_scan(tickers=None, extended_hours=False):
 
     results = []
     total = len(tickers)
-
-    # Locked to Daily candles ('1d', 280 days) for catching 10-trading-day swing divergences
-    interval = "1d"
-    days = 280
-    inc_pre_post = "true" if extended_hours else "false"
+    # Dynamic timeframe: 15m when market is open / extended hours, 1d when market is closed
+    interval, days, inc_pre_post = determine_scan_candle_mode(force_extended=extended_hours)
+    _timeframe_label = "15-Minute" if interval == "15m" else "Daily"
+    print(f"  [RSI Divergence Scan] Mode: {_timeframe_label} (interval={interval}, days={days}, prepost={inc_pre_post})")
 
     def _on_daily_progress(i, tot, sym):
         pct = int((i / tot) * 85)
-        _update_progress("downloading", f"Downloading daily candles... ({i}/{tot})", i, tot, ticker=sym, found=len(results), pct=pct)
+        _update_progress("downloading", f"Downloading {_timeframe_label} candles... ({i}/{tot})", i, tot, ticker=sym, found=len(results), pct=pct)
 
     daily_data = fetch_batch_concurrent(
         tickers, days=days, max_workers=6,
@@ -3301,16 +3304,15 @@ def watchlist_scan(tickers, extended_hours=False):
     start_time = time.time()
 
     total = len(tickers)
-    _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
+    # Dynamic timeframe: 15m when market is open / extended hours, 1d when market is closed
+    interval, days, inc_pre_post = determine_scan_candle_mode(force_extended=extended_hours)
+    _timeframe_label = "15-Minute" if interval == "15m" else "Daily"
+    print(f"  [Watchlist Scan] Mode: {_timeframe_label} (interval={interval}, days={days}, prepost={inc_pre_post})")
 
     def _on_dl_progress(i, tot, sym):
         pct = int((i / tot) * 30) if tot else 0
-        _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=0, pct=pct)
+        _update_progress("downloading", f"Downloading {sym} ({_timeframe_label})...", i, tot, ticker=sym, found=0, pct=pct)
 
-    # Locked to Daily candles ('1d', 280 days) for evaluating multi-day macro indicators & 10-day divergence
-    interval = "1d"
-    days = 280
-    inc_pre_post = "true" if extended_hours else "false"
     daily_data = fetch_batch_concurrent(
         tickers, days=days, max_workers=20,
         on_progress=_on_dl_progress, delay=0.01, interval=interval, includePrePost=inc_pre_post
@@ -3556,14 +3558,18 @@ def options_watchlist_scan(tickers, extended_hours=False):
     total = len(tickers)
     _update_progress("downloading", f"Downloading {total} tickers...", 0, total)
 
+    # Dynamic timeframe: 15m when market is open / extended hours, 1d when market is closed
+    interval, days, inc_pre_post = determine_scan_candle_mode(force_extended=extended_hours)
+    _timeframe_label = "15-Minute" if interval == "15m" else "Daily"
+    print(f"  [Options Watchlist Scan] Mode: {_timeframe_label} (interval={interval}, days={days}, prepost={inc_pre_post})")
+
     def _on_dl_progress(i, tot, sym):
         pct = int((i / tot) * 30) if tot else 0
-        _update_progress("downloading", f"Downloading {sym}...", i, tot, ticker=sym, found=len(results), pct=pct)
+        _update_progress("downloading", f"Downloading {sym} ({_timeframe_label})...", i, tot, ticker=sym, found=len(results), pct=pct)
 
-    inc_pre_post = "true" if extended_hours else "false"
     stock_data = fetch_batch_concurrent(
-        tickers, days=280, max_workers=4,
-        on_progress=_on_dl_progress, delay=0.05, interval="1d", includePrePost=inc_pre_post
+        tickers, days=days, max_workers=6,
+        on_progress=_on_dl_progress, delay=0.05, interval=interval, includePrePost=inc_pre_post
     )
 
     for i, (sym, df) in enumerate(stock_data.items()):

@@ -34,7 +34,7 @@ warnings.filterwarnings("ignore")
 
 _webull_unofficial_failures = 0
 _webull_openapi_failures = 0
-_WEBULL_MAX_FAILURES = 5  # After 5 consecutive failures, trip circuit breaker to use Yahoo Finance fallback
+_WEBULL_MAX_FAILURES = 30  # High resilience threshold to ensure Webull is always the primary data provider
 
 def reset_webull_circuit_breaker():
     """Reset the circuit breaker — call at the start of each new scan."""
