@@ -775,6 +775,26 @@ def watchlist_import_webull():
         traceback.print_exc()
         return jsonify({"ok": False, "error": str(e)}), 500
 
+@app.route("/api/watchlist/screen-criteria", methods=["POST"])
+def watchlist_screen_criteria():
+    """Re-screen universe against criteria (Base Equity, Options Health, ATR) and update watchlist."""
+    global user_watchlist
+    try:
+        from screen_stocks import run_screener
+        results = run_screener()
+        tickers = [r["symbol"] for r in results]
+        user_watchlist = tickers
+        save_watchlist(user_watchlist)
+        return jsonify({
+            "ok": True,
+            "watchlist": user_watchlist,
+            "count": len(user_watchlist)
+        })
+    except Exception as e:
+        print(f"Error running criteria screening: {e}")
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 # ── API: Reset Stuck Scan State ─────────────────────────────────────
 
 @app.route("/api/scan/reset", methods=["POST"])
