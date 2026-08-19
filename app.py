@@ -485,7 +485,8 @@ def scan_rsidiv():
     """Start a full market RSI divergence scan in the background."""
     if not _acquire_scan("RSIDiv-User"):
         return _scan_conflict_response()
-    _reset_progress(status="running", mode="rsidiv")
+    scan_id = str(int(time.time() * 1000))
+    _reset_progress(status="running", mode="rsidiv", scan_id=scan_id)
     scan_progress["phase_label"] = "Initiating scan..."
 
     req_data = request.get_json(silent=True) or {}
@@ -500,6 +501,7 @@ def scan_rsidiv():
             results_data = {
                 "ok": True,
                 "mode": "rsidiv",
+                "scan_id": scan_id,
                 "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
                 "count": len(df) if not df.empty else 0,
                 "results": df.to_dict(orient="records") if not df.empty else [],
@@ -518,7 +520,7 @@ def scan_rsidiv():
             _release_scan()
 
     threading.Thread(target=_run, daemon=False).start()
-    return jsonify({"ok": True, "message": "RSI divergence scan started"})
+    return jsonify({"ok": True, "scan_id": scan_id, "message": "RSI divergence scan started"})
 
 @app.route("/api/scan/rsidiv/results", methods=["GET"])
 def scan_rsidiv_results():
@@ -534,7 +536,8 @@ def scan_watchlist():
     """Start a watchlist reversal scan in the background."""
     if not _acquire_scan("Watchlist-User"):
         return _scan_conflict_response()
-    _reset_progress(status="running", mode="watchlist")
+    scan_id = str(int(time.time() * 1000))
+    _reset_progress(status="running", mode="watchlist", scan_id=scan_id)
     scan_progress["phase_label"] = "Initiating watchlist scan (all criteria)..."
 
     data = request.get_json() or {}
@@ -554,6 +557,7 @@ def scan_watchlist():
             results_data = {
                 "ok": True,
                 "mode": "watchlist",
+                "scan_id": scan_id,
                 "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
                 "count": len(clean_records),
                 "results": clean_records,
@@ -577,7 +581,7 @@ def scan_watchlist():
             _release_scan()
 
     threading.Thread(target=_run, daemon=False).start()
-    return jsonify({"ok": True, "message": "Watchlist scan started (all criteria)"})
+    return jsonify({"ok": True, "scan_id": scan_id, "message": "Watchlist scan started (all criteria)"})
 
 @app.route("/api/scan/watchlist/log", methods=["GET"])
 def get_scan_debug_log():

@@ -113,11 +113,12 @@ def release_scan_lock():
         except RuntimeError:
             pass
 
-def _reset_progress(status="idle", mode=""):
+def _reset_progress(status="idle", mode="", scan_id=None):
     scan_progress.update({
         "status": status, "mode": mode, "phase": "", "phase_label": "",
         "current": 0, "total": 0, "found": 0,
         "ticker": "", "pct": 1 if status == "running" else 0, "eta_seconds": 0,
+        "scan_id": scan_id or str(int(time.time() * 1000)),
         "debug_log": [],
     })
 

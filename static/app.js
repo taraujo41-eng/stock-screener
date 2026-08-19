@@ -701,7 +701,7 @@ function setFilter(filter, btnEl) {
 
 // ── Progress polling (both scan modes) ─────────────────────
 
-function startProgressPolling(scanType = "watchlist") {
+function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
   if (hideTimeout) {
     clearTimeout(hideTimeout);
     hideTimeout = null;
@@ -721,6 +721,7 @@ function startProgressPolling(scanType = "watchlist") {
   }
 
   let maxSeenPct = 0;
+  let hasStartedRunning = false;
 
   let pollCount = 0;
   pollTimer = setInterval(async () => {
@@ -728,6 +729,20 @@ function startProgressPolling(scanType = "watchlist") {
     try {
       const res = await fetch(`/api/scan/progress?t=${Date.now()}`);
       const p = await res.json();
+
+      // If we have an expected scan ID, wait until server reports matching scan_id or is running
+      if (expectedScanId && p.scan_id && p.scan_id !== expectedScanId && pollCount <= 6) {
+        return; // Skip stale progress state from previous scan
+      }
+
+      if (p.status === "running") {
+        hasStartedRunning = true;
+      }
+
+      // Ignore 'done' or 'idle' on initial polls before scan has actually started running
+      if (!hasStartedRunning && pollCount <= 3 && (p.status === "done" || p.status === "idle")) {
+        return;
+      }
 
       // If status is complete, error, poll limit reached (120s safety), or idle after grace period (pollCount > 10):
       const isFinished = p.status === "done" || p.status === "error" || (p.status === "idle" && pollCount > 10) || pollCount > 120;
@@ -852,7 +867,7 @@ async function runScan(scanType = "watchlist") {
         }
         throw new Error(data.error || "Failed to start scan");
       }
-      startProgressPolling(scanType);
+      startProgressPolling(scanType, data.scan_id);
       return;
     } catch (err) {
       if (err.message && err.message.includes("already running")) {
