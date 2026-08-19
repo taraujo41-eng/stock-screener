@@ -22,6 +22,7 @@ from reversal_scanner import (
     scan_progress, _reset_progress
 )
 from datetime import datetime, timedelta
+import time
 import socket
 import threading
 import json
