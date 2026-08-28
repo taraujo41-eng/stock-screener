@@ -19,6 +19,7 @@ from reversal_scanner import (
     tight_spread_options_scan,
     watchlist_scan,
     options_watchlist_scan,
+    unusual_options_full_market_scan,
     scan_progress, _reset_progress
 )
 from datetime import datetime, timedelta
@@ -76,6 +77,7 @@ OPTIONS_SPREADS_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_options_spreads
 WATCHLIST_FILE = os.path.join(SCAN_DATA_DIR, "watchlist.json")
 WATCHLIST_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_watchlist_scan.json")
 OPTIONS_WATCHLIST_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_options_watchlist_scan.json")
+UNUSUAL_OPTIONS_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_unusual_options_scan.json")
 
 DEFAULT_WATCHLIST = ["AAPL", "MSFT", "TSLA", "AMZN", "GOOGL", "META", "NVDA", "NFLX", "AMD", "SPY", "QQQ"]
 
@@ -702,6 +704,55 @@ def scan_options_watchlist_results():
             app.config["LAST_OPTIONS_WATCHLIST_RESULTS"] = results
     if results is None:
         return jsonify({"ok": False, "error": "No scan results available"}), 404
+    return jsonify(results)
+
+# ── API: Unusual Options Flow Scan (async) ──────────────────────────
+
+@app.route("/api/scan/unusual-options", methods=["POST"])
+def scan_unusual_options():
+    """Start a full market unusual options flow scan in the background."""
+    if not _acquire_scan("UnusualOpts-User"):
+        return _scan_conflict_response()
+    scan_id = str(int(time.time() * 1000))
+    _reset_progress(status="running", mode="unusual_options", scan_id=scan_id)
+    scan_progress["phase_label"] = "Initiating unusual options flow scan..."
+
+    req_data = request.get_json(silent=True) or {}
+    extended_hours = req_data.get("extended_hours", False)
+
+    def _run():
+        try:
+            et_tz = get_ny_timezone()
+            df = unusual_options_full_market_scan(extended_hours=extended_hours)
+            results_data = {
+                "ok": True,
+                "mode": "unusual_options",
+                "scan_id": scan_id,
+                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
+                "count": len(df) if not df.empty else 0,
+                "results": df.to_dict(orient="records") if not df.empty else [],
+            }
+            app.config["LAST_UNUSUAL_OPTIONS_RESULTS"] = results_data
+            save_last_scan(results_data, UNUSUAL_OPTIONS_RESULTS_FILE)
+            scan_progress["status"] = "done"
+            scan_progress["mode"] = "unusual_options"
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            app.config["LAST_UNUSUAL_OPTIONS_RESULTS"] = {"ok": False, "error": str(e), "traceback": traceback.format_exc()}
+            scan_progress["status"] = "error"
+            scan_progress["phase_label"] = traceback.format_exc()
+        finally:
+            _release_scan()
+
+    threading.Thread(target=_run, daemon=False).start()
+    return jsonify({"ok": True, "scan_id": scan_id, "message": "Unusual options flow scan started"})
+
+@app.route("/api/scan/unusual-options/results", methods=["GET"])
+def scan_unusual_options_results():
+    results = get_fresh_scan_results("LAST_UNUSUAL_OPTIONS_RESULTS", UNUSUAL_OPTIONS_RESULTS_FILE)
+    if results is None or not isinstance(results, dict):
+        return jsonify({"ok": True, "mode": "unusual_options", "count": 0, "results": [], "timestamp": "Ready"}), 200
     return jsonify(results)
 
 # ── API: Watchlist CRUD ─────────────────────────────────────────────

@@ -506,6 +506,115 @@ function buildOptionsSpreadsCard(item, index) {
   `;
 }
 
+// ── Build an unusual options flow card ─────────────────────
+
+function buildUnusualOptionsCard(item, index) {
+  const isBullish = item.Direction === "Bullish";
+  const dirIcon = isBullish ? "🟢" : "🔴";
+  const dirClass = isBullish ? "opts-dir--bull" : "opts-dir--bear";
+  const typeClass = item.Type === "CALL" ? "opts-type--call" : "opts-type--put";
+
+  const volOi = item["Vol/OI"] || 0;
+  let volOiBadgeClass = "unusual-voloi--normal";
+  let volOiLabel = `${volOi}x`;
+  if (volOi >= 10) {
+    volOiBadgeClass = "unusual-voloi--extreme";
+    volOiLabel = `🔥🔥 ${volOi}x`;
+  } else if (volOi >= 5) {
+    volOiBadgeClass = "unusual-voloi--high";
+    volOiLabel = `🔥 ${volOi}x`;
+  }
+
+  const vol = item.Volume || 0;
+  let volBadge = "";
+  if (vol >= 5000) {
+    volBadge = `<span class="unusual-block-badge">⚡ BLOCK ${vol.toLocaleString()}</span>`;
+  } else if (vol >= 1000) {
+    volBadge = `<span class="unusual-heavy-badge">Heavy ${vol.toLocaleString()}</span>`;
+  }
+
+  const callPct = item["Call Pct"] || 50;
+  let skewBadge = "";
+  if (callPct > 65) {
+    skewBadge = `<span class="unusual-skew-badge unusual-skew--bull">Calls ${callPct}%</span>`;
+  } else if (callPct < 35) {
+    skewBadge = `<span class="unusual-skew-badge unusual-skew--bear">Puts ${100 - callPct}%</span>`;
+  }
+
+  return `
+    <div class="card unusual-card" style="animation-delay: ${Math.min(index * 0.04, 1.2)}s">
+      <div class="card__top">
+        <div class="card__ticker-wrap">
+          <div class="card__ticker card__ticker--clickable" onclick="openChartModal('${item.Ticker}')" title="Click to view chart">${item.Ticker}</div>
+          <button class="btn-chart" onclick="openChartModal('${item.Ticker}')" title="Open Interactive Chart">📈 Chart</button>
+          <div class="opts-dir-badge ${dirClass}">${dirIcon} ${item.Direction}</div>
+        </div>
+        <div class="card__price">$${item["Last Price"].toFixed(2)}</div>
+      </div>
+
+      <div class="unusual-voloi-row">
+        <div class="unusual-voloi-badge ${volOiBadgeClass}">
+          <span class="unusual-voloi-label">Vol/OI</span>
+          <span class="unusual-voloi-value">${volOiLabel}</span>
+        </div>
+        ${volBadge}
+        ${skewBadge}
+      </div>
+
+      <div class="opts-contract">
+        <div class="opts-contract__tag">CONTRACT</div>
+        <div class="opts-contract__details">
+          <span class="opts-contract__type ${typeClass}">${item.Type}</span>
+          <span class="opts-contract__strike">$${item.Strike}</span>
+          <span class="opts-contract__exp">${item.Exp} (${item.DTE}d)</span>
+        </div>
+        <div class="opts-contract__price">@$${item.Mid.toFixed(2)}</div>
+      </div>
+
+      <div class="opts-metrics">
+        <div class="opts-metric">
+          <div class="opts-metric__value">${fmtVolume(item.Volume)}</div>
+          <div class="opts-metric__label">Vol</div>
+        </div>
+        <div class="opts-metric">
+          <div class="opts-metric__value">${fmtVolume(item.OI)}</div>
+          <div class="opts-metric__label">OI</div>
+        </div>
+        <div class="opts-metric">
+          <div class="opts-metric__value">${item.IV}%</div>
+          <div class="opts-metric__label">IV</div>
+        </div>
+        <div class="opts-metric">
+          <div class="opts-metric__value">${item.Spread}</div>
+          <div class="opts-metric__label">Spread</div>
+        </div>
+      </div>
+
+      <div class="opts-liquidity">
+        <div class="opts-liq-item">
+          <span class="opts-liq-label">Bid</span>
+          <span class="opts-liq-value">$${item.Bid.toFixed(2)}</span>
+        </div>
+        <div class="opts-liq-item">
+          <span class="opts-liq-label">Ask</span>
+          <span class="opts-liq-value">$${item.Ask.toFixed(2)}</span>
+        </div>
+        <div class="opts-liq-item">
+          <span class="opts-liq-label">Mkt Vol</span>
+          <span class="opts-liq-value">${fmtVolume(item["Total Opt Vol"] || 0)}</span>
+        </div>
+      </div>
+
+      <div class="card__signals">
+        <div class="signal-row">
+          <span class="signal-row__icon">⚡</span>
+          <span class="pill pill--${isBullish ? 'bull' : 'bear'}">${item["Flow Detail"]}</span>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 
 // ── Render results ─────────────────────────────────────────
 
@@ -513,9 +622,16 @@ function renderResults() {
   const el = document.getElementById("results");
   const isOptionsSpreads = (currentResultMode === "options_spreads");
   const isOptions = (currentResultMode === "options" || currentResultMode === "options_watchlist");
+  const isUnusualOptions = (currentResultMode === "unusual_options");
 
   let filtered = scanData;
-  if (isOptionsSpreads) {
+  if (isUnusualOptions) {
+    if (currentFilter === "bullish") {
+      filtered = scanData.filter(d => d.Type === "CALL");
+    } else if (currentFilter === "bearish") {
+      filtered = scanData.filter(d => d.Type === "PUT");
+    }
+  } else if (isOptionsSpreads) {
     if (currentFilter === "bullish") {
       filtered = scanData.filter(d => d.Type === "CALL");
     } else if (currentFilter === "bearish") {
@@ -553,7 +669,8 @@ function renderResults() {
   }
 
   let cardBuilder = buildCard;
-  if (isOptionsSpreads) cardBuilder = buildOptionsSpreadsCard;
+  if (isUnusualOptions) cardBuilder = buildUnusualOptionsCard;
+  else if (isOptionsSpreads) cardBuilder = buildOptionsSpreadsCard;
   else if (isOptions) cardBuilder = buildOptionsCard;
 
   el.innerHTML = `<div class="cards">${filtered.map(cardBuilder).join("")}</div>`;
@@ -564,8 +681,17 @@ function renderResults() {
 function updateStats() {
   const isOptionsSpreads = (currentResultMode === "options_spreads");
   const isOptions = (currentResultMode === "options" || currentResultMode === "options_watchlist");
+  const isUnusualOptions = (currentResultMode === "unusual_options");
 
-  if (isOptionsSpreads) {
+  if (isUnusualOptions) {
+    const callsCount = scanData.filter(d => d.Type === "CALL").length;
+    const putsCount = scanData.filter(d => d.Type === "PUT").length;
+    document.getElementById("statTotal").textContent = scanData.length;
+    document.getElementById("statBull").textContent = callsCount;
+    document.getElementById("statBear").textContent = putsCount;
+    document.querySelectorAll(".stat__label")[1].textContent = "Calls";
+    document.querySelectorAll(".stat__label")[2].textContent = "Puts";
+  } else if (isOptionsSpreads) {
     const callsCount = scanData.filter(d => d.Type === "CALL").length;
     const putsCount = scanData.filter(d => d.Type === "PUT").length;
     document.getElementById("statTotal").textContent = scanData.length;
@@ -602,8 +728,11 @@ function displayResults(data) {
 
   const isOptionsSpreads = (currentResultMode === "options_spreads");
   const isOptions = (currentResultMode === "options" || currentResultMode === "options_watchlist");
+  const isUnusualOptions = (currentResultMode === "unusual_options");
 
-  if (isOptionsSpreads) {
+  if (isUnusualOptions) {
+    scanData = (data.results || []).sort((a, b) => (b["Vol/OI"] || 0) - (a["Vol/OI"] || 0));
+  } else if (isOptionsSpreads) {
     scanData = (data.results || []).sort((a, b) => (a["Spread (%)"] || 0) - (b["Spread (%)"] || 0));
   } else if (isOptions) {
     scanData = (data.results || []).sort((a, b) => (b["Catalyst Score"] || 0) - (a["Catalyst Score"] || 0));
@@ -617,7 +746,10 @@ function displayResults(data) {
   document.getElementById("tsValue").textContent = data.timestamp;
 
   const badge = document.getElementById("scanBadge");
-  if (data.mode === "rsidiv") {
+  if (data.mode === "unusual_options") {
+    badge.textContent = `🔥 Unusual Options Flow (${data.count || 0} contracts)`;
+    badge.classList.remove("hidden");
+  } else if (data.mode === "rsidiv") {
     badge.textContent = `RSI Divergence Scan (${data.count || 0} setups)`;
     badge.classList.remove("hidden");
   } else if (data.mode === "watchlist") {
@@ -638,7 +770,7 @@ function displayResults(data) {
   document.querySelector('[data-filter="all"]').classList.add("filter-btn--active");
 
   let bullLabel, bearLabel;
-  if (isOptionsSpreads || isOptions) {
+  if (isUnusualOptions || isOptionsSpreads || isOptions) {
     bullLabel = "🟢 Calls";
     bearLabel = "🔴 Puts";
   } else {
@@ -649,7 +781,7 @@ function displayResults(data) {
   document.querySelector('[data-filter="bearish"]').textContent = bearLabel;
 
   const bothBtn = document.querySelector('[data-filter="both"]');
-  if (isOptionsSpreads || isOptions) {
+  if (isUnusualOptions || isOptionsSpreads || isOptions) {
     bothBtn.classList.add("hidden");
   } else {
     bothBtn.classList.remove("hidden");
@@ -669,7 +801,10 @@ function displayResults(data) {
     }
 
     let emptyTitle, emptyText;
-    if (isOptions) {
+    if (isUnusualOptions) {
+      emptyTitle = "No unusual flow detected";
+      emptyText = "No contracts with Vol/OI > 2x found right now.";
+    } else if (isOptions) {
       emptyTitle = "No setups found";
       emptyText = "No options meeting all criteria right now.";
     } else {
@@ -711,7 +846,7 @@ function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
   document.getElementById("progressPct").textContent = "1%";
   document.getElementById("progressFill").style.width = "1%";
 
-  const btnId = scanType === "rsidiv" ? "scanRsiDivBtn" : "scanBtn";
+  const btnId = scanType === "unusual_options" ? "scanUnusualOptsBtn" : (scanType === "rsidiv" ? "scanRsiDivBtn" : "scanBtn");
   const btn = document.getElementById(btnId) || document.getElementById("scanBtn");
   btn.classList.add("scan-btn--loading");
   btn.disabled = true;
@@ -754,7 +889,7 @@ function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
         stopProgressPolling();
 
         if (p.status === "done" || p.status === "idle" || pollCount > 120) {
-          const resultsUrl = scanType === "rsidiv" ? "/api/scan/rsidiv/results" : "/api/scan/watchlist/results";
+          const resultsUrl = scanType === "unusual_options" ? "/api/scan/unusual-options/results" : (scanType === "rsidiv" ? "/api/scan/rsidiv/results" : "/api/scan/watchlist/results");
           const resData = await fetch(`${resultsUrl}?t=${Date.now()}`);
           const data = await resData.json();
           if (data.ok) {
@@ -775,6 +910,10 @@ function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
         if (document.getElementById("scanRsiDivBtn")) {
           document.getElementById("scanRsiDivBtn").classList.remove("scan-btn--loading");
           document.getElementById("scanRsiDivBtn").disabled = false;
+        }
+        if (document.getElementById("scanUnusualOptsBtn")) {
+          document.getElementById("scanUnusualOptsBtn").classList.remove("scan-btn--loading");
+          document.getElementById("scanUnusualOptsBtn").disabled = false;
         }
         return;
       }
@@ -897,6 +1036,59 @@ async function runScan(scanType = "watchlist") {
         btn.classList.remove("scan-btn--loading");
         btn.disabled = false;
       }
+    }
+  }
+}
+
+// ── Unusual Options Flow Scan ─────────────────────────────────
+
+async function runUnusualOptionsScan() {
+  const btn = document.getElementById("scanUnusualOptsBtn");
+  if (btn) {
+    btn.classList.add("scan-btn--loading");
+    btn.disabled = true;
+  }
+
+  document.getElementById("emptyState")?.classList.add("hidden");
+  document.getElementById("results").innerHTML = "";
+
+  document.getElementById("statsBar")?.classList.add("hidden");
+  document.getElementById("timestamp")?.classList.add("hidden");
+  document.getElementById("scanBadge")?.classList.add("hidden");
+  document.getElementById("filters")?.classList.add("hidden");
+
+  const extHours = document.getElementById("extHoursToggle")?.checked || false;
+
+  try {
+    const res = await fetch("/api/scan/unusual-options", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ extended_hours: extHours })
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      if (res.status === 409 || (data.error && data.error.includes("already running"))) {
+        startProgressPolling("unusual_options");
+        return;
+      }
+      throw new Error(data.error || "Failed to start scan");
+    }
+    startProgressPolling("unusual_options", data.scan_id);
+  } catch (err) {
+    if (err.message && err.message.includes("already running")) {
+      startProgressPolling("unusual_options");
+      return;
+    }
+    document.getElementById("results").innerHTML = `
+      <div class="empty-state">
+        <div class="empty-state__icon">⚠️</div>
+        <div class="empty-state__title">Scan error</div>
+        <div class="empty-state__text">${err.message}</div>
+      </div>
+    `;
+    if (btn) {
+      btn.classList.remove("scan-btn--loading");
+      btn.disabled = false;
     }
   }
 }

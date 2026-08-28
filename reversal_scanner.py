@@ -3605,6 +3605,197 @@ def options_watchlist_scan(tickers, extended_hours=False):
 
 
 # =====================================================================
+# Unusual Options Flow — Full Market Scanner
+# =====================================================================
+
+def unusual_options_full_market_scan(tickers=None, extended_hours=False):
+    """
+    Scan the full market (or custom tickers) for unusual options activity.
+
+    For each ticker, fetches the options chain and flags individual contracts where:
+      1. Volume / Open Interest ratio > 2.0  (unusual flow)
+      2. Single-contract volume > 300         (block trade threshold)
+      3. Mid price > $0.10                    (filter out penny options)
+
+    Returns a DataFrame of per-contract results sorted by Vol/OI ratio descending.
+    """
+    _reset_progress(status="running", mode="unusual_options")
+    start_time = time.time()
+
+    # 1. Build ticker universe
+    if tickers is None:
+        _update_progress("init", "Loading ticker universe...", 0, 0, pct=1)
+        tickers = get_us_tickers()
+        _update_progress("init", f"Loaded {len(tickers)} tickers, applying liquidity filter...", 0, len(tickers), pct=3)
+        tickers = prefilter_liquid_optionable(tickers)
+        _update_progress("init", f"Pre-filter done: {len(tickers)} liquid tickers.", 0, len(tickers), pct=5)
+
+    total = len(tickers)
+    results = []
+
+    # 2. Fetch stock prices concurrently for context
+    _update_progress("downloading", "Downloading stock prices...", 0, total, pct=6)
+
+    def _on_price_progress(i, tot, sym):
+        pct = 6 + int((i / max(1, tot)) * 20)
+        _update_progress("downloading", f"Fetching prices... ({i}/{tot})", i, tot, ticker=sym, pct=pct)
+
+    price_data = fetch_batch_concurrent(
+        tickers, days=5, max_workers=8,
+        on_progress=_on_price_progress, delay=0.02, interval="1d", includePrePost="false"
+    )
+
+    # 3. Scan each ticker's options chain
+    for i, sym in enumerate(tickers):
+        pct = 26 + int((i / max(1, total)) * 72)
+        _update_progress("analyzing", f"Scanning {sym} options chain... ({i+1}/{total})", i, total,
+                         ticker=sym, found=len(results), pct=pct)
+        try:
+            chain_meta = fetch_options_chain(sym)
+            if not chain_meta or not chain_meta.get("allChains"):
+                continue
+
+            # Get last price from price data or chain metadata
+            last_price = None
+            if sym in price_data and price_data[sym] is not None and len(price_data[sym]) > 0:
+                last_price = float(price_data[sym]["Close"].iloc[-1])
+            elif chain_meta.get("underlyingPrice"):
+                last_price = float(chain_meta["underlyingPrice"])
+
+            if last_price is None or last_price <= 0:
+                continue
+
+            all_chains = chain_meta.get("allChains", {})
+            expirations = chain_meta.get("expirations", [])
+            now_ts = time.time()
+
+            # Aggregate total call/put volume across all expirations for skew
+            total_call_vol = 0
+            total_put_vol = 0
+
+            for exp_ts in expirations:
+                chain = all_chains.get(exp_ts)
+                if not chain:
+                    continue
+                for c in chain.get("calls", []):
+                    total_call_vol += (c.get("volume") or 0)
+                for p in chain.get("puts", []):
+                    total_put_vol += (p.get("volume") or 0)
+
+            total_opt_vol = total_call_vol + total_put_vol
+            if total_opt_vol < 200:
+                continue  # Skip very illiquid options
+
+            call_pct = total_call_vol / total_opt_vol if total_opt_vol > 0 else 0.5
+
+            # Scan individual contracts
+            for exp_ts in expirations:
+                dte = int((exp_ts - now_ts) / 86400)
+                if dte < 0 or dte > 90:
+                    continue  # Skip expired or very far-out expirations
+
+                exp_str = datetime.fromtimestamp(exp_ts).strftime("%b %d")
+                chain = all_chains.get(exp_ts)
+                if not chain:
+                    continue
+
+                for side_key, side_label in [("calls", "CALL"), ("puts", "PUT")]:
+                    for contract in chain.get(side_key, []):
+                        vol = contract.get("volume") or 0
+                        oi = contract.get("openInterest") or 0
+                        bid = contract.get("bid") or 0
+                        ask = contract.get("ask") or 0
+                        strike = contract.get("strike") or 0
+                        iv = contract.get("impliedVolatility") or 0
+
+                        # Basic filters
+                        if vol < 300:
+                            continue
+                        mid = (bid + ask) / 2 if (bid and ask) else 0
+                        if mid < 0.10:
+                            continue
+
+                        # Vol/OI ratio
+                        vol_oi = vol / oi if oi > 0 else (vol if vol > 0 else 0)
+                        if oi > 0 and vol_oi < 2.0:
+                            continue
+                        if oi == 0 and vol < 500:
+                            continue  # Require higher vol when no OI exists
+
+                        # Spread calculation
+                        spread_pct = ((ask - bid) / mid * 100) if mid > 0 else 999
+                        spread_str = f"${(ask - bid):.2f} ({spread_pct:.0f}%)" if mid > 0 else "—"
+
+                        # Determine direction based on contract type and flow
+                        if side_label == "CALL":
+                            direction = "Bullish"
+                        else:
+                            direction = "Bearish"
+
+                        # Build flow detail
+                        flow_parts = []
+                        if vol_oi >= 10:
+                            flow_parts.append(f"🔥🔥 V/OI {vol_oi:.1f}x")
+                        elif vol_oi >= 5:
+                            flow_parts.append(f"🔥 V/OI {vol_oi:.1f}x")
+                        else:
+                            flow_parts.append(f"V/OI {vol_oi:.1f}x")
+
+                        if vol >= 5000:
+                            flow_parts.append(f"Block {vol:,} vol")
+                        elif vol >= 1000:
+                            flow_parts.append(f"Heavy {vol:,} vol")
+
+                        skew_label = f"Calls {call_pct*100:.0f}%" if call_pct > 0.6 else (f"Puts {(1-call_pct)*100:.0f}%" if call_pct < 0.4 else "")
+                        if skew_label:
+                            flow_parts.append(skew_label)
+
+                        flow_detail = " | ".join(flow_parts)
+
+                        results.append({
+                            "Ticker": sym,
+                            "Direction": direction,
+                            "Type": side_label,
+                            "Strike": strike,
+                            "Exp": exp_str,
+                            "DTE": dte,
+                            "Volume": vol,
+                            "OI": oi,
+                            "Vol/OI": round(vol_oi, 1),
+                            "Bid": round(bid, 2) if bid else 0,
+                            "Ask": round(ask, 2) if ask else 0,
+                            "Mid": round(mid, 2),
+                            "IV": round(iv * 100, 1) if iv and iv < 10 else round(iv, 1) if iv else 0,
+                            "Spread": spread_str,
+                            "Spread_Pct": round(spread_pct, 1) if spread_pct < 999 else 999,
+                            "Flow Detail": flow_detail,
+                            "Last Price": round(last_price, 2),
+                            "Call Pct": round(call_pct * 100, 0),
+                            "Total Opt Vol": total_opt_vol,
+                        })
+
+        except Exception as e:
+            print(f"  [Unusual Options] Error scanning {sym}: {e}")
+            continue
+
+    total_time = time.time() - start_time
+    scan_progress.update({
+        "status": "done", "phase": "complete",
+        "phase_label": f"Done — {len(results)} unusual contracts found",
+        "current": total, "total": total,
+        "found": len(results), "pct": 100, "eta_seconds": 0,
+    })
+
+    print(f"[Done] Unusual options scan: {len(results)} contracts in {total_time:.1f}s")
+    if not results:
+        return pd.DataFrame()
+    df = pd.DataFrame(results)
+    # Sort by Vol/OI descending, then by Volume descending
+    df = df.sort_values(by=["Vol/OI", "Volume"], ascending=[False, False])
+    return df
+
+
+# =====================================================================
 # CLI entry point
 # =====================================================================
 

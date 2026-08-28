@@ -57,7 +57,7 @@
       </div>
 
       <!-- Scan Buttons -->
-      <div style="display: flex; gap: 10px; width: 100%; margin-bottom: 16px;">
+      <div style="display: flex; gap: 10px; width: 100%; margin-bottom: 10px;">
         <button class="scan-btn" id="scanBtn" onclick="runScan('watchlist')" style="flex: 1;">
           <div class="scan-btn__spinner"></div>
           <span class="scan-btn__text">📋 Scan Watchlist</span>
@@ -65,6 +65,12 @@
         <button class="scan-btn" id="scanRsiDivBtn" onclick="runScan('rsidiv')" style="flex: 1; background: linear-gradient(135deg, #6366f1, #818cf8);">
           <div class="scan-btn__spinner"></div>
           <span class="scan-btn__text">📊 RSI Divergence</span>
+        </button>
+      </div>
+      <div style="width: 100%; margin-bottom: 16px;">
+        <button class="scan-btn scan-btn--unusual" id="scanUnusualOptsBtn" onclick="runUnusualOptionsScan()" style="width: 100%; background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 4px 20px rgba(245, 158, 11, 0.35);">
+          <div class="scan-btn__spinner"></div>
+          <span class="scan-btn__text">🔥 Unusual Options Flow</span>
         </button>
       </div>
 
