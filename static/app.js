@@ -551,6 +551,11 @@ function buildUnusualOptionsCard(item, index) {
     skewBadge = `<span class="unusual-skew-badge unusual-skew--bear">Puts ${100 - callPct}%</span>`;
   }
 
+  const isWeekly = (item.DTE || 0) <= 7;
+  const dteBadge = isWeekly 
+    ? `<span class="unusual-dte-badge unusual-dte--weekly">⚡ ${item.DTE}d Weekly</span>`
+    : `<span class="unusual-dte-badge unusual-dte--swing">📈 ${item.DTE}d Swing</span>`;
+
   return `
     <div class="card unusual-card" style="animation-delay: ${Math.min(index * 0.04, 1.2)}s">
       <div class="card__top">
@@ -567,6 +572,7 @@ function buildUnusualOptionsCard(item, index) {
           <span class="unusual-voloi-label">Vol/OI</span>
           <span class="unusual-voloi-value">${volOiLabel}</span>
         </div>
+        ${dteBadge}
         ${premBadge}
         ${volBadge}
         ${skewBadge}
@@ -641,6 +647,12 @@ function renderResults() {
       filtered = scanData.filter(d => d.Type === "CALL");
     } else if (currentFilter === "bearish") {
       filtered = scanData.filter(d => d.Type === "PUT");
+    }
+
+    if (currentDteFilter === "weekly") {
+      filtered = filtered.filter(d => (d.DTE || 0) <= 7);
+    } else if (currentDteFilter === "swing") {
+      filtered = filtered.filter(d => (d.DTE || 0) > 7);
     }
   } else if (isOptionsSpreads) {
     if (currentFilter === "bullish") {
@@ -780,6 +792,18 @@ function displayResults(data) {
     b.classList.remove("filter-btn--active"));
   document.querySelector('[data-filter="all"]').classList.add("filter-btn--active");
 
+  const dteFiltersEl = document.getElementById("dteFilters");
+  if (dteFiltersEl) {
+    if (isUnusualOptions) {
+      dteFiltersEl.classList.remove("hidden");
+      currentDteFilter = "all";
+      document.querySelectorAll("[data-dte]").forEach(b => b.classList.remove("filter-btn--active"));
+      document.querySelector('[data-dte="all"]')?.classList.add("filter-btn--active");
+    } else {
+      dteFiltersEl.classList.add("hidden");
+    }
+  }
+
   let bullLabel, bearLabel;
   if (isUnusualOptions || isOptionsSpreads || isOptions) {
     bullLabel = "🟢 Calls";
@@ -837,11 +861,21 @@ function displayResults(data) {
 
 // ── Filter handler ─────────────────────────────────────────
 
+let currentDteFilter = "all";
+
 function setFilter(filter, btnEl) {
   currentFilter = filter;
-  document.querySelectorAll(".filter-btn").forEach(b =>
+  document.querySelectorAll("#filters .filter-btn").forEach(b =>
     b.classList.remove("filter-btn--active"));
   btnEl.classList.add("filter-btn--active");
+  renderResults();
+}
+
+function setDteFilter(dteType, btnEl) {
+  currentDteFilter = dteType;
+  document.querySelectorAll("#dteFilters .filter-btn").forEach(b =>
+    b.classList.remove("filter-btn--active"));
+  if (btnEl) btnEl.classList.add("filter-btn--active");
   renderResults();
 }
 

@@ -121,6 +121,13 @@
         <button class="filter-btn" data-filter="both" onclick="setFilter('both', this)">⚡ Both</button>
       </div>
 
+      <!-- DTE Expiration Filter tabs (Unusual Options mode) -->
+      <div class="filters dte-filters hidden" id="dteFilters" style="margin-top: -6px; margin-bottom: 16px;">
+        <button class="filter-btn filter-btn--active" data-dte="all" onclick="setDteFilter('all', this)">All DTE</button>
+        <button class="filter-btn" data-dte="weekly" onclick="setDteFilter('weekly', this)">⚡ Weekly (0–7d)</button>
+        <button class="filter-btn" data-dte="swing" onclick="setDteFilter('swing', this)">📈 Swing (8–60d)</button>
+      </div>
+
       <!-- Results -->
       <div id="results">
         <div class="empty-state" id="emptyState">
