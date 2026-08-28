@@ -529,8 +529,18 @@ function buildUnusualOptionsCard(item, index) {
   let volBadge = "";
   if (vol >= 5000) {
     volBadge = `<span class="unusual-block-badge">⚡ BLOCK ${vol.toLocaleString()}</span>`;
-  } else if (vol >= 1000) {
+  } else if (vol >= 1500) {
     volBadge = `<span class="unusual-heavy-badge">Heavy ${vol.toLocaleString()}</span>`;
+  }
+
+  const premStr = item.Premium_Str || (item.Premium ? `$${Math.round(item.Premium / 1000)}K` : "");
+  let premBadge = "";
+  if (item.Premium >= 500000) {
+    premBadge = `<span class="unusual-prem-badge unusual-prem--whale">🐋 ${premStr}</span>`;
+  } else if (item.Premium >= 100000) {
+    premBadge = `<span class="unusual-prem-badge unusual-prem--high">💰 ${premStr}</span>`;
+  } else if (premStr) {
+    premBadge = `<span class="unusual-prem-badge unusual-prem--med">💵 ${premStr}</span>`;
   }
 
   const callPct = item["Call Pct"] || 50;
@@ -557,6 +567,7 @@ function buildUnusualOptionsCard(item, index) {
           <span class="unusual-voloi-label">Vol/OI</span>
           <span class="unusual-voloi-value">${volOiLabel}</span>
         </div>
+        ${premBadge}
         ${volBadge}
         ${skewBadge}
       </div>
