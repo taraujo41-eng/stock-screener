@@ -3688,19 +3688,14 @@ def unusual_options_full_market_scan(tickers=None, extended_hours=False):
 
             call_pct = total_call_vol / total_opt_vol if total_opt_vol > 0 else 0.5
 
-            # Scan individual contracts with Calibrated Flow Filters:
-            # 1. 0 <= DTE <= 45 (captures front weekly flow + monthly swings)
-            # 2. Strike within 25% of spot (relevant moneyness)
-            # 3. Mid price >= $0.15 (filters out penny lotto tickets)
-            # 4. Premium Traded >= $25,000 (substantial capital commitment)
-            # 5. Vol / OI ratio >= 2.0x
-            # 6. Spread <= 30% of mid price (tradable liquidity)
+            # Scan individual contracts across all available expirations (0 to 60 DTE)
             ticker_candidates = []
 
+            # 1. First process any Webull chain expirations
             for exp_ts in expirations:
                 dte = int((exp_ts - now_ts) / 86400)
-                if dte < 0 or dte > 45:
-                    continue  # Filter: 0 to 45 DTE
+                if dte < 0 or dte > 60:
+                    continue
 
                 exp_str = datetime.fromtimestamp(exp_ts).strftime("%b %d")
                 chain = all_chains.get(exp_ts)
@@ -3716,47 +3711,37 @@ def unusual_options_full_market_scan(tickers=None, extended_hours=False):
                         strike = contract.get("strike") or 0
                         iv = contract.get("impliedVolatility") or 0
 
-                        # Filter: Strike within 25% of stock price
                         if strike <= 0 or abs(strike - last_price) / last_price > 0.25:
                             continue
-
-                        # Filter: Basic volume & mid price threshold
-                        if vol < 500:
+                        if vol < 300:
                             continue
                         mid = (bid + ask) / 2 if (bid and ask) else 0
                         if mid < 0.15:
                             continue
 
-                        # Filter: Premium Traded (Dollars) >= $25,000
                         premium_dollars = vol * mid * 100
-                        if premium_dollars < 25000:
+                        if premium_dollars < 20000:
                             continue
 
-                        # Filter: Vol/OI ratio >= 2.0x
                         vol_oi = vol / oi if oi > 0 else (vol if vol > 0 else 0)
                         if oi > 0 and vol_oi < 2.0:
                             continue
-                        if oi == 0 and (vol < 1000 or premium_dollars < 50000):
+                        if oi == 0 and (vol < 800 or premium_dollars < 40000):
                             continue
 
-                        # Filter: Spread <= 30% (or max $0.20 width for cheap contracts)
                         spread_dollars = ask - bid
                         spread_pct = ((spread_dollars) / mid * 100) if mid > 0 else 999
                         if spread_pct > 30.0 and spread_dollars > 0.20:
                             continue
 
                         spread_str = f"${spread_dollars:.2f} ({spread_pct:.0f}%)" if mid > 0 else "—"
-
-                        # Determine direction based on contract type
                         direction = "Bullish" if side_label == "CALL" else "Bearish"
 
-                        # Format premium string
                         if premium_dollars >= 1_000_000:
                             prem_str = f"${premium_dollars / 1_000_000:.2f}M"
                         else:
                             prem_str = f"${premium_dollars / 1_000:.0f}K"
 
-                        # Build flow detail string
                         flow_parts = []
                         if premium_dollars >= 500_000:
                             flow_parts.append(f"🐋 WHALE {prem_str}")
@@ -3807,10 +3792,128 @@ def unusual_options_full_market_scan(tickers=None, extended_hours=False):
                             "Total Opt Vol": total_opt_vol,
                         })
 
-            # Keep top 2 highest-premium unusual contracts per ticker
+            # 2. Check yfinance options for swing expirations (> 7 DTE)
+            has_swing = any(c["DTE"] > 7 for c in ticker_candidates)
+            if not has_swing:
+                try:
+                    import yfinance as yf
+                    tk_yf = yf.Ticker(sym)
+                    yf_exps = tk_yf.options
+                    if yf_exps:
+                        now_dt = datetime.now()
+                        for exp_s in yf_exps:
+                            try:
+                                exp_dt = datetime.strptime(exp_s, "%Y-%m-%d")
+                                dte = (exp_dt - now_dt).days
+                                if dte <= 7:
+                                    continue
+                                if dte > 60:
+                                    break  # Expirations are sorted, stop once beyond 60 DTE
+                                exp_str = exp_dt.strftime("%b %d")
+                                chain_yf = tk_yf.option_chain(exp_s)
+                                
+                                for side_key, side_label in [("calls", "CALL"), ("puts", "PUT")]:
+                                    df_side = getattr(chain_yf, side_key, None)
+                                    if df_side is None or df_side.empty:
+                                        continue
+                                    for _, row in df_side.iterrows():
+                                        strike = float(row.get("strike") or 0)
+                                        vol = 0 if pd.isna(row.get("volume")) else int(row.get("volume"))
+                                        oi = 0 if pd.isna(row.get("openInterest")) else int(row.get("openInterest"))
+                                        bid = 0.0 if pd.isna(row.get("bid")) else float(row.get("bid"))
+                                        ask = 0.0 if pd.isna(row.get("ask")) else float(row.get("ask"))
+                                        last_p = 0.0 if pd.isna(row.get("lastPrice")) else float(row.get("lastPrice"))
+                                        iv = 0.0 if pd.isna(row.get("impliedVolatility")) else float(row.get("impliedVolatility"))
+
+                                        if strike <= 0 or abs(strike - last_price) / last_price > 0.25:
+                                            continue
+                                        if vol < 300:
+                                            continue
+                                        mid = (bid + ask) / 2 if (bid > 0 and ask > 0) else last_p
+                                        if mid < 0.15:
+                                            continue
+
+                                        premium_dollars = vol * mid * 100
+                                        if premium_dollars < 20000:
+                                            continue
+
+                                        vol_oi = vol / oi if oi > 0 else (vol if vol > 0 else 0)
+                                        if oi > 0 and vol_oi < 2.0:
+                                            continue
+                                        if oi == 0 and (vol < 800 or premium_dollars < 40000):
+                                            continue
+
+                                        spread_dollars = ask - bid if (bid > 0 and ask > 0) else 0.10
+                                        spread_pct = ((spread_dollars) / mid * 100) if mid > 0 else 999
+                                        if spread_pct > 30.0 and spread_dollars > 0.20:
+                                            continue
+
+                                        spread_str = f"${spread_dollars:.2f} ({spread_pct:.0f}%)" if mid > 0 else "—"
+                                        direction = "Bullish" if side_label == "CALL" else "Bearish"
+
+                                        if premium_dollars >= 1_000_000:
+                                            prem_str = f"${premium_dollars / 1_000_000:.2f}M"
+                                        else:
+                                            prem_str = f"${premium_dollars / 1_000:.0f}K"
+
+                                        flow_parts = [f"📈 Swing {dte}d"]
+                                        if premium_dollars >= 500_000:
+                                            flow_parts.append(f"🐋 WHALE {prem_str}")
+                                        elif premium_dollars >= 100_000:
+                                            flow_parts.append(f"💰 {prem_str} Flow")
+                                        else:
+                                            flow_parts.append(f"{prem_str} Prem")
+
+                                        if vol_oi >= 10:
+                                            flow_parts.append(f"🔥🔥 V/OI {vol_oi:.1f}x")
+                                        elif vol_oi >= 5:
+                                            flow_parts.append(f"🔥 V/OI {vol_oi:.1f}x")
+                                        else:
+                                            flow_parts.append(f"V/OI {vol_oi:.1f}x")
+
+                                        if vol >= 5000:
+                                            flow_parts.append(f"Block {vol:,}")
+                                        elif vol >= 1500:
+                                            flow_parts.append(f"Heavy {vol:,}")
+
+                                        flow_detail = " | ".join(flow_parts)
+
+                                        ticker_candidates.append({
+                                            "Ticker": sym,
+                                            "Direction": direction,
+                                            "Type": side_label,
+                                            "Strike": strike,
+                                            "Exp": exp_str,
+                                            "DTE": dte,
+                                            "Volume": vol,
+                                            "OI": oi,
+                                            "Vol/OI": round(vol_oi, 1),
+                                            "Premium": round(premium_dollars, 0),
+                                            "Premium_Str": prem_str,
+                                            "Bid": round(bid, 2) if bid else 0,
+                                            "Ask": round(ask, 2) if ask else 0,
+                                            "Mid": round(mid, 2),
+                                            "IV": round(iv * 100, 1) if iv and iv < 10 else round(iv, 1) if iv else 0,
+                                            "Spread": spread_str,
+                                            "Spread_Pct": round(spread_pct, 1) if spread_pct < 999 else 999,
+                                            "Flow Detail": flow_detail,
+                                            "Last Price": round(last_price, 2),
+                                            "Call Pct": round(call_pct * 100, 0),
+                                            "Total Opt Vol": total_opt_vol,
+                                        })
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+            # Separate into Weeklies (0-7 DTE) and Swings (8-60 DTE) so both are represented
             if ticker_candidates:
-                ticker_candidates.sort(key=lambda x: (x["Premium"], x["Vol/OI"]), reverse=True)
-                results.extend(ticker_candidates[:2])
+                w_list = [c for c in ticker_candidates if c["DTE"] <= 7]
+                s_list = [c for c in ticker_candidates if c["DTE"] > 7]
+                w_list.sort(key=lambda x: (x["Premium"], x["Vol/OI"]), reverse=True)
+                s_list.sort(key=lambda x: (x["Premium"], x["Vol/OI"]), reverse=True)
+                results.extend(w_list[:2])
+                results.extend(s_list[:2])
 
         except Exception as e:
             print(f"  [Unusual Options] Error scanning {sym}: {e}")
@@ -3828,9 +3931,12 @@ def unusual_options_full_market_scan(tickers=None, extended_hours=False):
     if not results:
         return pd.DataFrame()
     df = pd.DataFrame(results)
-    # Sort by Premium descending and Vol/OI descending, cap at Top 50
-    df = df.sort_values(by=["Premium", "Vol/OI"], ascending=[False, False]).head(50)
-    return df
+    
+    # Balance and return top weeklies + top swings
+    w_df = df[df["DTE"] <= 7].sort_values(by=["Premium", "Vol/OI"], ascending=[False, False]).head(30)
+    s_df = df[df["DTE"] > 7].sort_values(by=["Premium", "Vol/OI"], ascending=[False, False]).head(30)
+    final_df = pd.concat([w_df, s_df]).drop_duplicates().sort_values(by=["Premium", "Vol/OI"], ascending=[False, False])
+    return final_df
 
 
 # =====================================================================
