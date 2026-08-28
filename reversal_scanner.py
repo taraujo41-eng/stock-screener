@@ -3688,19 +3688,19 @@ def unusual_options_full_market_scan(tickers=None, extended_hours=False):
 
             call_pct = total_call_vol / total_opt_vol if total_opt_vol > 0 else 0.5
 
-            # Scan individual contracts with Institutional Flow Filters:
-            # 1. 3 <= DTE <= 60 (swing/catalyst timeframe)
-            # 2. Strike within 20% of spot (relevant moneyness)
-            # 3. Mid price >= $0.20 (filter out penny lottery tickets)
-            # 4. Premium Traded (Vol * Mid * 100) >= $50,000 (real institutional capital)
-            # 5. Vol / OI ratio >= 3.0x (or >= 1,500 vol for brand new contracts)
-            # 6. Spread <= 25% of mid price (tradable liquidity)
+            # Scan individual contracts with Calibrated Flow Filters:
+            # 1. 0 <= DTE <= 45 (captures front weekly flow + monthly swings)
+            # 2. Strike within 25% of spot (relevant moneyness)
+            # 3. Mid price >= $0.15 (filters out penny lotto tickets)
+            # 4. Premium Traded >= $25,000 (substantial capital commitment)
+            # 5. Vol / OI ratio >= 2.0x
+            # 6. Spread <= 30% of mid price (tradable liquidity)
             ticker_candidates = []
 
             for exp_ts in expirations:
                 dte = int((exp_ts - now_ts) / 86400)
-                if dte < 3 or dte > 60:
-                    continue  # Filter: only 3 to 60 DTE
+                if dte < 0 or dte > 45:
+                    continue  # Filter: 0 to 45 DTE
 
                 exp_str = datetime.fromtimestamp(exp_ts).strftime("%b %d")
                 chain = all_chains.get(exp_ts)
@@ -3716,33 +3716,33 @@ def unusual_options_full_market_scan(tickers=None, extended_hours=False):
                         strike = contract.get("strike") or 0
                         iv = contract.get("impliedVolatility") or 0
 
-                        # Filter: Strike within 20% of stock price
-                        if strike <= 0 or abs(strike - last_price) / last_price > 0.20:
+                        # Filter: Strike within 25% of stock price
+                        if strike <= 0 or abs(strike - last_price) / last_price > 0.25:
                             continue
 
                         # Filter: Basic volume & mid price threshold
                         if vol < 500:
                             continue
                         mid = (bid + ask) / 2 if (bid and ask) else 0
-                        if mid < 0.20:
+                        if mid < 0.15:
                             continue
 
-                        # Filter: Premium Traded (Dollars) >= $50,000
+                        # Filter: Premium Traded (Dollars) >= $25,000
                         premium_dollars = vol * mid * 100
-                        if premium_dollars < 50000:
+                        if premium_dollars < 25000:
                             continue
 
-                        # Filter: Vol/OI ratio >= 3.0x
+                        # Filter: Vol/OI ratio >= 2.0x
                         vol_oi = vol / oi if oi > 0 else (vol if vol > 0 else 0)
-                        if oi > 0 and vol_oi < 3.0:
+                        if oi > 0 and vol_oi < 2.0:
                             continue
-                        if oi == 0 and (vol < 1200 or premium_dollars < 75000):
+                        if oi == 0 and (vol < 1000 or premium_dollars < 50000):
                             continue
 
-                        # Filter: Spread <= 25% (or max $0.15 width for cheap contracts)
+                        # Filter: Spread <= 30% (or max $0.20 width for cheap contracts)
                         spread_dollars = ask - bid
                         spread_pct = ((spread_dollars) / mid * 100) if mid > 0 else 999
-                        if spread_pct > 25.0 and spread_dollars > 0.15:
+                        if spread_pct > 30.0 and spread_dollars > 0.20:
                             continue
 
                         spread_str = f"${spread_dollars:.2f} ({spread_pct:.0f}%)" if mid > 0 else "—"
