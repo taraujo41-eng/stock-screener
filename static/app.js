@@ -71,6 +71,8 @@ function hideAuxUI() {
   document.getElementById("statsBar").classList.add("hidden");
   document.getElementById("timestamp").classList.add("hidden");
   document.getElementById("filters").classList.add("hidden");
+  document.getElementById("dteFilters")?.classList.add("hidden");
+  document.getElementById("flowTierFilters")?.classList.add("hidden");
   document.getElementById("scanBadge").classList.add("hidden");
 }
 
@@ -654,6 +656,14 @@ function renderResults() {
     } else if (currentDteFilter === "swing") {
       filtered = filtered.filter(d => (d.DTE || 0) > 7);
     }
+
+    if (currentFlowTierFilter === "100k") {
+      filtered = filtered.filter(d => (d.Premium || 0) >= 100000);
+    } else if (currentFlowTierFilter === "whale") {
+      filtered = filtered.filter(d => (d.Premium || 0) >= 500000);
+    } else if (currentFlowTierFilter === "extreme") {
+      filtered = filtered.filter(d => (d["Vol/OI"] || 0) >= 5.0);
+    }
   } else if (isOptionsSpreads) {
     if (currentFilter === "bullish") {
       filtered = scanData.filter(d => d.Type === "CALL");
@@ -793,6 +803,7 @@ function displayResults(data) {
   document.querySelector('[data-filter="all"]').classList.add("filter-btn--active");
 
   const dteFiltersEl = document.getElementById("dteFilters");
+  const flowTierFiltersEl = document.getElementById("flowTierFilters");
   if (dteFiltersEl) {
     if (isUnusualOptions) {
       dteFiltersEl.classList.remove("hidden");
@@ -801,6 +812,16 @@ function displayResults(data) {
       document.querySelector('[data-dte="all"]')?.classList.add("filter-btn--active");
     } else {
       dteFiltersEl.classList.add("hidden");
+    }
+  }
+  if (flowTierFiltersEl) {
+    if (isUnusualOptions) {
+      flowTierFiltersEl.classList.remove("hidden");
+      currentFlowTierFilter = "all";
+      document.querySelectorAll("[data-tier]").forEach(b => b.classList.remove("filter-btn--active"));
+      document.querySelector('[data-tier="all"]')?.classList.add("filter-btn--active");
+    } else {
+      flowTierFiltersEl.classList.add("hidden");
     }
   }
 
@@ -862,6 +883,7 @@ function displayResults(data) {
 // ── Filter handler ─────────────────────────────────────────
 
 let currentDteFilter = "all";
+let currentFlowTierFilter = "all";
 
 function setFilter(filter, btnEl) {
   currentFilter = filter;
@@ -874,6 +896,14 @@ function setFilter(filter, btnEl) {
 function setDteFilter(dteType, btnEl) {
   currentDteFilter = dteType;
   document.querySelectorAll("#dteFilters .filter-btn").forEach(b =>
+    b.classList.remove("filter-btn--active"));
+  if (btnEl) btnEl.classList.add("filter-btn--active");
+  renderResults();
+}
+
+function setFlowTierFilter(tier, btnEl) {
+  currentFlowTierFilter = tier;
+  document.querySelectorAll("#flowTierFilters .filter-btn").forEach(b =>
     b.classList.remove("filter-btn--active"));
   if (btnEl) btnEl.classList.add("filter-btn--active");
   renderResults();

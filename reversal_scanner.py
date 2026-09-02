@@ -3711,22 +3711,22 @@ def unusual_options_full_market_scan(tickers=None, extended_hours=False):
                         strike = contract.get("strike") or 0
                         iv = contract.get("impliedVolatility") or 0
 
-                        if strike <= 0 or abs(strike - last_price) / last_price > 0.25:
+                        if strike <= 0 or abs(strike - last_price) / last_price > 0.15:
                             continue
-                        if vol < 300:
+                        if vol < 500:
                             continue
                         mid = (bid + ask) / 2 if (bid and ask) else 0
-                        if mid < 0.15:
+                        if mid < 0.20:
                             continue
 
                         premium_dollars = vol * mid * 100
-                        if premium_dollars < 20000:
+                        if premium_dollars < 50000:
                             continue
 
                         vol_oi = vol / oi if oi > 0 else (vol if vol > 0 else 0)
-                        if oi > 0 and vol_oi < 2.0:
+                        if oi > 0 and vol_oi < 3.0:
                             continue
-                        if oi == 0 and (vol < 800 or premium_dollars < 40000):
+                        if oi == 0 and (vol < 1000 or premium_dollars < 100000):
                             continue
 
                         spread_dollars = ask - bid
@@ -3825,22 +3825,22 @@ def unusual_options_full_market_scan(tickers=None, extended_hours=False):
                                         last_p = 0.0 if pd.isna(row.get("lastPrice")) else float(row.get("lastPrice"))
                                         iv = 0.0 if pd.isna(row.get("impliedVolatility")) else float(row.get("impliedVolatility"))
 
-                                        if strike <= 0 or abs(strike - last_price) / last_price > 0.25:
+                                        if strike <= 0 or abs(strike - last_price) / last_price > 0.15:
                                             continue
-                                        if vol < 300:
+                                        if vol < 500:
                                             continue
                                         mid = (bid + ask) / 2 if (bid > 0 and ask > 0) else last_p
-                                        if mid < 0.15:
+                                        if mid < 0.20:
                                             continue
 
                                         premium_dollars = vol * mid * 100
-                                        if premium_dollars < 20000:
+                                        if premium_dollars < 50000:
                                             continue
 
                                         vol_oi = vol / oi if oi > 0 else (vol if vol > 0 else 0)
-                                        if oi > 0 and vol_oi < 2.0:
+                                        if oi > 0 and vol_oi < 3.0:
                                             continue
-                                        if oi == 0 and (vol < 800 or premium_dollars < 40000):
+                                        if oi == 0 and (vol < 1000 or premium_dollars < 100000):
                                             continue
 
                                         spread_dollars = ask - bid if (bid > 0 and ask > 0) else 0.10
@@ -3912,8 +3912,8 @@ def unusual_options_full_market_scan(tickers=None, extended_hours=False):
                 s_list = [c for c in ticker_candidates if c["DTE"] > 7]
                 w_list.sort(key=lambda x: (x["Premium"], x["Vol/OI"]), reverse=True)
                 s_list.sort(key=lambda x: (x["Premium"], x["Vol/OI"]), reverse=True)
-                results.extend(w_list[:2])
-                results.extend(s_list[:2])
+                results.extend(w_list[:1])
+                results.extend(s_list[:1])
 
         except Exception as e:
             print(f"  [Unusual Options] Error scanning {sym}: {e}")
@@ -3932,10 +3932,10 @@ def unusual_options_full_market_scan(tickers=None, extended_hours=False):
         return pd.DataFrame()
     df = pd.DataFrame(results)
     
-    # Balance and return top weeklies + top swings
-    w_df = df[df["DTE"] <= 7].sort_values(by=["Premium", "Vol/OI"], ascending=[False, False]).head(30)
-    s_df = df[df["DTE"] > 7].sort_values(by=["Premium", "Vol/OI"], ascending=[False, False]).head(30)
-    final_df = pd.concat([w_df, s_df]).drop_duplicates().sort_values(by=["Premium", "Vol/OI"], ascending=[False, False])
+    # Balance and return top weeklies + top swings (capped at top 10 weeklies and top 10 swings, max 20 total)
+    w_df = df[df["DTE"] <= 7].sort_values(by=["Premium", "Vol/OI"], ascending=[False, False]).head(10)
+    s_df = df[df["DTE"] > 7].sort_values(by=["Premium", "Vol/OI"], ascending=[False, False]).head(10)
+    final_df = pd.concat([w_df, s_df]).drop_duplicates().sort_values(by=["Premium", "Vol/OI"], ascending=[False, False]).head(20)
     return final_df
 
 

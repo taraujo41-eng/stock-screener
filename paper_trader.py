@@ -353,7 +353,7 @@ class PaperTrader:
             logger.error(f"[PaperTrader] get_positions error: {e}")
             return []
 
-    def get_orders(self, count=20):
+    def get_orders(self, count=20, status=None, **kwargs):
         """Get recent order history."""
         if not self._logged_in:
             if not self.login():

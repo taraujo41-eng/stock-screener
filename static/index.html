@@ -122,10 +122,18 @@
       </div>
 
       <!-- DTE Expiration Filter tabs (Unusual Options mode) -->
-      <div class="filters dte-filters hidden" id="dteFilters" style="margin-top: -6px; margin-bottom: 16px;">
+      <div class="filters dte-filters hidden" id="dteFilters" style="margin-top: -6px; margin-bottom: 8px;">
         <button class="filter-btn filter-btn--active" data-dte="all" onclick="setDteFilter('all', this)">All DTE</button>
         <button class="filter-btn" data-dte="weekly" onclick="setDteFilter('weekly', this)">⚡ Weekly (0–7d)</button>
         <button class="filter-btn" data-dte="swing" onclick="setDteFilter('swing', this)">📈 Swing (8–60d)</button>
+      </div>
+
+      <!-- Flow Size / Vol/OI Filter tabs (Unusual Options mode) -->
+      <div class="filters flow-tier-filters hidden" id="flowTierFilters" style="margin-top: -4px; margin-bottom: 16px;">
+        <button class="filter-btn filter-btn--active" data-tier="all" onclick="setFlowTierFilter('all', this)">All Flow Sizes</button>
+        <button class="filter-btn" data-tier="100k" onclick="setFlowTierFilter('100k', this)">💰 $100k+ Flow</button>
+        <button class="filter-btn" data-tier="whale" onclick="setFlowTierFilter('whale', this)">🐋 $500k+ Whales</button>
+        <button class="filter-btn" data-tier="extreme" onclick="setFlowTierFilter('extreme', this)">🔥 Vol/OI ≥ 5x</button>
       </div>
 
       <!-- Results -->

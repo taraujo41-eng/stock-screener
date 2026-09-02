@@ -1179,7 +1179,7 @@ def paper_orders():
     try:
         from paper_trader import get_paper_trader
         pt = get_paper_trader()
-        orders = pt.get_orders(status="All", count=50)
+        orders = pt.get_orders(count=50)
         return jsonify({"orders": orders}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500

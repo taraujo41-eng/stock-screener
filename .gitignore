@@ -16,3 +16,4 @@ last_*_scan.json
 alerted_today.json
 scan_progress.json
 trade_log.json
+cloudflared
