@@ -3742,7 +3742,7 @@ def unusual_options_full_market_scan(tickers=None, extended_hours=False):
                         else:
                             prem_str = f"${premium_dollars / 1_000:.0f}K"
 
-                        flow_parts = []
+                        flow_parts = ["⚡ SWEEP"]
                         if premium_dollars >= 500_000:
                             flow_parts.append(f"🐋 WHALE {prem_str}")
                         elif premium_dollars >= 100_000:
@@ -3757,10 +3757,10 @@ def unusual_options_full_market_scan(tickers=None, extended_hours=False):
                         else:
                             flow_parts.append(f"V/OI {vol_oi:.1f}x")
 
-                        if vol >= 5000:
-                            flow_parts.append(f"Block {vol:,}")
-                        elif vol >= 1500:
+                        if vol >= 2500:
                             flow_parts.append(f"Heavy {vol:,}")
+                        elif vol >= 500:
+                            flow_parts.append(f"{vol:,} contracts")
 
                         skew_label = f"Calls {call_pct*100:.0f}%" if call_pct > 0.65 else (f"Puts {(1-call_pct)*100:.0f}%" if call_pct < 0.35 else "")
                         if skew_label:
@@ -3772,6 +3772,7 @@ def unusual_options_full_market_scan(tickers=None, extended_hours=False):
                             "Ticker": sym,
                             "Direction": direction,
                             "Type": side_label,
+                            "Order_Type": "SWEEP",
                             "Strike": strike,
                             "Exp": exp_str,
                             "DTE": dte,
@@ -3856,7 +3857,7 @@ def unusual_options_full_market_scan(tickers=None, extended_hours=False):
                                         else:
                                             prem_str = f"${premium_dollars / 1_000:.0f}K"
 
-                                        flow_parts = [f"📈 Swing {dte}d"]
+                                        flow_parts = ["⚡ SWEEP", f"📈 Swing {dte}d"]
                                         if premium_dollars >= 500_000:
                                             flow_parts.append(f"🐋 WHALE {prem_str}")
                                         elif premium_dollars >= 100_000:
@@ -3871,10 +3872,10 @@ def unusual_options_full_market_scan(tickers=None, extended_hours=False):
                                         else:
                                             flow_parts.append(f"V/OI {vol_oi:.1f}x")
 
-                                        if vol >= 5000:
-                                            flow_parts.append(f"Block {vol:,}")
-                                        elif vol >= 1500:
+                                        if vol >= 2500:
                                             flow_parts.append(f"Heavy {vol:,}")
+                                        elif vol >= 500:
+                                            flow_parts.append(f"{vol:,} contracts")
 
                                         flow_detail = " | ".join(flow_parts)
 
@@ -3882,6 +3883,7 @@ def unusual_options_full_market_scan(tickers=None, extended_hours=False):
                                             "Ticker": sym,
                                             "Direction": direction,
                                             "Type": side_label,
+                                            "Order_Type": "SWEEP",
                                             "Strike": strike,
                                             "Exp": exp_str,
                                             "DTE": dte,

@@ -528,11 +528,9 @@ function buildUnusualOptionsCard(item, index) {
   }
 
   const vol = item.Volume || 0;
-  let volBadge = "";
-  if (vol >= 5000) {
-    volBadge = `<span class="unusual-block-badge">⚡ BLOCK ${vol.toLocaleString()}</span>`;
-  } else if (vol >= 1500) {
-    volBadge = `<span class="unusual-heavy-badge">Heavy ${vol.toLocaleString()}</span>`;
+  let volBadge = `<span class="unusual-sweep-badge">⚡ SWEEP</span>`;
+  if (vol >= 2500) {
+    volBadge += ` <span class="unusual-heavy-badge">Heavy ${vol.toLocaleString()}</span>`;
   }
 
   const premStr = item.Premium_Str || (item.Premium ? `$${Math.round(item.Premium / 1000)}K` : "");
@@ -780,7 +778,7 @@ function displayResults(data) {
 
   const badge = document.getElementById("scanBadge");
   if (data.mode === "unusual_options") {
-    badge.textContent = `🔥 Unusual Options Flow (${data.count || 0} contracts)`;
+    badge.textContent = `⚡ Unusual Options Sweeps (${data.count || 0} contracts)`;
     badge.classList.remove("hidden");
   } else if (data.mode === "rsidiv") {
     badge.textContent = `RSI Divergence Scan (${data.count || 0} setups)`;
@@ -858,8 +856,8 @@ function displayResults(data) {
 
     let emptyTitle, emptyText;
     if (isUnusualOptions) {
-      emptyTitle = "No unusual flow detected";
-      emptyText = "No contracts with Vol/OI > 2x found right now.";
+      emptyTitle = "No unusual sweeps detected";
+      emptyText = "No aggressive sweep contracts meeting criteria right now.";
     } else if (isOptions) {
       emptyTitle = "No setups found";
       emptyText = "No options meeting all criteria right now.";
