@@ -918,6 +918,8 @@ function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
   wrap.classList.remove("hidden");
   document.getElementById("progressPct").textContent = "1%";
   document.getElementById("progressFill").style.width = "1%";
+  document.getElementById("progressPhase").textContent = "Initiating scan...";
+  document.getElementById("progressDetail").textContent = "";
 
   const btnId = scanType === "unusual_options" ? "scanUnusualOptsBtn" : (scanType === "rsidiv" ? "scanRsiDivBtn" : "scanBtn");
   const btn = document.getElementById(btnId) || document.getElementById("scanBtn");
@@ -1012,7 +1014,7 @@ function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
       document.getElementById("progressPct").textContent = `${displayPct}%`;
       document.getElementById("progressFill").style.width = `${displayPct}%`;
       document.getElementById("progressDetail").textContent =
-        p.found > 0 ? `${p.found} matches found` : "";
+        p.found > 0 ? `${p.found} matches found` : (p.ticker ? `Processing ${p.ticker}` : "");
       document.getElementById("progressEta").textContent = fmtEta(p.eta_seconds);
 
       const fill = document.getElementById("progressFill");

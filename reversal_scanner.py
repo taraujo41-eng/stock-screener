@@ -297,7 +297,7 @@ def prefilter_liquid_optionable(tickers, MIN_PRICE=10.0, MIN_AVG_VOLUME=500_000)
     """
     if not tickers:
         return []
-    if len(tickers) <= 200:
+    if len(tickers) <= 500:
         return sorted(tickers)
 
     print(f"  [Prefilter] Screening {len(tickers)} tickers for liquidity (Price >= ${MIN_PRICE}, AvgVol >= {MIN_AVG_VOLUME:,})...")
@@ -2696,7 +2696,7 @@ def rsi_divergence_full_market_scan(tickers=None, extended_hours=False):
     print(f"  [RSI Divergence Scan] Mode: {_timeframe_label} (interval={interval}, days={days}, prepost={inc_pre_post})")
 
     def _on_daily_progress(i, tot, sym):
-        pct = int((i / tot) * 85)
+        pct = 5 + (int((i / tot) * 80) if tot else 0)
         _update_progress("downloading", f"Downloading {_timeframe_label} candles... ({i}/{tot})", i, tot, ticker=sym, found=len(results), pct=pct)
 
     daily_data = fetch_batch_concurrent(
