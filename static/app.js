@@ -938,30 +938,35 @@ function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
       const res = await fetch(`/api/scan/progress?t=${Date.now()}`);
       const p = await res.json();
 
-      // If we have an expected scan ID, wait until server reports matching scan_id or is running
-      if (expectedScanId && p.scan_id && p.scan_id !== expectedScanId && pollCount <= 6) {
-        return; // Skip stale progress state from previous scan
+      // If we have an expected scan ID, ignore progress events from other scans or background cycles
+      if (expectedScanId && p.scan_id && p.scan_id !== expectedScanId) {
+        return; // Skip progress state belonging to another scan
       }
 
       if (p.status === "running") {
-        hasStartedRunning = true;
+        // Also verify the running mode matches the requested scanType if available
+        if (!p.mode || p.mode === scanType || (scanType === "watchlist" && p.mode === "watchlist")) {
+          hasStartedRunning = true;
+        }
       }
 
       // Ignore 'done' or 'idle' on initial polls before scan has actually started running
-      if (!hasStartedRunning && pollCount <= 3 && (p.status === "done" || p.status === "idle")) {
+      if (!hasStartedRunning && pollCount <= 5 && (p.status === "done" || p.status === "idle")) {
         return;
       }
 
-      // If status is complete, error, poll limit reached (120s safety), or idle after grace period (pollCount > 10):
-      const isFinished = p.status === "done" || p.status === "error" || (p.status === "idle" && pollCount > 10) || pollCount > 120;
+      // Complete when server reports done or error for this scan, or max 15-minute safety timeout (600 polls * 1.5s = 900s)
+      const isMatchingMode = !p.mode || p.mode === scanType || (scanType === "watchlist" && p.mode === "watchlist");
+      const isMatchingDone = (p.status === "done") && (!expectedScanId || p.scan_id === expectedScanId) && isMatchingMode;
+      const isFinished = isMatchingDone || p.status === "error" || pollCount > 600;
       if (isFinished) {
-        if (p.status === "done" || (p.status === "idle" && pollCount > 10) || pollCount > 120) {
+        if (isMatchingDone) {
           document.getElementById("progressPct").textContent = "100%";
           document.getElementById("progressFill").style.width = "100%";
         }
         stopProgressPolling();
 
-        if (p.status === "done" || p.status === "idle" || pollCount > 120) {
+        if (isMatchingDone) {
           const resultsUrl = scanType === "unusual_options" ? "/api/scan/unusual-options/results" : (scanType === "rsidiv" ? "/api/scan/rsidiv/results" : "/api/scan/watchlist/results");
           const resData = await fetch(`${resultsUrl}?t=${Date.now()}`);
           const data = await resData.json();
@@ -973,7 +978,15 @@ function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
             <div class="empty-state">
               <div class="empty-state__icon">⚠️</div>
               <div class="empty-state__title">Scan error</div>
-              <div class="empty-state__text">${p.phase_label}</div>
+              <div class="empty-state__text">${p.phase_label || "An error occurred during scan."}</div>
+            </div>
+          `;
+        } else if (pollCount > 600) {
+          document.getElementById("results").innerHTML = `
+            <div class="empty-state">
+              <div class="empty-state__icon">⏱️</div>
+              <div class="empty-state__title">Scan timed out</div>
+              <div class="empty-state__text">The scan is taking longer than expected. Please check back shortly or try again.</div>
             </div>
           `;
         }

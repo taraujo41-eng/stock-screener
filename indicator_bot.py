@@ -467,15 +467,7 @@ def bot_loop():
                 time.sleep(300)
                 continue
 
-            from reversal_scanner import acquire_scan_lock, release_scan_lock, scan_progress, _reset_progress, _update_progress
-            if not acquire_scan_lock("Background-3Sigma-Bot"):
-                logger.info("A user manual scan is currently running — skipping background bot cycle for 60s...")
-                time.sleep(60)
-                continue
-
             logger.info("--- Starting 3-Sigma A+ Reversal Bot Cycle ---")
-            _reset_progress(status="running", mode="3sigma_bot")
-            scan_progress["phase_label"] = "Initiating 3-Sigma Bot scan..."
 
             try:
                 # 1. Determine tickers to scan: Combine all 287 US Optionable tickers AND Watchlist tickers
@@ -505,15 +497,9 @@ def bot_loop():
                 scan_interval = int(os.getenv("SCAN_INTERVAL_3SIGMA", "60"))
                 
                 # 2. Pre-calculate daily bands
-                _update_progress("init", "Pre-calculating daily bands...", 0, len(tickers), pct=5)
                 precalculate_daily_bands(tickers)
                 
                 logger.info(f"Scanning {len(tickers)} tickers in parallel ({candle_interval} candles, 3.0SD Breach + A+ Setups)...")
-                _update_progress("downloading", f"Downloading candles for {len(tickers)} tickers...", 0, len(tickers), pct=10)
-
-                def _on_bot_dl_progress(i, tot, sym):
-                    pct = 10 + int((i / max(1, tot)) * 85)
-                    _update_progress("downloading", f"3-Sigma Bot scanning {sym} ({i}/{tot})...", i, tot, ticker=sym, pct=pct)
 
                 # 3. Download and compute in parallel
                 results = fetch_batch_concurrent(
@@ -523,7 +509,6 @@ def bot_loop():
                     interval=candle_interval,
                     includePrePost="false",
                     process_fn=evaluate_ticker_process,
-                    on_progress=_on_bot_dl_progress,
                     skip_webull=False
                 )
                 
@@ -585,15 +570,9 @@ def bot_loop():
                 except Exception as save_err:
                     logger.warning(f"Could not save 3sigma bot results: {save_err}")
 
-                scan_progress.update({
-                    "status": "done",
-                    "phase": "complete",
-                    "phase_label": f"3-Sigma Bot cycle complete — {triggered_count} new alerts",
-                    "pct": 100
-                })
                 logger.info(f"--- 3-Sigma Bot Cycle Complete. New A+ alerts: {triggered_count}, Suppressed (already alerted today): {skipped_count}. Sleeping for {scan_interval}s ---")
-            finally:
-                release_scan_lock()
+            except Exception as bot_err:
+                logger.error(f"Error during bot scan cycle: {bot_err}")
 
             time.sleep(scan_interval)
             

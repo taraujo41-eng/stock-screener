@@ -1813,10 +1813,10 @@ def _analyze_options_setup(sym, df, iv_history):
                     bear_catalyst += 2
                     bear_reasons.append(f"{news_tag} (+2)")
 
-        # Need at least score 2 on one side to proceed and generate recommended option plays
+        # Need at least score 3 on one side to proceed and generate recommended option plays
         max_catalyst = max(bull_catalyst, bear_catalyst)
         print(f"  {sym}: Bull={bull_catalyst} Bear={bear_catalyst} RSI={rsi_val:.1f} Chg={day_chg_pct:.1f}%")
-        if max_catalyst < 2:
+        if max_catalyst < 3:
             return None
 
         # Determine dominant direction
