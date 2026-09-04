@@ -114,11 +114,13 @@ def release_scan_lock():
             pass
 
 def _reset_progress(status="idle", mode="", scan_id=None):
+    existing_id = scan_progress.get("scan_id") if hasattr(scan_progress, "get") else None
+    active_id = scan_id or (existing_id if status == "running" and existing_id else None) or str(int(time.time() * 1000))
     scan_progress.update({
         "status": status, "mode": mode, "phase": "", "phase_label": "",
         "current": 0, "total": 0, "found": 0,
         "ticker": "", "pct": 1 if status == "running" else 0, "eta_seconds": 0,
-        "scan_id": scan_id or str(int(time.time() * 1000)),
+        "scan_id": active_id,
         "debug_log": [],
     })
 

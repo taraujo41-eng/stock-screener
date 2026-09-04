@@ -938,16 +938,16 @@ function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
       const res = await fetch(`/api/scan/progress?t=${Date.now()}`);
       const p = await res.json();
 
-      // If we have an expected scan ID, ignore progress events from other scans or background cycles
-      if (expectedScanId && p.scan_id && p.scan_id !== expectedScanId) {
-        return; // Skip progress state belonging to another scan
+      // Check if this progress update matches our requested scan mode
+      const isOurMode = !p.mode || p.mode === scanType || (scanType === "watchlist" && p.mode === "watchlist");
+
+      // Only skip if the progress update belongs to an entirely different scan mode
+      if (p.mode && !isOurMode) {
+        return;
       }
 
-      if (p.status === "running") {
-        // Also verify the running mode matches the requested scanType if available
-        if (!p.mode || p.mode === scanType || (scanType === "watchlist" && p.mode === "watchlist")) {
-          hasStartedRunning = true;
-        }
+      if (p.status === "running" && isOurMode) {
+        hasStartedRunning = true;
       }
 
       // Ignore 'done' or 'idle' on initial polls before scan has actually started running
@@ -955,9 +955,8 @@ function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
         return;
       }
 
-      // Complete when server reports done or error for this scan, or max 15-minute safety timeout (600 polls * 1.5s = 900s)
-      const isMatchingMode = !p.mode || p.mode === scanType || (scanType === "watchlist" && p.mode === "watchlist");
-      const isMatchingDone = (p.status === "done") && (!expectedScanId || p.scan_id === expectedScanId) && isMatchingMode;
+      // Complete when server reports done for our mode, error, or max 15-minute safety timeout
+      const isMatchingDone = (p.status === "done") && isOurMode;
       const isFinished = isMatchingDone || p.status === "error" || pollCount > 600;
       if (isFinished) {
         if (isMatchingDone) {
