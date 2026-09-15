@@ -10,11 +10,11 @@ services:
       - SCAN_DATA_DIR=/app/scan_data
       - SKIP_BOT_THREAD=true
     ports:
-      - "5000:5000"
+      - "127.0.0.1:5000:5000"
     volumes:
       - ./conf:/app/conf
       - scan_data:/app/scan_data
-    command: gunicorn app:app --bind 0.0.0.0:5000 --timeout 600 --workers 1 --threads 4
+    command: gunicorn app:app --bind 0.0.0.0:5000 --timeout 600 --workers 1 --threads 4 --max-requests 1000 --max-requests-jitter 100 --keep-alive 5
 
   indicator_bot:
     image: stock_scanner_app:latest

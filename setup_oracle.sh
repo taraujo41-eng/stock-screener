@@ -12,10 +12,9 @@ sudo apt install -y curl git ufw iptables-persistent docker.io docker-compose-v2
 sudo usermod -aG docker $USER
 
 # 3. Configure firewall (Oracle Ubuntu instances use iptables by default)
-echo "🔓 Configuring firewall rules for HTTP (80), HTTPS (443), and App (5000)..."
+echo "🔓 Configuring firewall rules for HTTP (80) and HTTPS (443)..."
 sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
 sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
-sudo iptables -I INPUT 6 -m state --state NEW -p tcp --dport 5000 -j ACCEPT
 sudo netfilter-persistent save
 
 # 4. Enable Docker service
