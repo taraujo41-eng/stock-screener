@@ -3289,8 +3289,8 @@ def tight_spread_options_scan(tickers=None, extended_hours=False):
 # Watchlist Scanners
 # =====================================================================
 
-def watchlist_scan(tickers, extended_hours=False):
-    """Enhanced watchlist scan — runs ALL analysis criteria on watchlist tickers.
+def watchlist_scan(tickers, extended_hours=False, mode="watchlist"):
+    """Enhanced watchlist scan — runs ALL analysis criteria on specified tickers.
 
     Combines results from:
       1. General reversal analysis (_analyze_stock)
@@ -3301,16 +3301,17 @@ def watchlist_scan(tickers, extended_hours=False):
     Results are merged per ticker so each ticker appears at most once with
     all signals, patterns, and option plays aggregated.
     """
-    _reset_progress(status="running", mode="watchlist")
+    _reset_progress(status="running", mode=mode)
     scan_progress["status"] = "running"
-    scan_progress["mode"] = "watchlist"
+    scan_progress["mode"] = mode
     start_time = time.time()
 
     total = len(tickers)
     # Dynamic timeframe: 15m when market is open / extended hours, 1d when market is closed
     interval, days, inc_pre_post = determine_scan_candle_mode(force_extended=extended_hours)
     _timeframe_label = "15-Minute" if interval == "15m" else "Daily"
-    print(f"  [Watchlist Scan] Mode: {_timeframe_label} (interval={interval}, days={days}, prepost={inc_pre_post})")
+    scan_title = "Top 50 Scan" if mode == "top50" else "Watchlist Scan"
+    print(f"  [{scan_title}] Mode: {_timeframe_label} (interval={interval}, days={days}, prepost={inc_pre_post})")
 
     def _on_dl_progress(i, tot, sym):
         pct = int((i / tot) * 30) if tot else 0
@@ -3534,13 +3535,14 @@ def watchlist_scan(tickers, extended_hours=False):
 
     total_time = time.time() - start_time
     scan_progress.update({
-        "status": "done", "mode": "watchlist", "phase": "complete",
+        "status": "done", "mode": mode, "phase": "complete",
         "phase_label": f"Done — {len(merged)} signals found",
         "current": total, "total": total,
         "found": len(merged), "pct": 100, "eta_seconds": 0,
     })
 
-    print(f"[Done] Watchlist scan (all criteria): {len(merged)} signals in {total_time:.1f}s")
+    done_title = "Top 50" if mode == "top50" else "Watchlist"
+    print(f"[Done] {done_title} scan (all criteria): {len(merged)} signals in {total_time:.1f}s")
     if not merged:
         return pd.DataFrame()
     df = pd.DataFrame(merged).sort_values(by="Score", ascending=False)

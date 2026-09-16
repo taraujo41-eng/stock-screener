@@ -43,8 +43,11 @@
     <div id="scannerView">
       <!-- Scanner description -->
       <div class="mode-info">
-        <p class="mode-desc" id="modeDesc">Scans your watchlist on 15m candles with extended hours during active market, or daily candles when closed.</p>
-        <button class="edit-link" id="editWatchlistBtn" onclick="openWatchlistModal()">⚙️ Edit Watchlist</button>
+        <p class="mode-desc" id="modeDesc">Scans tickers on 15m candles with extended hours during active market, or daily candles when closed.</p>
+        <div class="mode-links">
+          <button class="edit-link" id="editWatchlistBtn" onclick="openWatchlistModal()">⚙️ Edit Watchlist</button>
+          <button class="edit-link edit-link--top50" id="viewTop50Btn" onclick="openTop50Modal()">🔥 View Top 50</button>
+        </div>
       </div>
 
       <!-- Extended Hours Toggle -->
@@ -56,21 +59,23 @@
         </label>
       </div>
 
-      <!-- Scan Buttons -->
-      <div style="display: flex; gap: 10px; width: 100%; margin-bottom: 10px;">
-        <button class="scan-btn" id="scanBtn" onclick="runScan('watchlist')" style="flex: 1;">
+      <!-- Scan Buttons Grid -->
+      <div class="scan-grid">
+        <button class="scan-btn" id="scanBtn" onclick="runScan('watchlist')">
           <div class="scan-btn__spinner"></div>
           <span class="scan-btn__text">📋 Scan Watchlist</span>
         </button>
-        <button class="scan-btn" id="scanRsiDivBtn" onclick="runScan('rsidiv')" style="flex: 1; background: linear-gradient(135deg, #6366f1, #818cf8);">
+        <button class="scan-btn scan-btn--top50" id="scanTop50Btn" onclick="runScan('top50')">
+          <div class="scan-btn__spinner"></div>
+          <span class="scan-btn__text">🔥 Scan Top 50</span>
+        </button>
+        <button class="scan-btn scan-btn--rsidiv" id="scanRsiDivBtn" onclick="runScan('rsidiv')">
           <div class="scan-btn__spinner"></div>
           <span class="scan-btn__text">📊 RSI Divergence</span>
         </button>
-      </div>
-      <div style="width: 100%; margin-bottom: 16px;">
-        <button class="scan-btn scan-btn--unusual" id="scanUnusualOptsBtn" onclick="runUnusualOptionsScan()" style="width: 100%; background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 4px 20px rgba(245, 158, 11, 0.35);">
+        <button class="scan-btn scan-btn--unusual" id="scanUnusualOptsBtn" onclick="runUnusualOptionsScan()">
           <div class="scan-btn__spinner"></div>
-          <span class="scan-btn__text">⚡ Unusual Options Sweeps</span>
+          <span class="scan-btn__text">⚡ Unusual Options</span>
         </button>
       </div>
 
@@ -281,10 +286,13 @@
         <button class="modal__add-btn" onclick="addTickerFromInput()">Add</button>
       </div>
       
-      <!-- Webull Import Button -->
+      <!-- Watchlist Actions -->
       <div style="padding: 0 20px 8px; display: flex; gap: 8px;">
         <button class="modal__add-btn" style="flex: 1; background: linear-gradient(135deg, #0284c7, #0369a1); display: flex; align-items: center; justify-content: center; gap: 8px;" id="importWebullBtn" onclick="importFromWebull()">
-          📥 Import from Webull
+          📥 Import Webull
+        </button>
+        <button class="modal__add-btn" style="flex: 1; background: linear-gradient(135deg, #0ea5e9, #0284c7); display: flex; align-items: center; justify-content: center; gap: 8px;" id="importTop50Btn" onclick="loadTop50IntoWatchlist()">
+          🔥 Load Top 50
         </button>
       </div>
       
@@ -300,6 +308,33 @@
     </div>
   </div>
 
-  <script src="/app.js?v=5.7"></script>
+  <!-- Top 50 Tickers Modal Overlay -->
+  <div class="modal-overlay hidden" id="top50Modal">
+    <div class="modal modal--top50">
+      <div class="modal__header">
+        <span class="modal__title">🔥 Top 50 Most Active Stocks</span>
+        <button class="modal__close" onclick="closeTop50Modal()">&times;</button>
+      </div>
+
+      <div class="top50-actions-bar">
+        <button class="top50-action-btn top50-action-btn--primary" onclick="closeTop50Modal(); runScan('top50')">
+          ⚡ Scan Top 50 Now
+        </button>
+        <button class="top50-action-btn top50-action-btn--secondary" onclick="loadTop50IntoWatchlist(true)">
+          📋 Set as My Watchlist
+        </button>
+      </div>
+
+      <div class="modal__count" id="top50Count">50 TICKERS • RANKED BY VOLUME & MOMENTUM</div>
+
+      <div class="top50-list" id="top50Container">
+        <!-- Rendered dynamically via JS -->
+      </div>
+
+      <button class="modal__done-btn" onclick="closeTop50Modal()">Close</button>
+    </div>
+  </div>
+
+  <script src="/app.js?v=5.8"></script>
 </body>
 </html>

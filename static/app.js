@@ -780,6 +780,9 @@ function displayResults(data) {
   if (data.mode === "unusual_options") {
     badge.textContent = `⚡ Unusual Options Sweeps (${data.count || 0} contracts)`;
     badge.classList.remove("hidden");
+  } else if (data.mode === "top50") {
+    badge.textContent = `🔥 Top 50 Stocks Scan (${data.count || 0} setups)`;
+    badge.classList.remove("hidden");
   } else if (data.mode === "rsidiv") {
     badge.textContent = `RSI Divergence Scan (${data.count || 0} setups)`;
     badge.classList.remove("hidden");
@@ -941,7 +944,7 @@ function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
       const p = await res.json();
 
       // Check if this progress update matches our requested scan mode
-      const isOurMode = !p.mode || p.mode === scanType || (scanType === "watchlist" && p.mode === "watchlist");
+      const isOurMode = !p.mode || p.mode === scanType || (scanType === "watchlist" && p.mode === "watchlist") || (scanType === "top50" && p.mode === "top50");
 
       // Only skip if the progress update belongs to an entirely different scan mode
       if (p.mode && !isOurMode) {
@@ -968,7 +971,14 @@ function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
         stopProgressPolling();
 
         if (isMatchingDone) {
-          const resultsUrl = scanType === "unusual_options" ? "/api/scan/unusual-options/results" : (scanType === "rsidiv" ? "/api/scan/rsidiv/results" : "/api/scan/watchlist/results");
+          let resultsUrl = "/api/scan/watchlist/results";
+          if (scanType === "unusual_options") {
+            resultsUrl = "/api/scan/unusual-options/results";
+          } else if (scanType === "rsidiv") {
+            resultsUrl = "/api/scan/rsidiv/results";
+          } else if (scanType === "top50") {
+            resultsUrl = "/api/scan/top50/results";
+          }
           const resData = await fetch(`${resultsUrl}?t=${Date.now()}`);
           const data = await resData.json();
           if (data.ok) {
@@ -992,8 +1002,12 @@ function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
           `;
         }
 
-        document.getElementById("scanBtn").classList.remove("scan-btn--loading");
-        document.getElementById("scanBtn").disabled = false;
+        document.getElementById("scanBtn")?.classList.remove("scan-btn--loading");
+        if (document.getElementById("scanBtn")) document.getElementById("scanBtn").disabled = false;
+        if (document.getElementById("scanTop50Btn")) {
+          document.getElementById("scanTop50Btn").classList.remove("scan-btn--loading");
+          document.getElementById("scanTop50Btn").disabled = false;
+        }
         if (document.getElementById("scanRsiDivBtn")) {
           document.getElementById("scanRsiDivBtn").classList.remove("scan-btn--loading");
           document.getElementById("scanRsiDivBtn").disabled = false;
@@ -1047,10 +1061,14 @@ function stopProgressPolling() {
 // ── Main scan ──────────────────────────────────────────────
 
 async function runScan(scanType = "watchlist") {
-  const btnId = scanType === "rsidiv" ? "scanRsiDivBtn" : "scanBtn";
+  let btnId = "scanBtn";
+  if (scanType === "rsidiv") btnId = "scanRsiDivBtn";
+  else if (scanType === "top50") btnId = "scanTop50Btn";
   const btn = document.getElementById(btnId) || document.getElementById("scanBtn");
-  btn.classList.add("scan-btn--loading");
-  btn.disabled = true;
+  if (btn) {
+    btn.classList.add("scan-btn--loading");
+    btn.disabled = true;
+  }
 
   document.getElementById("emptyState")?.classList.add("hidden");
   document.getElementById("results").innerHTML = "";
@@ -1062,8 +1080,15 @@ async function runScan(scanType = "watchlist") {
 
   const extHours = document.getElementById("extHoursToggle")?.checked || false;
 
-  const endpoint = scanType === "rsidiv" ? "/api/scan/rsidiv" : "/api/scan/watchlist";
-  const payload = scanType === "rsidiv" ? { extended_hours: extHours, use_watchlist: false } : { extended_hours: extHours };
+  let endpoint = "/api/scan/watchlist";
+  let payload = { extended_hours: extHours };
+  if (scanType === "rsidiv") {
+    endpoint = "/api/scan/rsidiv";
+    payload = { extended_hours: extHours, use_watchlist: false };
+  } else if (scanType === "top50") {
+    endpoint = "/api/scan/top50";
+    payload = { extended_hours: extHours };
+  }
 
   const maxRetries = 3;
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -1410,6 +1435,114 @@ async function importFromWebull() {
     if (btn) {
       btn.disabled = false;
       btn.textContent = "📥 Import from Webull";
+    }
+  }
+}
+
+// ── Top 50 Stocks Modal & Actions ─────────────────────────
+
+let cachedTop50Stocks = null;
+
+async function fetchTop50Stocks() {
+  if (cachedTop50Stocks && cachedTop50Stocks.length > 0) return cachedTop50Stocks;
+  try {
+    const res = await fetch("/api/top50/tickers");
+    const data = await res.json();
+    if (data.ok && data.stocks) {
+      cachedTop50Stocks = data.stocks;
+      return cachedTop50Stocks;
+    }
+  } catch (e) {
+    console.error("Failed to fetch top 50 tickers:", e);
+  }
+  return [];
+}
+
+async function openTop50Modal() {
+  const modal = document.getElementById("top50Modal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  const container = document.getElementById("top50Container");
+  if (container) {
+    container.innerHTML = `<div style="text-align: center; padding: 24px; color: var(--text-muted);">Loading Top 50 stocks...</div>`;
+    const stocks = await fetchTop50Stocks();
+    renderTop50UI(stocks);
+  }
+}
+
+function closeTop50Modal() {
+  document.getElementById("top50Modal")?.classList.add("hidden");
+}
+
+function renderTop50UI(stocks) {
+  const container = document.getElementById("top50Container");
+  if (!container) return;
+  if (!stocks || stocks.length === 0) {
+    container.innerHTML = `<div style="text-align: center; padding: 24px; color: var(--text-muted);">No stock list available.</div>`;
+    return;
+  }
+  container.innerHTML = stocks.map(s => `
+    <div class="top50-row">
+      <div class="top50-row__left">
+        <span class="top50-row__rank">#${s.rank}</span>
+        <span class="top50-row__symbol">${s.ticker}</span>
+      </div>
+      <div class="top50-row__name" title="${s.name || ''}">${s.name || ''}</div>
+    </div>
+  `).join("");
+}
+
+async function loadTop50IntoWatchlist(fromTop50Modal = false) {
+  const stocks = await fetchTop50Stocks();
+  if (!stocks || stocks.length === 0) {
+    alert("Could not load Top 50 ticker list.");
+    return;
+  }
+  const topTickers = stocks.map(s => s.ticker);
+
+  if (fromTop50Modal) {
+    const confirmMsg = `Replace your current watchlist (${userWatchlist.length} tickers) with the Top 50 most active stocks?`;
+    if (!confirm(confirmMsg)) {
+      return;
+    }
+  }
+
+  const btn = document.getElementById("importTop50Btn");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳ Loading...";
+  }
+
+  try {
+    const res = await fetch("/api/watchlist", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ watchlist: topTickers })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      userWatchlist = data.watchlist;
+      localStorage.setItem("userWatchlist", JSON.stringify(userWatchlist));
+      renderWatchlistUI();
+      if (fromTop50Modal) {
+        closeTop50Modal();
+        openWatchlistModal();
+      }
+      const msgEl = document.getElementById("modalMsg");
+      if (msgEl) {
+        msgEl.textContent = `Loaded ${userWatchlist.length} Top 50 tickers into your watchlist!`;
+        msgEl.className = "modal__msg modal__msg--success";
+        msgEl.classList.remove("hidden");
+        setTimeout(() => msgEl.classList.add("hidden"), 3500);
+      }
+    }
+  } catch (e) {
+    console.error("Error loading top 50 into watchlist:", e);
+    alert("Error updating watchlist.");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "🔥 Load Top 50";
     }
   }
 }

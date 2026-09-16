@@ -78,6 +78,25 @@ WATCHLIST_FILE = os.path.join(SCAN_DATA_DIR, "watchlist.json")
 WATCHLIST_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_watchlist_scan.json")
 OPTIONS_WATCHLIST_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_options_watchlist_scan.json")
 UNUSUAL_OPTIONS_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_unusual_options_scan.json")
+TOP_50_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_top50_scan.json")
+TOP_50_STOCKS_FILE = os.path.join(os.path.dirname(__file__), "top50_stocks.json")
+
+def load_top50_stocks():
+    """Load top 50 stocks with rank, ticker, and company name."""
+    if os.path.exists(TOP_50_STOCKS_FILE):
+        try:
+            with open(TOP_50_STOCKS_FILE, "r") as f:
+                data = json.load(f)
+                if isinstance(data, list) and len(data) > 0:
+                    return data
+        except Exception as e:
+            print(f"Error loading top 50 stocks from {TOP_50_STOCKS_FILE}: {e}")
+    return []
+
+def load_top50_tickers():
+    """Return list of ticker symbols for top 50 stocks."""
+    stocks = load_top50_stocks()
+    return [s["ticker"] for s in stocks if isinstance(s, dict) and "ticker" in s]
 
 DEFAULT_WATCHLIST = ["AAPL", "MSFT", "TSLA", "AMZN", "GOOGL", "META", "NVDA", "NFLX", "AMD", "SPY", "QQQ"]
 
@@ -654,6 +673,78 @@ def scan_watchlist_results():
     if not results or not isinstance(results, dict):
         return jsonify({"ok": True, "mode": "watchlist", "count": 0, "results": [], "timestamp": "Ready"}), 200
     return jsonify(results)
+
+# ── API: Top 50 Stocks Scan ─────────────────────────────────────────
+
+@app.route("/api/scan/top50", methods=["POST"])
+def scan_top50():
+    """Start a reversal scan for the Top 50 tickers in the background."""
+    if not _acquire_scan("Top50-User"):
+        return _scan_conflict_response()
+    scan_id = str(int(time.time() * 1000))
+    _reset_progress(status="running", mode="top50", scan_id=scan_id)
+    scan_progress["phase_label"] = "Initiating Top 50 scan (all criteria)..."
+
+    data = request.get_json() or {}
+    extended_hours = data.get("extended_hours", False)
+
+    def _run():
+        try:
+            et_tz = get_ny_timezone()
+            tickers = load_top50_tickers()
+            with open("/tmp/scan_debug.log", "a") as f:
+                f.write(f"[{datetime.now()}] Top 50 scan started for {len(tickers)} tickers\n")
+            df = watchlist_scan(tickers, extended_hours=extended_hours, mode="top50")
+            if not df.empty:
+                df = df[df["Ticker"].isin(tickers)]
+            raw_records = df.to_dict(orient="records") if not df.empty else []
+            clean_records = sanitize_for_json(raw_records)
+            results_data = {
+                "ok": True,
+                "mode": "top50",
+                "scan_id": scan_id,
+                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
+                "count": len(clean_records),
+                "tickers_scanned": len(tickers),
+                "results": clean_records,
+            }
+            app.config["LAST_TOP50_RESULTS"] = results_data
+            save_last_scan(results_data, TOP_50_RESULTS_FILE)
+            scan_progress["status"] = "done"
+            scan_progress["mode"] = "top50"
+            with open("/tmp/scan_debug.log", "a") as f:
+                f.write(f"[{datetime.now()}] Top 50 scan completed with {len(clean_records)} signals\n")
+        except BaseException as e:
+            import traceback
+            tb_str = traceback.format_exc()
+            print(f"[Top 50 Scan Error] {e}\n{tb_str}")
+            with open("/tmp/scan_debug.log", "a") as f:
+                f.write(f"[{datetime.now()}] ERROR: {e}\n{tb_str}\n")
+            app.config["LAST_TOP50_RESULTS"] = {"ok": False, "error": str(e), "traceback": tb_str}
+            scan_progress["status"] = "error"
+            scan_progress["phase_label"] = str(e)
+        finally:
+            _release_scan()
+
+    threading.Thread(target=_run, daemon=False).start()
+    return jsonify({"ok": True, "scan_id": scan_id, "message": "Top 50 scan started (all criteria)"})
+
+@app.route("/api/scan/top50/results", methods=["GET"])
+def scan_top50_results():
+    results = get_fresh_scan_results("LAST_TOP50_RESULTS", TOP_50_RESULTS_FILE)
+    if not results or not isinstance(results, dict):
+        return jsonify({"ok": True, "mode": "top50", "count": 0, "results": [], "timestamp": "Ready"}), 200
+    return jsonify(results)
+
+@app.route("/api/top50/tickers", methods=["GET"])
+def get_top50_tickers():
+    stocks = load_top50_stocks()
+    return jsonify({
+        "ok": True,
+        "count": len(stocks),
+        "stocks": stocks,
+        "tickers": [s["ticker"] for s in stocks if isinstance(s, dict) and "ticker" in s]
+    })
 
 @app.route("/api/scan/options/watchlist", methods=["POST"])
 def scan_options_watchlist():
