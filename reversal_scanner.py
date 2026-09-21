@@ -1957,15 +1957,17 @@ def _analyze_options_setup(sym, df, iv_history):
             opt_type = "CALL" if direction == "bullish" else "PUT"
             opt_strike = round(last_price, 1)
             opt_exp = (datetime.now() + timedelta(days=35)).strftime("%b %d")
+            intrinsic = max(0.0, (last_price - opt_strike) if direction == "bullish" else (opt_strike - last_price))
+            mid_val = round(intrinsic + (last_price * 0.035), 2)
             best_contract = {
                 "symbol": f"{sym}{opt_exp}{opt_type[0]}{opt_strike}",
                 "strike": opt_strike,
                 "type": opt_type,
                 "exp": opt_exp,
                 "dte": 35,
-                "mid": round(last_price * 0.04, 2),
-                "bid": round(last_price * 0.038, 2),
-                "ask": round(last_price * 0.042, 2),
+                "mid": mid_val,
+                "bid": round(mid_val * 0.95, 2),
+                "ask": round(mid_val * 1.05, 2),
                 "iv": 35.0,
                 "volume": 150,
                 "oi": 500,
@@ -3015,7 +3017,8 @@ def options_directional_exhaustion_scan():
             opt_strike = round(last_price, 1)
             opt_exp = (datetime.now() + timedelta(days=35)).strftime("%b %d")
             opt_dte = 35
-            opt_mid = round(last_price * 0.04, 2)
+            intrinsic = max(0.0, (last_price - opt_strike) if side == "bullish" else (opt_strike - last_price))
+            opt_mid = round(intrinsic + (last_price * 0.035), 2)
             opt_bid = round(opt_mid * 0.95, 2)
             opt_ask = round(opt_mid * 1.05, 2)
             opt_iv = 35.0
