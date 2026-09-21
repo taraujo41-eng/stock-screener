@@ -924,10 +924,23 @@ function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
   document.getElementById("progressPhase").textContent = "Initiating scan...";
   document.getElementById("progressDetail").textContent = "";
 
-  const btnId = scanType === "unusual_options" ? "scanUnusualOptsBtn" : (scanType === "rsidiv" ? "scanRsiDivBtn" : "scanBtn");
-  const btn = document.getElementById(btnId) || document.getElementById("scanBtn");
-  btn.classList.add("scan-btn--loading");
-  btn.disabled = true;
+  const allBtnIds = ["scanBtn", "scanTop50Btn", "scanRsiDivBtn", "scanUnusualOptsBtn"];
+  let activeBtnId = "scanBtn";
+  if (scanType === "unusual_options") activeBtnId = "scanUnusualOptsBtn";
+  else if (scanType === "rsidiv") activeBtnId = "scanRsiDivBtn";
+  else if (scanType === "top50") activeBtnId = "scanTop50Btn";
+
+  allBtnIds.forEach(id => {
+    const b = document.getElementById(id);
+    if (b) {
+      if (id === activeBtnId) {
+        b.classList.add("scan-btn--loading");
+      } else {
+        b.classList.remove("scan-btn--loading");
+      }
+      b.disabled = true;
+    }
+  });
 
   if (pollTimer) {
     clearInterval(pollTimer);
@@ -1250,11 +1263,9 @@ async function checkActiveScan() {
     if (!res.ok) return false;
     const p = await res.json();
     if (p.status === "running") {
-      if (p.mode === scanMode) {
-        startProgressPolling();
-        return true;
-      }
-      return false;
+      const activeMode = p.mode || "watchlist";
+      startProgressPolling(activeMode, p.scan_id);
+      return true;
     }
   } catch (e) {
     console.error("Error checking active scan:", e);

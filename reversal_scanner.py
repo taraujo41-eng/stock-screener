@@ -3330,9 +3330,11 @@ def watchlist_scan(tickers, extended_hours=False, mode="watchlist"):
     scan_title = "Top 50 Scan" if mode == "top50" else "Watchlist Scan"
     print(f"  [{scan_title}] Mode: {_timeframe_label} (interval={interval}, days={days}, prepost={inc_pre_post})")
 
+    prefix = "Top 50" if mode == "top50" else "Watchlist"
+
     def _on_dl_progress(i, tot, sym):
         pct = int((i / tot) * 30) if tot else 0
-        _update_progress("downloading", f"Downloading {sym} ({_timeframe_label})...", i, tot, ticker=sym, found=0, pct=pct)
+        _update_progress("downloading", f"Downloading {prefix}: {sym} ({_timeframe_label})...", i, tot, ticker=sym, found=0, pct=pct)
 
     daily_data = fetch_batch_concurrent(
         tickers, days=days, max_workers=20,
@@ -3350,7 +3352,7 @@ def watchlist_scan(tickers, extended_hours=False, mode="watchlist"):
     for i, sym in enumerate(tickers):
         found_cnt = len(set(stock_results) | set(sigma3_results))
         pct = 30 + int((i / total) * 65) if total else 95
-        _update_progress("analyzing", f"Analyzing {sym} (all criteria)...", i, total, ticker=sym, found=found_cnt, pct=pct)
+        _update_progress("analyzing", f"Analyzing {prefix}: {sym} (all criteria)...", i, total, ticker=sym, found=found_cnt, pct=pct)
         try:
             df = daily_data.get(sym)
             if df is None or len(df) < 20:
