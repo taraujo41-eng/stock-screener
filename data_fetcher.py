@@ -56,8 +56,8 @@ def get_unofficial_client():
 
     token_path = os.path.dirname(__file__)
     credentials_file = os.path.join(token_path, "webull_credentials.json")
-    env_access_token = (os.getenv("WEBULL_ACCESS_TOKEN") or "dc_us_tech1.19e61c47746-fff90aac6d3e4fe096f653b1d955e4bd").strip() or None
-    env_did = (os.getenv("WEBULL_DID") or "f9s4nk68xjcslox4g2we0xu3zsxdfam0y").strip() or None
+    env_access_token = (os.getenv("WEBULL_ACCESS_TOKEN") or "").strip() or None
+    env_did = (os.getenv("WEBULL_DID") or "").strip() or None
     
     try:
         try:

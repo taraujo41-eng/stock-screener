@@ -24,7 +24,7 @@ import warnings
 from data_fetcher import (
     fetch_batch, fetch_batch_concurrent, test_connection,
     fetch_options_chain, fetch_options_for_expiration, fetch_news,
-    fetch_quotes_batch, check_optionable_batch
+    fetch_quotes_batch, check_optionable_batch, get_unofficial_client
 )
 
 warnings.filterwarnings("ignore")
@@ -1049,15 +1049,27 @@ def find_best_option(ticker, signal_type, last_price):
                                         bid = float(bid_list[0].get("price", 0))
                                     if ask_list:
                                         ask = float(ask_list[0].get("price", 0))
+                                    if (bid is None or ask is None or (bid + ask) <= 0) and q_data.get("close"):
+                                        c_px = float(q_data["close"])
+                                        if c_px > 0:
+                                            bid = round(c_px * 0.98, 2)
+                                            ask = round(c_px * 1.02, 2)
                                     if q_data.get("impVol"):
                                         iv = float(q_data.get("impVol", 0))
+                                    if q_data.get("volume"):
+                                        vol = int(float(q_data.get("volume", 0)))
+                                    if q_data.get("openInterest"):
+                                        oi = int(float(q_data.get("openInterest", 0)))
+                                    if q_data.get("delta"):
+                                        est_delta = abs(float(q_data.get("delta", 0.50)))
                         except Exception:
                             pass
                     
                     if bid is not None and ask is not None and (bid + ask) > 0:
                         mid = (bid + ask) / 2.0
                     else:
-                        mid = round(last_price * 0.04, 2)
+                        intrinsic = max(0.0, (last_price - strike) if signal_type == "bullish" else (strike - last_price))
+                        mid = round(intrinsic + (last_price * 0.035), 2)
                         bid = round(mid * 0.95, 2)
                         ask = round(mid * 1.05, 2)
                     
@@ -1082,7 +1094,7 @@ def find_best_option(ticker, signal_type, last_price):
                             "volume": vol,
                             "oi": oi,
                             "spread_pct": round(spread_pct, 1),
-                            "est_delta": 0.50,
+                            "est_delta": round(est_delta if 'est_delta' in locals() else 0.50, 2),
                             "score": score
                         }
                 
@@ -1093,7 +1105,8 @@ def find_best_option(ticker, signal_type, last_price):
             # Fallback: calculate standard Friday expiration and standard strike
             target_strike = _round_to_standard_strike(last_price)
             exp_dt, dte_days = _get_target_friday_exp(valid_exps, target_dte=30)
-            mid_val = round(last_price * 0.04, 2)
+            intrinsic = max(0.0, (last_price - target_strike) if signal_type == "bullish" else (target_strike - last_price))
+            mid_val = round(intrinsic + (last_price * 0.035), 2)
             occ_sym = f"{ticker}{exp_dt.strftime('%y%m%d')}{'C' if signal_type == 'bullish' else 'P'}{int(target_strike*1000):08d}"
             
             best_contract = {
@@ -1117,7 +1130,8 @@ def find_best_option(ticker, signal_type, last_price):
     except Exception:
         target_strike = _round_to_standard_strike(last_price)
         exp_dt, dte_days = _get_target_friday_exp(None, target_dte=30)
-        mid_val = round(last_price * 0.04, 2)
+        intrinsic = max(0.0, (last_price - target_strike) if signal_type == "bullish" else (target_strike - last_price))
+        mid_val = round(intrinsic + (last_price * 0.035), 2)
         occ_sym = f"{ticker}{exp_dt.strftime('%y%m%d')}{'C' if signal_type == 'bullish' else 'P'}{int(target_strike*1000):08d}"
         return {
             "symbol": occ_sym,
