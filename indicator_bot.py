@@ -470,14 +470,7 @@ def bot_loop():
             logger.info("--- Starting 3-Sigma A+ Reversal Bot Cycle ---")
 
             try:
-                # 1. Determine tickers to scan: Combine all 287 US Optionable tickers AND Watchlist tickers
-                from reversal_scanner import get_us_tickers
-                try:
-                    us_tickers = get_us_tickers()
-                except Exception as e:
-                    logger.error(f"Failed to load full US tickers list: {e}")
-                    us_tickers = []
-
+                # 1. Determine tickers to scan: Restricted strictly to Watchlist tickers (165 tickers)
                 watchlist_tickers = []
                 try:
                     watchlist_file = os.path.join(_SCAN_DATA_DIR, "watchlist.json")
@@ -489,7 +482,7 @@ def bot_loop():
                 except Exception as e:
                     logger.error(f"Failed to load watchlist.json: {e}")
 
-                tickers = list(dict.fromkeys(us_tickers + watchlist_tickers))
+                tickers = list(dict.fromkeys([t.strip().upper() for t in watchlist_tickers if t and isinstance(t, str)]))
                 if not tickers:
                     tickers = ["AAPL", "MSFT", "NVDA", "SPY", "QQQ"]
 
@@ -499,7 +492,7 @@ def bot_loop():
                 # 2. Pre-calculate daily bands
                 precalculate_daily_bands(tickers)
                 
-                logger.info(f"Scanning {len(tickers)} tickers in parallel ({candle_interval} candles, 3.0SD Breach + A+ Setups)...")
+                logger.info(f"Scanning {len(tickers)} watchlist tickers in parallel ({candle_interval} candles, 3.0SD Breach + A+ Setups)...")
 
                 # 3. Download and compute in parallel
                 results = fetch_batch_concurrent(

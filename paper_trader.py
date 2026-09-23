@@ -486,6 +486,20 @@ class PaperTrader:
                 logger.error("[PaperTrader] Cannot place order — not logged in")
                 return None
 
+        # Verify ticker is in approved watchlist (165 tickers)
+        try:
+            wl_file = os.path.join(_SCAN_DATA_DIR, "watchlist.json")
+            if not os.path.exists(wl_file):
+                wl_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
+            if os.path.exists(wl_file):
+                with open(wl_file, "r") as f:
+                    allowed = set(t.strip().upper() for t in json.load(f) if t)
+                if ticker.upper() not in allowed:
+                    logger.warning(f"[PaperTrader] Ticker {ticker} is not in approved watchlist — skipping order.")
+                    return None
+        except Exception as e:
+            logger.debug(f"[PaperTrader] Watchlist validation warning: {e}")
+
         try:
             # 1. Find the best option contract using existing scanner logic
             sys.path.insert(0, os.path.dirname(__file__))
