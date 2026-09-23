@@ -1511,11 +1511,24 @@ async function loadTop50IntoWatchlist(fromTop50Modal = false) {
   }
   const topTickers = stocks.map(s => s.ticker);
 
+  let targetWatchlist;
+  let addedCount = 0;
   if (fromTop50Modal) {
     const confirmMsg = `Replace your current watchlist (${userWatchlist.length} tickers) with the Top 50 most active stocks?`;
     if (!confirm(confirmMsg)) {
       return;
     }
+    targetWatchlist = topTickers;
+  } else {
+    const currentSet = new Set(userWatchlist);
+    targetWatchlist = [...userWatchlist];
+    for (const t of topTickers) {
+      if (!currentSet.has(t)) {
+        targetWatchlist.push(t);
+        addedCount++;
+      }
+    }
+    targetWatchlist.sort();
   }
 
   const btn = document.getElementById("importTop50Btn");
@@ -1528,7 +1541,7 @@ async function loadTop50IntoWatchlist(fromTop50Modal = false) {
     const res = await fetch("/api/watchlist", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ watchlist: topTickers })
+      body: JSON.stringify({ watchlist: targetWatchlist })
     });
     const data = await res.json();
     if (data.ok) {
@@ -1541,7 +1554,9 @@ async function loadTop50IntoWatchlist(fromTop50Modal = false) {
       }
       const msgEl = document.getElementById("modalMsg");
       if (msgEl) {
-        msgEl.textContent = `Loaded ${userWatchlist.length} Top 50 tickers into your watchlist!`;
+        msgEl.textContent = fromTop50Modal
+          ? `Replaced watchlist with ${userWatchlist.length} Top 50 tickers!`
+          : `Added ${addedCount} new Top 50 ticker(s)! Total: ${userWatchlist.length}`;
         msgEl.className = "modal__msg modal__msg--success";
         msgEl.classList.remove("hidden");
         setTimeout(() => msgEl.classList.add("hidden"), 3500);
