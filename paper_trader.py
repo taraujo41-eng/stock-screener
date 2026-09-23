@@ -34,6 +34,7 @@ load_dotenv()
 
 logger = logging.getLogger("paper_trader")
 logger.setLevel(logging.INFO)
+logger.propagate = False  # Prevent propagation duplicates
 
 if not logger.handlers:
     handler = logging.FileHandler(os.path.join(os.path.dirname(__file__), "3sigma_bot.log"))
@@ -41,9 +42,11 @@ if not logger.handlers:
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
-    console = logging.StreamHandler(sys.stdout)
-    console.setFormatter(formatter)
-    logger.addHandler(console)
+    # Only attach console stream if stdout is an interactive terminal and not redirected to log
+    if sys.stdout.isatty():
+        console = logging.StreamHandler(sys.stdout)
+        console.setFormatter(formatter)
+        logger.addHandler(console)
 
 
 def get_ny_timezone():
@@ -114,7 +117,7 @@ class PaperTrader:
         self._account_id = None
         self._logged_in = False
         self._trade_log = _load_trade_log()
-        self._open_positions = []  # Tracked locally for TP/SL monitoring
+        self._open_positions = [t for t in self._trade_log.get("trades", []) if t.get("status") == "open"]
         self._monitor_thread = None
         self._lock = threading.Lock()
 
@@ -402,7 +405,7 @@ class PaperTrader:
 
     def _open_position_count(self):
         """Count currently tracked open positions."""
-        return len([p for p in self._open_positions if p.get("status") == "open"])
+        return len([p for p in self.get_open_positions() if p.get("status") == "open"])
 
     def _check_risk_limits(self, ask_price):
         """
@@ -499,6 +502,16 @@ class PaperTrader:
                     return None
         except Exception as e:
             logger.debug(f"[PaperTrader] Watchlist validation warning: {e}")
+
+        # Guard: Check if an active open position already exists for this ticker
+        open_positions = self.get_open_positions()
+        existing = [p for p in open_positions if p.get("ticker", "").upper() == ticker.upper() and p.get("status") == "open"]
+        if existing:
+            logger.warning(
+                f"[PaperTrader] ⛔ Active position already open for {ticker} "
+                f"({existing[0].get('option_symbol', '')}) — skipping duplicate order."
+            )
+            return None
 
         try:
             # 1. Find the best option contract using existing scanner logic

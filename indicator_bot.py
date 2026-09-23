@@ -37,10 +37,11 @@ if not logger.handlers:
     handler.setFormatter(formatter)
     logger.addHandler(handler)
     
-    # Also log to standard out
-    console = logging.StreamHandler(sys.stdout)
-    console.setFormatter(formatter)
-    logger.addHandler(console)
+    # Only attach console stream if stdout is an interactive terminal and not redirected to log
+    if sys.stdout.isatty():
+        console = logging.StreamHandler(sys.stdout)
+        console.setFormatter(formatter)
+        logger.addHandler(console)
 
 # Global map to store pre-calculated daily bands: {ticker: (upper_bb_daily, lower_bb_daily)}
 _daily_bands_map = {}
