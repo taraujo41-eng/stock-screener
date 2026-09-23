@@ -778,13 +778,13 @@ function displayResults(data) {
 
   const badge = document.getElementById("scanBadge");
   if (data.mode === "unusual_options") {
-    badge.textContent = `⚡ Unusual Options Sweeps (${data.count || 0} contracts)`;
+    badge.textContent = `⚡ Unusual Options Sweeps — Watchlist (${data.count || 0} contracts)`;
     badge.classList.remove("hidden");
   } else if (data.mode === "top50") {
     badge.textContent = `🔥 Top 50 Stocks Scan (${data.count || 0} setups)`;
     badge.classList.remove("hidden");
   } else if (data.mode === "rsidiv") {
-    badge.textContent = `RSI Divergence Scan (${data.count || 0} setups)`;
+    badge.textContent = `📊 RSI Divergence — Watchlist (${data.count || 0} setups)`;
     badge.classList.remove("hidden");
   } else if (data.mode === "watchlist") {
     badge.textContent = `Watchlist Scan (${data.count || 0} setups)`;
@@ -973,8 +973,10 @@ function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
         return;
       }
 
-      // Complete when server reports done for our mode, error, or max 15-minute safety timeout
-      const isMatchingDone = (p.status === "done") && isOurMode;
+      // Complete when server reports done for our mode, or transitioned from running to idle, or server already idle after warmup
+      const isIdleAfterRunning = hasStartedRunning && (p.status === "idle" || p.status === "done");
+      const isWarmupIdle = (!hasStartedRunning && pollCount > 8 && p.status === "idle");
+      const isMatchingDone = ((p.status === "done") && isOurMode) || isIdleAfterRunning || isWarmupIdle;
       const isFinished = isMatchingDone || p.status === "error" || pollCount > 600;
       if (isFinished) {
         if (isMatchingDone) {

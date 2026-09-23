@@ -206,9 +206,15 @@ def _release_scan():
         _scan_running = False
     release_scan_lock()
 
-# Reset scan state to idle on server boot
-_release_scan()
-_reset_progress("idle")
+# Reset scan state only on clean boot; do not overwrite a recently completed 'done' state
+try:
+    current_p = scan_progress.read()
+    if current_p.get("status") not in ("done", "running"):
+        _release_scan()
+        _reset_progress("idle")
+except Exception:
+    _release_scan()
+    _reset_progress("idle")
 
 # ── Static files ─────────────────────────────────────────────────────
 
@@ -518,7 +524,7 @@ def scan_rsidiv():
     def _run():
         try:
             et_tz = get_ny_timezone()
-            tickers = load_watchlist() if use_watchlist else None
+            tickers = load_watchlist()
             df = rsi_divergence_full_market_scan(tickers=tickers, extended_hours=extended_hours)
             results_data = {
                 "ok": True,
@@ -814,7 +820,8 @@ def scan_unusual_options():
     def _run():
         try:
             et_tz = get_ny_timezone()
-            df = unusual_options_full_market_scan(extended_hours=extended_hours)
+            tickers = load_watchlist()
+            df = unusual_options_full_market_scan(tickers=tickers, extended_hours=extended_hours)
             results_data = {
                 "ok": True,
                 "mode": "unusual_options",

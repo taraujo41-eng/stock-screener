@@ -2919,7 +2919,7 @@ def rsi_divergence_full_market_scan(tickers=None, extended_hours=False):
 
     total_time = time.time() - start_time
     scan_progress.update({
-        "status": "done", "phase": "complete",
+        "status": "done", "phase": "complete", "mode": "rsidiv",
         "phase_label": f"Done — {len(results)} RSI divergence signals found",
         "current": total, "total": total,
         "found": len(results), "pct": 100, "eta_seconds": 0,
@@ -3652,6 +3652,8 @@ def unusual_options_full_market_scan(tickers=None, extended_hours=False):
         _update_progress("init", f"Loaded {len(tickers)} tickers, applying liquidity filter...", 0, len(tickers), pct=3)
         tickers = prefilter_liquid_optionable(tickers)
         _update_progress("init", f"Pre-filter done: {len(tickers)} liquid tickers.", 0, len(tickers), pct=5)
+    else:
+        _update_progress("init", f"Loaded {len(tickers)} watchlist tickers...", 0, len(tickers), pct=5)
 
     total = len(tickers)
     results = []
@@ -3946,7 +3948,7 @@ def unusual_options_full_market_scan(tickers=None, extended_hours=False):
 
     total_time = time.time() - start_time
     scan_progress.update({
-        "status": "done", "phase": "complete",
+        "status": "done", "phase": "complete", "mode": "unusual_options",
         "phase_label": f"Done — {len(results)} high-conviction contracts found",
         "current": total, "total": total,
         "found": len(results), "pct": 100, "eta_seconds": 0,
