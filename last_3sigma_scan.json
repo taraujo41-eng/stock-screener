@@ -1,7 +1,36 @@
 {
   "ok": true,
   "mode": "3sigma",
-  "timestamp": "Sep 04, 2026  04:05 PM",
-  "count": 0,
-  "results": []
+  "timestamp": "Sep 23, 2026  12:32 PM",
+  "count": 2,
+  "results": [
+    {
+      "Ticker": "JPM",
+      "Direction": "Bullish",
+      "Last Price": 338.35,
+      "RSI": 38.0462923922933,
+      "Score": 14,
+      "Grade": "A+",
+      "Bullish Signals": "bullish",
+      "Bearish Signals": "\u2014",
+      "Patterns": "Pierced Daily Lower 3SD BB | RSI Bullish Divergence",
+      "RVOL": 0.600343387497955,
+      "Entry": 338.35,
+      "Profit Target": 338.9400051918037
+    },
+    {
+      "Ticker": "NEE",
+      "Direction": "Bullish",
+      "Last Price": 77.71,
+      "RSI": 26.543285180891573,
+      "Score": 16,
+      "Grade": "A+",
+      "Bullish Signals": "bullish",
+      "Bearish Signals": "\u2014",
+      "Patterns": "Pierced Daily Lower 3SD BB | RSI Bullish Divergence | RSI Oversold (26.5)",
+      "RVOL": 0.5575627141508509,
+      "Entry": 77.71,
+      "Profit Target": 77.90506614683959
+    }
+  ]
 }

@@ -428,19 +428,198 @@ def prefilter_liquid_optionable(tickers, MIN_PRICE=10.0, MIN_AVG_VOLUME=500_000)
     return filtered
 
 
-def check_spy_regime():
-    """Returns True if SPY is bullish (above its 50 SMA), False if bearish."""
+_market_sentiment_cache = None
+_market_sentiment_cache_ts = 0
+
+def get_market_sentiment(max_age_seconds=180):
+    """
+    Evaluates comprehensive Market Sentiment (SPY, QQQ, VIX).
+    Returns a dict with:
+      - sentiment: "Bullish" | "Bearish" | "Neutral"
+      - score: 0 to 100
+      - label: "Bullish 🟢" | "Bearish 🔴" | "Neutral ⚪"
+      - is_bullish: bool
+      - spy: { close, change_pct, above_ema20, above_sma50, above_sma200, regime }
+      - qqq: { close, change_pct, above_ema20, above_sma50, above_sma200, regime }
+      - vix: { close, risk_state }
+      - summary: text explanation
+      - timestamp: string
+    """
+    global _market_sentiment_cache, _market_sentiment_cache_ts
+    now = time.time()
+    if _market_sentiment_cache is not None and (now - _market_sentiment_cache_ts) < max_age_seconds:
+        return _market_sentiment_cache
+
     try:
         from data_fetcher import fetch_one
-        spy_df = fetch_one("SPY", days=100, interval="1d")
-        if spy_df is not None and len(spy_df) >= 50:
-            spy_close = float(spy_df['Close'].iloc[-1])
-            spy_sma50 = float(compute_sma(spy_df['Close'], 50).iloc[-1])
-            is_bullish = spy_close >= spy_sma50
-            print(f"  [Regime check] SPY Close: {spy_close:.2f}, SMA50: {spy_sma50:.2f} | Bullish: {is_bullish}")
-            return is_bullish
+        spy_df = fetch_one("SPY", days=250, interval="1d")
+        qqq_df = fetch_one("QQQ", days=250, interval="1d")
+        vix_df = fetch_one("^VIX", days=30, interval="1d")
+        if vix_df is None or len(vix_df) == 0:
+            vix_df = fetch_one("VIX", days=30, interval="1d")
+
+        score = 50  # Neutral base
+        details = []
+
+        # 1. SPY Analysis
+        spy_info = {"close": 0, "change_pct": 0, "regime": "Above 50 SMA"}
+        if spy_df is not None and len(spy_df) >= 20:
+            c = float(spy_df['Close'].iloc[-1])
+            prev = float(spy_df['Close'].iloc[-2]) if len(spy_df) > 1 else c
+            chg_pct = round(((c - prev) / prev) * 100, 2)
+            ema20 = float(compute_ema(spy_df['Close'], 20).iloc[-1]) if len(spy_df) >= 20 else c
+            sma50 = float(compute_sma(spy_df['Close'], 50).iloc[-1]) if len(spy_df) >= 50 else c
+            sma200 = float(compute_sma(spy_df['Close'], 200).iloc[-1]) if len(spy_df) >= 200 else c
+
+            above_ema20 = c >= ema20
+            above_sma50 = c >= sma50
+            above_sma200 = c >= sma200
+
+            if above_sma50:
+                score += 15
+                details.append("SPY > 50 SMA")
+            else:
+                score -= 15
+                details.append("SPY < 50 SMA")
+
+            if above_ema20:
+                score += 10
+            else:
+                score -= 10
+
+            if above_sma200:
+                score += 10
+            else:
+                score -= 10
+
+            if chg_pct > 0:
+                score += 5
+            elif chg_pct < 0:
+                score -= 5
+
+            spy_info = {
+                "close": round(c, 2),
+                "change_pct": chg_pct,
+                "above_ema20": above_ema20,
+                "above_sma50": above_sma50,
+                "above_sma200": above_sma200,
+                "regime": "Above 50 SMA" if above_sma50 else "Below 50 SMA"
+            }
+
+        # 2. QQQ Analysis
+        qqq_info = {"close": 0, "change_pct": 0, "regime": "Above 50 SMA"}
+        if qqq_df is not None and len(qqq_df) >= 20:
+            c = float(qqq_df['Close'].iloc[-1])
+            prev = float(qqq_df['Close'].iloc[-2]) if len(qqq_df) > 1 else c
+            chg_pct = round(((c - prev) / prev) * 100, 2)
+            ema20 = float(compute_ema(qqq_df['Close'], 20).iloc[-1]) if len(qqq_df) >= 20 else c
+            sma50 = float(compute_sma(qqq_df['Close'], 50).iloc[-1]) if len(qqq_df) >= 50 else c
+            sma200 = float(compute_sma(qqq_df['Close'], 200).iloc[-1]) if len(qqq_df) >= 200 else c
+
+            above_ema20 = c >= ema20
+            above_sma50 = c >= sma50
+            above_sma200 = c >= sma200
+
+            if above_sma50:
+                score += 10
+                details.append("QQQ > 50 SMA")
+            else:
+                score -= 10
+                details.append("QQQ < 50 SMA")
+
+            if above_ema20:
+                score += 5
+            else:
+                score -= 5
+
+            if chg_pct > 0:
+                score += 5
+            elif chg_pct < 0:
+                score -= 5
+
+            qqq_info = {
+                "close": round(c, 2),
+                "change_pct": chg_pct,
+                "above_ema20": above_ema20,
+                "above_sma50": above_sma50,
+                "above_sma200": above_sma200,
+                "regime": "Above 50 SMA" if above_sma50 else "Below 50 SMA"
+            }
+
+        # 3. VIX Analysis
+        vix_val = float(vix_df['Close'].iloc[-1]) if vix_df is not None and len(vix_df) > 0 else 16.5
+        vix_val = round(vix_val, 2)
+        if vix_val < 18.0:
+            vix_state = "Risk-On (Low Vol)"
+            score += 10
+        elif vix_val < 24.0:
+            vix_state = "Moderate Vol"
+            score += 0
+        elif vix_val < 30.0:
+            vix_state = "Elevated Fear"
+            score -= 15
+        else:
+            vix_state = "High Fear"
+            score -= 25
+
+        vix_info = {
+            "close": vix_val,
+            "risk_state": vix_state
+        }
+
+        # Clamp score between 0 and 100
+        score = max(0, min(100, score))
+
+        if score >= 60:
+            sentiment = "Bullish"
+            label = "BULLISH 🟢"
+        elif score <= 40:
+            sentiment = "Bearish"
+            label = "BEARISH 🔴"
+        else:
+            sentiment = "Neutral"
+            label = "NEUTRAL ⚪"
+
+        summary = f"Market Sentiment is {sentiment} ({score}/100) — SPY (${spy_info.get('close', '—')}) & QQQ (${qqq_info.get('close', '—')}) | VIX: {vix_val} ({vix_state})"
+
+        res = {
+            "sentiment": sentiment,
+            "score": score,
+            "label": label,
+            "is_bullish": sentiment == "Bullish",
+            "spy": spy_info,
+            "qqq": qqq_info,
+            "vix": vix_info,
+            "summary": summary,
+            "timestamp": datetime.now().strftime("%I:%M %p")
+        }
+        _market_sentiment_cache = res
+        _market_sentiment_cache_ts = now
+        print(f"  [Market Sentiment] {label} (Score: {score}) | {summary}")
+        return res
+
     except Exception as e:
-        print(f"  [Regime check] Error fetching SPY regime: {e}")
+        print(f"  [Market Sentiment] Error: {e}")
+        return {
+            "sentiment": "Bullish",
+            "score": 65,
+            "label": "BULLISH 🟢",
+            "is_bullish": True,
+            "spy": {"close": 0, "change_pct": 0, "regime": "Above 50 SMA"},
+            "qqq": {"close": 0, "change_pct": 0, "regime": "Above 50 SMA"},
+            "vix": {"close": 16.5, "risk_state": "Risk-On (Low Vol)"},
+            "summary": "Market Sentiment is Bullish",
+            "timestamp": datetime.now().strftime("%I:%M %p")
+        }
+
+
+def check_spy_regime():
+    """Returns True if Market Sentiment is Bullish, False if Bearish."""
+    try:
+        sentiment = get_market_sentiment()
+        return sentiment.get("is_bullish", True)
+    except Exception as e:
+        print(f"  [Regime check] Error fetching sentiment regime: {e}")
     return True  # Fallback to bullish if fetch fails
 
 def fetch_upcoming_earnings(tickers):
@@ -1248,6 +1427,114 @@ def detect_unusual_options(sym):
 
 
 # =====================================================================
+# Institutional Supply and Demand Zones
+# =====================================================================
+
+def detect_supply_demand_zones(df, lookback=60, tolerance_pct=0.015):
+    """
+    Detect institutional Supply and Demand zones based on explosive imbalance displacement candles:
+    - Demand Zones (Drop-Base-Rally / Rally-Base-Rally): Base preceding a large bullish impulse candle.
+    - Supply Zones (Rally-Base-Drop / Drop-Base-Drop): Base preceding a large bearish impulse candle.
+    Returns: (in_demand, in_supply, active_demand, active_supply)
+    """
+    if df is None or len(df) < 15:
+        return False, False, None, None
+
+    last_price = float(df["Close"].iloc[-1])
+    atr_series = compute_atr(df, 14)
+    atr = float(atr_series.iloc[-1]) if len(atr_series) > 0 and not np.isnan(atr_series.iloc[-1]) else 0.02 * last_price
+
+    demand_zones = []
+    supply_zones = []
+
+    start_idx = max(2, len(df) - lookback)
+    for i in range(start_idx, len(df) - 1):
+        base_bar = df.iloc[i]
+        next_bar = df.iloc[i + 1]
+
+        base_body = abs(float(base_bar["Close"]) - float(base_bar["Open"]))
+        next_body = abs(float(next_bar["Close"]) - float(next_bar["Open"]))
+
+        # 1. Demand Zone: Base followed by strong bullish displacement
+        is_bull_displacement = (float(next_bar["Close"]) > float(next_bar["Open"])) and (
+            next_body >= 1.0 * atr or next_body >= 1.7 * max(base_body, 0.01)
+        )
+        if is_bull_displacement:
+            zone_low = float(base_bar["Low"])
+            zone_high = max(float(base_bar["Open"]), float(base_bar["Close"]))
+            age = len(df) - 1 - i
+            demand_zones.append({"low": zone_low, "high": zone_high, "age": age})
+
+        # 2. Supply Zone: Base followed by strong bearish displacement
+        is_bear_displacement = (float(next_bar["Close"]) < float(next_bar["Open"])) and (
+            next_body >= 1.0 * atr or next_body >= 1.7 * max(base_body, 0.01)
+        )
+        if is_bear_displacement:
+            zone_high = float(base_bar["High"])
+            zone_low = min(float(base_bar["Open"]), float(base_bar["Close"]))
+            age = len(df) - 1 - i
+            supply_zones.append({"low": zone_low, "high": zone_high, "age": age})
+
+    active_demand = None
+    in_demand = False
+    for z in reversed(demand_zones):
+        z_low = z["low"]
+        z_high = z["high"]
+        if (z_low * (1.0 - tolerance_pct * 0.5)) <= last_price <= (z_high * (1.0 + tolerance_pct)):
+            in_demand = True
+            active_demand = {
+                "type": "Demand",
+                "low": round(z_low, 2),
+                "high": round(z_high, 2),
+                "age_bars": z["age"],
+                "range_str": f"${z_low:.2f} – ${z_high:.2f}"
+            }
+            break
+
+    if not active_demand:
+        below_demand = [z for z in reversed(demand_zones) if z["high"] <= last_price * 1.02]
+        if below_demand:
+            z = below_demand[0]
+            active_demand = {
+                "type": "Demand",
+                "low": round(z["low"], 2),
+                "high": round(z["high"], 2),
+                "age_bars": z["age"],
+                "range_str": f"${z['low']:.2f} – ${z['high']:.2f}"
+            }
+
+    active_supply = None
+    in_supply = False
+    for z in reversed(supply_zones):
+        z_low = z["low"]
+        z_high = z["high"]
+        if (z_low * (1.0 - tolerance_pct)) <= last_price <= (z_high * (1.0 + tolerance_pct * 0.5)):
+            in_supply = True
+            active_supply = {
+                "type": "Supply",
+                "low": round(z_low, 2),
+                "high": round(z_high, 2),
+                "age_bars": z["age"],
+                "range_str": f"${z_low:.2f} – ${z_high:.2f}"
+            }
+            break
+
+    if not active_supply:
+        above_supply = [z for z in reversed(supply_zones) if z["low"] >= last_price * 0.98]
+        if above_supply:
+            z = above_supply[0]
+            active_supply = {
+                "type": "Supply",
+                "low": round(z["low"], 2),
+                "high": round(z["high"], 2),
+                "age_bars": z["age"],
+                "range_str": f"${z['low']:.2f} – ${z['high']:.2f}"
+            }
+
+    return in_demand, in_supply, active_demand, active_supply
+
+
+# =====================================================================
 # Analyze a single stock DataFrame
 # =====================================================================
 
@@ -1387,6 +1674,41 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
         hs, ihs = False, False
         cup_handle = False
 
+        # 17. Supply and Demand Zones Detection
+        in_demand, in_supply, demand_zone, supply_zone = detect_supply_demand_zones(df)
+
+        # Technical trend posture based on moving averages and momentum
+        tech_bull_signals = 0
+        tech_bear_signals = 0
+        if ema20 and last_price > ema20: tech_bull_signals += 1
+        elif ema20 and last_price < ema20: tech_bear_signals += 1
+
+        if sma50 and last_price > sma50: tech_bull_signals += 1
+        elif sma50 and last_price < sma50: tech_bear_signals += 1
+
+        if sma200 and last_price > sma200: tech_bull_signals += 1
+        elif sma200 and last_price < sma200: tech_bear_signals += 1
+
+        if ema20 and sma50 and ema20 > sma50: tech_bull_signals += 1
+        elif ema20 and sma50 and ema20 < sma50: tech_bear_signals += 1
+
+        if macd_line is not None and signal_line is not None and len(macd_line) > 0 and len(signal_line) > 0:
+            if float(macd_line.iloc[-1]) > float(signal_line.iloc[-1]):
+                tech_bull_signals += 1
+            else:
+                tech_bear_signals += 1
+
+        if tech_bull_signals >= 4:
+            tech_trend = "Strong Bullish"
+        elif tech_bull_signals >= 3:
+            tech_trend = "Bullish"
+        elif tech_bear_signals >= 4:
+            tech_trend = "Strong Bearish"
+        elif tech_bear_signals >= 3:
+            tech_trend = "Bearish"
+        else:
+            tech_trend = "Neutral"
+
         # ═══════════════════════════════════════════════════════
         # WEIGHTED SCORING SYSTEM
         # ═══════════════════════════════════════════════════════
@@ -1398,7 +1720,10 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
         bull_tags = []
         if is_market_bullish:
             bull_score += 1
-            bull_tags.append("Market Trend +1")
+            bull_tags.append("Market Sentiment: Bullish +1")
+        if tech_bull_signals >= 3:
+            bull_score += 1
+            bull_tags.append(f"Tech: {tech_trend} +1")
 
         # Chart pattern additions to bullish scoring
         if double_bottom:
@@ -1454,13 +1779,18 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
                 bull_score += 1; bull_tags.append("Prior Downtrend +1")
         if vol_above_avg and has_bull_pattern:
             bull_score += 1; bull_tags.append("Vol > Avg +1")
+        if in_demand and demand_zone:
+            bull_score += 2; bull_tags.append(f"Demand Zone ({demand_zone['range_str']}) +2")
 
         # --- BEARISH SCORE ---
         bear_score = 0
         bear_tags = []
         if not is_market_bullish:
             bear_score += 1
-            bear_tags.append("Market Trend +1")
+            bear_tags.append("Market Sentiment: Bearish +1")
+        if tech_bear_signals >= 3:
+            bear_score += 1
+            bear_tags.append(f"Tech: {tech_trend} +1")
 
         if double_top:
             bear_score += 3
@@ -1507,6 +1837,8 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
                 bear_score += 1; bear_tags.append("Prior Uptrend +1")
         if vol_above_avg and has_bear_pattern:
             bear_score += 1; bear_tags.append("Vol > Avg +1")
+        if in_supply and supply_zone:
+            bear_score += 2; bear_tags.append(f"Supply Zone ({supply_zone['range_str']}) +2")
 
         # --- UNUSUAL OPTIONS ACTIVITY (check if either side has potential) ---
         # Only fetch options data if the stock already shows some technical signals
@@ -1611,6 +1943,20 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
             sl = last_price + 2.0 * atr_val
             pt = last_price - 4.0 * atr_val
 
+        dir_str = "Bullish" if is_bullish else "Bearish"
+        mkt_sentiment_label = "Bullish" if is_market_bullish else "Bearish"
+        sentiment_align = "Bullish Aligned" if (dir_str == "Bullish" and is_market_bullish) else ("Bearish Aligned" if (dir_str == "Bearish" and not is_market_bullish) else "Counter-Trend Reversal")
+
+        zone_str = None
+        if is_bullish and demand_zone:
+            zone_str = f"Demand: {demand_zone['range_str']}"
+        elif is_bearish and supply_zone:
+            zone_str = f"Supply: {supply_zone['range_str']}"
+        elif demand_zone:
+            zone_str = f"Demand: {demand_zone['range_str']}"
+        elif supply_zone:
+            zone_str = f"Supply: {supply_zone['range_str']}"
+
         return {
             "Ticker": sym,
             "Last Price": round(last_price, 2),
@@ -1633,7 +1979,14 @@ def _analyze_stock(sym, df, rsi_bull_thresh=35, rsi_bear_thresh=65, swing_tolera
             "Patterns": " | ".join(detected_patterns) if detected_patterns else "—",
             "Entry": round(entry, 2),
             "Stop Loss": round(sl, 2),
-            "Profit Target": round(pt, 2)
+            "Profit Target": round(pt, 2),
+            "Direction": dir_str,
+            "Market Sentiment": mkt_sentiment_label,
+            "Sentiment Alignment": sentiment_align,
+            "Technical Trend": tech_trend,
+            "Supply/Demand Zone": zone_str,
+            "In Zone": bool(in_demand if is_bullish else in_supply),
+            "Zone Details": demand_zone if is_bullish else supply_zone
         }
     except Exception as e:
         print(f"  Error analyzing {sym}: {e}")
@@ -3341,7 +3694,8 @@ def watchlist_scan(tickers, extended_hours=False, mode="watchlist"):
         on_progress=_on_dl_progress, delay=0.01, interval=interval, includePrePost=inc_pre_post
     )
 
-    is_bullish = check_spy_regime()
+    market_sentiment = get_market_sentiment()
+    is_bullish = market_sentiment.get("is_bullish", True)
     iv_history = _load_iv_history()
 
     # Collect results keyed by ticker for merging
@@ -3550,6 +3904,59 @@ def watchlist_scan(tickers, extended_hours=False, mode="watchlist"):
         else:
             base["Grade"] = "B"
 
+        # Attach Market Sentiment & Alignment
+        base["Market Sentiment"] = market_sentiment.get("sentiment", "Bullish")
+        base["Market Sentiment Score"] = market_sentiment.get("score", 65)
+        final_dir = base.get("Direction", "Bullish")
+        if final_dir == market_sentiment.get("sentiment"):
+            base["Sentiment Alignment"] = f"{final_dir} Aligned"
+        else:
+            base["Sentiment Alignment"] = "Counter-Trend Reversal"
+
+        # Ensure Technical Trend is populated
+        if "Technical Trend" not in base or not base["Technical Trend"]:
+            if base.get("EMA20_Dist", 0) > 0 and base.get("SMA200_Dist", 0) > 0:
+                base["Technical Trend"] = "Bullish"
+            elif base.get("EMA20_Dist", 0) < 0 and base.get("SMA200_Dist", 0) < 0:
+                base["Technical Trend"] = "Bearish"
+            else:
+                base["Technical Trend"] = "Neutral"
+
+        # Ensure SMA50_Dist is populated
+        if "SMA50_Dist" not in base or base["SMA50_Dist"] is None:
+            if df_sym is not None and len(df_sym) >= 50:
+                s50 = float(compute_sma(df_sym["Close"], 50).iloc[-1])
+                base["SMA50_Dist"] = round(((last_price - s50) / s50) * 100, 2)
+            else:
+                base["SMA50_Dist"] = 0.0
+
+        # Ensure Supply/Demand Zone is attached
+        if not base.get("Supply/Demand Zone"):
+            if df_sym is not None and len(df_sym) >= 15:
+                in_d, in_s, d_zone, s_zone = detect_supply_demand_zones(df_sym)
+                if final_dir == "Bullish" and d_zone:
+                    base["Supply/Demand Zone"] = f"Demand: {d_zone['range_str']}"
+                    base["In Zone"] = in_d
+                    base["Zone Details"] = d_zone
+                elif final_dir == "Bearish" and s_zone:
+                    base["Supply/Demand Zone"] = f"Supply: {s_zone['range_str']}"
+                    base["In Zone"] = in_s
+                    base["Zone Details"] = s_zone
+                elif d_zone:
+                    base["Supply/Demand Zone"] = f"Demand: {d_zone['range_str']}"
+                    base["In Zone"] = in_d
+                    base["Zone Details"] = d_zone
+                elif s_zone:
+                    base["Supply/Demand Zone"] = f"Supply: {s_zone['range_str']}"
+                    base["In Zone"] = in_s
+                    base["Zone Details"] = s_zone
+                else:
+                    base["Supply/Demand Zone"] = None
+                    base["In Zone"] = False
+            else:
+                base["Supply/Demand Zone"] = None
+                base["In Zone"] = False
+
         merged.append(base)
 
     total_time = time.time() - start_time
@@ -3558,6 +3965,7 @@ def watchlist_scan(tickers, extended_hours=False, mode="watchlist"):
         "phase_label": f"Done — {len(merged)} signals found",
         "current": total, "total": total,
         "found": len(merged), "pct": 100, "eta_seconds": 0,
+        "market_sentiment": market_sentiment
     })
 
     done_title = "Top 50" if mode == "top50" else "Watchlist"
@@ -3570,6 +3978,7 @@ def watchlist_scan(tickers, extended_hours=False, mode="watchlist"):
         best_df = df[df["Score"] >= 5]
     if len(best_df) == 0:
         best_df = df
+    best_df.attrs["market_sentiment"] = market_sentiment
     return best_df.head(15)
 
 

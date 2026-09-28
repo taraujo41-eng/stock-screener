@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="/icon.png">
   <link rel="icon" href="/icon.png">
-  <link rel="stylesheet" href="/style.css?v=4.2">
+  <link rel="stylesheet" href="/style.css?v=4.4">
   <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body>
@@ -26,7 +26,7 @@
     <header class="header">
       <span class="header__icon">📋</span>
       <h1 class="header__title">Watchlist Scanner</h1>
-      <p class="header__subtitle" id="headerSubtitle">Reversal & RSI Divergence Scanner</p>
+      <p class="header__subtitle" id="headerSubtitle">Technicals & Market Sentiment Reversal Scanner</p>
     </header>
 
     <!-- Navigation Tabs (Scanner vs Paper Trader) -->
@@ -47,6 +47,52 @@
         <div class="mode-links">
           <button class="edit-link" id="editWatchlistBtn" onclick="openWatchlistModal()">⚙️ Edit Watchlist</button>
           <button class="edit-link edit-link--top50" id="viewTop50Btn" onclick="openTop50Modal()">🔥 View Top 50</button>
+        </div>
+      </div>
+
+      <!-- Market Sentiment Live Banner -->
+      <div class="market-sentiment-card" id="marketSentimentCard">
+        <div class="sentiment-card-header">
+          <div class="sentiment-title-wrap">
+            <span class="sentiment-icon">🌐</span>
+            <span class="sentiment-title">MARKET SENTIMENT</span>
+            <span class="sentiment-pill sentiment-pill--bullish" id="marketSentimentPill">BULLISH 🟢</span>
+          </div>
+          <button class="sentiment-refresh-btn" id="sentimentRefreshBtn" onclick="fetchLiveMarketSentiment()" title="Refresh live market sentiment">🔄 Live</button>
+        </div>
+        <div class="sentiment-indices-grid">
+          <div class="sentiment-index-item">
+            <div class="sentiment-index-head">
+              <span class="sentiment-index-symbol">SPY</span>
+              <span class="sentiment-index-price" id="spyPrice">$771.35</span>
+            </div>
+            <div class="sentiment-index-sub">
+              <span class="sentiment-index-change sentiment-up" id="spyChange">+0.54%</span>
+              <span class="sentiment-index-regime" id="spyRegime">Above 50 SMA</span>
+            </div>
+          </div>
+          <div class="sentiment-index-item">
+            <div class="sentiment-index-head">
+              <span class="sentiment-index-symbol">QQQ</span>
+              <span class="sentiment-index-price" id="qqqPrice">$744.50</span>
+            </div>
+            <div class="sentiment-index-sub">
+              <span class="sentiment-index-change sentiment-up" id="qqqChange">+0.46%</span>
+              <span class="sentiment-index-regime" id="qqqRegime">Above 50 SMA</span>
+            </div>
+          </div>
+          <div class="sentiment-index-item">
+            <div class="sentiment-index-head">
+              <span class="sentiment-index-symbol">VIX</span>
+              <span class="sentiment-index-price" id="vixPrice">16.85</span>
+            </div>
+            <div class="sentiment-index-sub">
+              <span class="sentiment-index-risk sentiment-risk--on" id="vixState">Risk-On (Low Vol)</span>
+            </div>
+          </div>
+        </div>
+        <div class="sentiment-summary" id="sentimentSummary">
+          SPY &amp; QQQ trading above key moving averages with low volatility regime.
         </div>
       </div>
 
@@ -123,6 +169,9 @@
         <button class="filter-btn filter-btn--active" data-filter="all" onclick="setFilter('all', this)">All</button>
         <button class="filter-btn" data-filter="bullish" onclick="setFilter('bullish', this)">🟢 Bullish</button>
         <button class="filter-btn" data-filter="bearish" onclick="setFilter('bearish', this)">🔴 Bearish</button>
+        <button class="filter-btn" data-filter="zone" onclick="setFilter('zone', this)">🧱 S/D Zone</button>
+        <button class="filter-btn" data-filter="aligned" onclick="setFilter('aligned', this)">🎯 Market Aligned</button>
+        <button class="filter-btn" data-filter="counter" onclick="setFilter('counter', this)">🔄 Counter-Trend</button>
         <button class="filter-btn" data-filter="both" onclick="setFilter('both', this)">⚡ Both</button>
       </div>
 
@@ -335,6 +384,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=6.1"></script>
+  <script src="/app.js?v=6.3"></script>
 </body>
 </html>

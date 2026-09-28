@@ -20,7 +20,8 @@ from reversal_scanner import (
     watchlist_scan,
     options_watchlist_scan,
     unusual_options_full_market_scan,
-    scan_progress, _reset_progress
+    scan_progress, _reset_progress,
+    get_market_sentiment
 )
 from datetime import datetime, timedelta
 import time
@@ -582,12 +583,14 @@ def scan_watchlist():
                 df = df[df["Ticker"].isin(current_watchlist)]
             raw_records = df.to_dict(orient="records") if not df.empty else []
             clean_records = sanitize_for_json(raw_records)
+            mkt_sentiment = get_market_sentiment()
             results_data = {
                 "ok": True,
                 "mode": "watchlist",
                 "scan_id": scan_id,
                 "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
                 "count": len(clean_records),
+                "market_sentiment": mkt_sentiment,
                 "results": clean_records,
             }
             app.config["LAST_WATCHLIST_RESULTS"] = results_data
@@ -678,7 +681,18 @@ def scan_watchlist_results():
     results = get_fresh_scan_results("LAST_WATCHLIST_RESULTS", WATCHLIST_RESULTS_FILE)
     if not results or not isinstance(results, dict):
         return jsonify({"ok": True, "mode": "watchlist", "count": 0, "results": [], "timestamp": "Ready"}), 200
+    if "market_sentiment" not in results:
+        results["market_sentiment"] = get_market_sentiment()
     return jsonify(results)
+
+@app.route("/api/market-sentiment", methods=["GET"])
+def api_market_sentiment():
+    """Returns real-time broad market sentiment (SPY, QQQ, VIX)."""
+    try:
+        sentiment = get_market_sentiment()
+        return jsonify({"ok": True, "sentiment": sentiment})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 # ── API: Top 50 Stocks Scan ─────────────────────────────────────────
 
@@ -705,6 +719,7 @@ def scan_top50():
                 df = df[df["Ticker"].isin(tickers)]
             raw_records = df.to_dict(orient="records") if not df.empty else []
             clean_records = sanitize_for_json(raw_records)
+            mkt_sentiment = get_market_sentiment()
             results_data = {
                 "ok": True,
                 "mode": "top50",
@@ -712,6 +727,7 @@ def scan_top50():
                 "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
                 "count": len(clean_records),
                 "tickers_scanned": len(tickers),
+                "market_sentiment": mkt_sentiment,
                 "results": clean_records,
             }
             app.config["LAST_TOP50_RESULTS"] = results_data

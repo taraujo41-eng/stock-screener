@@ -36,8 +36,86 @@ function fmtEta(seconds) {
 function updateModeDesc() {
   const desc = document.getElementById("modeDesc");
   const subtitle = document.getElementById("headerSubtitle");
-  if (desc) desc.textContent = "Scans your watchlist tickers using all criteria: Reversals, 3σ/2σ Bands, RSI Divergence & Options Exhaustion";
-  if (subtitle) subtitle.textContent = "All Criteria × Your Custom Watchlist";
+  if (desc) desc.textContent = "Scans your watchlist tickers using all criteria: Technicals, Market Sentiment, Reversals, Sigma Bands & Options Exhaustion";
+  if (subtitle) subtitle.textContent = "Technicals & Market Sentiment × Your Custom Watchlist";
+}
+
+// ── Market Sentiment Live UI ──────────────────────────────
+
+function updateMarketSentimentUI(sentiment) {
+  if (!sentiment) return;
+  const card = document.getElementById("marketSentimentCard");
+  const pill = document.getElementById("marketSentimentPill");
+  if (!card || !pill) return;
+
+  const sLabel = (sentiment.sentiment || "Bullish").toUpperCase();
+  const isBull = sentiment.sentiment === "Bullish";
+  const isBear = sentiment.sentiment === "Bearish";
+
+  pill.textContent = sentiment.label || `${sLabel} ${isBull ? '🟢' : (isBear ? '🔴' : '⚪')}`;
+  pill.className = `sentiment-pill sentiment-pill--${(sentiment.sentiment || 'bullish').toLowerCase()}`;
+  card.className = `market-sentiment-card sentiment--${(sentiment.sentiment || 'bullish').toLowerCase()}`;
+
+  // SPY
+  if (sentiment.spy) {
+    const spyP = document.getElementById("spyPrice");
+    const spyC = document.getElementById("spyChange");
+    const spyR = document.getElementById("spyRegime");
+    if (spyP && sentiment.spy.close) spyP.textContent = `$${sentiment.spy.close.toFixed(2)}`;
+    if (spyC && sentiment.spy.change_pct !== undefined) {
+      spyC.textContent = `${sentiment.spy.change_pct > 0 ? '+' : ''}${sentiment.spy.change_pct.toFixed(2)}%`;
+      spyC.className = `sentiment-index-change ${sentiment.spy.change_pct >= 0 ? 'sentiment-up' : 'sentiment-down'}`;
+    }
+    if (spyR) spyR.textContent = sentiment.spy.regime || (sentiment.spy.above_sma50 ? "Above 50 SMA" : "Below 50 SMA");
+  }
+
+  // QQQ
+  if (sentiment.qqq) {
+    const qqqP = document.getElementById("qqqPrice");
+    const qqqC = document.getElementById("qqqChange");
+    const qqqR = document.getElementById("qqqRegime");
+    if (qqqP && sentiment.qqq.close) qqqP.textContent = `$${sentiment.qqq.close.toFixed(2)}`;
+    if (qqqC && sentiment.qqq.change_pct !== undefined) {
+      qqqC.textContent = `${sentiment.qqq.change_pct > 0 ? '+' : ''}${sentiment.qqq.change_pct.toFixed(2)}%`;
+      qqqC.className = `sentiment-index-change ${sentiment.qqq.change_pct >= 0 ? 'sentiment-up' : 'sentiment-down'}`;
+    }
+    if (qqqR) qqqR.textContent = sentiment.qqq.regime || (sentiment.qqq.above_sma50 ? "Above 50 SMA" : "Below 50 SMA");
+  }
+
+  // VIX
+  if (sentiment.vix) {
+    const vixP = document.getElementById("vixPrice");
+    const vixS = document.getElementById("vixState");
+    if (vixP && sentiment.vix.close) vixP.textContent = sentiment.vix.close.toFixed(2);
+    if (vixS && sentiment.vix.risk_state) {
+      vixS.textContent = sentiment.vix.risk_state;
+      vixS.className = `sentiment-index-risk ${sentiment.vix.close < 20 ? 'sentiment-risk--on' : 'sentiment-risk--off'}`;
+    }
+  }
+
+  // Summary
+  const sumEl = document.getElementById("sentimentSummary");
+  if (sumEl && sentiment.summary) {
+    sumEl.textContent = sentiment.summary;
+  }
+}
+
+async function fetchLiveMarketSentiment() {
+  const btn = document.getElementById("sentimentRefreshBtn");
+  if (btn) btn.textContent = "⏳...";
+  try {
+    const res = await fetch("/api/market-sentiment");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.ok && data.sentiment) {
+        updateMarketSentimentUI(data.sentiment);
+      }
+    }
+  } catch (e) {
+    console.error("Failed to fetch market sentiment:", e);
+  } finally {
+    if (btn) btn.textContent = "🔄 Live";
+  }
 }
 
 async function loadLastWatchlistScan() {
@@ -156,11 +234,43 @@ function buildCard(item, index) {
   const ema20DistVal = item.EMA20_Dist !== undefined ? `${item.EMA20_Dist > 0 ? '+' : ''}${item.EMA20_Dist.toFixed(1)}%` : "—";
   const ema20Class = item.EMA20_Dist > 0 ? "tech-chip__value--green" : "tech-chip__value--red";
 
+  const sma50DistVal = item.SMA50_Dist !== undefined ? `${item.SMA50_Dist > 0 ? '+' : ''}${item.SMA50_Dist.toFixed(1)}%` : "—";
+  const sma50Class = item.SMA50_Dist > 0 ? "tech-chip__value--green" : "tech-chip__value--red";
+
   const sma200DistVal = item.SMA200_Dist !== undefined ? `${item.SMA200_Dist > 0 ? '+' : ''}${item.SMA200_Dist.toFixed(1)}%` : "—";
   const sma200Class = item.SMA200_Dist > 0 ? "tech-chip__value--green" : "tech-chip__value--red";
 
   const squeezeVal = item.Squeeze ? `<span class="tech-chip__value--squeeze-on">ON 🔥</span>` : "OFF";
   const squeezeCls = item.Squeeze ? "tech-chip--squeeze-on" : "";
+
+  // Criteria & Sentiment Badges
+  const sentimentAlign = item["Sentiment Alignment"] || (item.Direction === "Bullish" ? "Bullish Aligned" : "Bearish Aligned");
+  const isAligned = sentimentAlign.includes("Aligned");
+  const sentimentBadgeCls = sentimentAlign.includes("Bullish") ? "criteria-badge--bull" : (sentimentAlign.includes("Bearish") ? "criteria-badge--bear" : "criteria-badge--counter");
+  const sentimentIcon = isAligned ? "🎯" : "🔄";
+
+  const techTrend = item["Technical Trend"] || (item.EMA20_Dist > 0 ? "Bullish" : "Bearish");
+  const techTrendCls = techTrend.includes("Bullish") ? "criteria-badge--bull" : (techTrend.includes("Bearish") ? "criteria-badge--bear" : "criteria-badge--neutral");
+
+  // Supply / Demand Zone Badge
+  const zoneStr = item["Supply/Demand Zone"];
+  const inZone = item["In Zone"];
+  let zoneBadgeHtml = "";
+  if (zoneStr && zoneStr !== "None") {
+    const isDemand = zoneStr.toLowerCase().includes("demand");
+    const zoneCls = isDemand ? "criteria-badge--demand" : "criteria-badge--supply";
+    const zoneIcon = isDemand ? "🧱 Demand" : "🧱 Supply";
+    const statusText = inZone ? " 🔥 In Zone" : "";
+    zoneBadgeHtml = `<span class="criteria-badge ${zoneCls}" title="Institutional Imbalance Zone">${zoneIcon}: ${zoneStr.replace(/^(Demand|Supply):\s*/i, '')}${statusText}</span>`;
+  }
+
+  const criteriaRowHtml = `
+    <div class="card__criteria-row">
+      <span class="criteria-badge ${sentimentBadgeCls}" title="Market Sentiment Alignment">${sentimentIcon} ${sentimentAlign}</span>
+      <span class="criteria-badge ${techTrendCls}" title="Technical Moving Average & Momentum Posture">📊 ${techTrend}</span>
+      ${zoneBadgeHtml}
+    </div>
+  `;
 
   const techGridHtml = `
     <div class="card__tech-grid">
@@ -183,6 +293,10 @@ function buildCard(item, index) {
       <div class="tech-chip">
         <span class="tech-chip__label">20 EMA</span>
         <span class="tech-chip__value ${ema20Class}">${ema20DistVal}</span>
+      </div>
+      <div class="tech-chip">
+        <span class="tech-chip__label">50 SMA</span>
+        <span class="tech-chip__value ${sma50Class}">${sma50DistVal}</span>
       </div>
       <div class="tech-chip">
         <span class="tech-chip__label">200 SMA</span>
@@ -219,6 +333,7 @@ function buildCard(item, index) {
           </div>
         </div>
       </div>
+      ${criteriaRowHtml}
       ${techGridHtml}
       ${patternBadges}
       <div class="card__signals">
@@ -681,6 +796,15 @@ function renderResults() {
     } else if (currentFilter === "bearish") {
       filtered = scanData.filter(d =>
         d["Bearish Signals"] && d["Bearish Signals"] !== "—");
+    } else if (currentFilter === "aligned") {
+      filtered = scanData.filter(d =>
+        d["Sentiment Alignment"] && d["Sentiment Alignment"].includes("Aligned"));
+    } else if (currentFilter === "counter") {
+      filtered = scanData.filter(d =>
+        d["Sentiment Alignment"] && d["Sentiment Alignment"].includes("Counter"));
+    } else if (currentFilter === "zone") {
+      filtered = scanData.filter(d =>
+        d["Supply/Demand Zone"] && (d["In Zone"] || d["Supply/Demand Zone"] !== "None"));
     } else if (currentFilter === "both") {
       filtered = scanData.filter(d =>
         (d["Bullish Signals"] && d["Bullish Signals"] !== "—") &&
@@ -794,6 +918,10 @@ function displayResults(data) {
     badge.classList.remove("hidden");
   } else {
     badge.classList.add("hidden");
+  }
+
+  if (data.market_sentiment) {
+    updateMarketSentimentUI(data.market_sentiment);
   }
 
   updateStats();
@@ -1283,6 +1411,7 @@ checkActiveScan().then(running => {
 
 // Fetch user watchlist from server on app load
 fetchWatchlist();
+fetchLiveMarketSentiment();
 
 // ── Watchlist Manager Functions ───────────────────────────────────
 

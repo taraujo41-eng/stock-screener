@@ -43,7 +43,20 @@
       "Profit Target": 44.04,
       "Suggested Option": "Oct 16 $48.0 PUT (@$1.92, IV: 35.0%)",
       "News Details": null,
-      "SMA50_Dist": 0.89
+      "SMA50_Dist": 0.89,
+      "Market Sentiment": "Bullish",
+      "Market Sentiment Score": 100,
+      "Sentiment Alignment": "Counter-Trend Reversal",
+      "Technical Trend": "Bullish",
+      "Supply/Demand Zone": "Supply: $47.68 \u2013 $48.35",
+      "In Zone": true,
+      "Zone Details": {
+        "type": "Supply",
+        "low": 47.68,
+        "high": 48.35,
+        "age_bars": 4,
+        "range_str": "$47.68 \u2013 $48.35"
+      }
     },
     {
       "Ticker": "NEE",
@@ -88,7 +101,20 @@
         "publish_time": "Sep 19, 2026 at 11:24 AM UTC",
         "url": "https://news-static.webullfintech.com/us/news-html/20260919/15604779689444352.html"
       },
-      "SMA50_Dist": -5.35
+      "SMA50_Dist": -5.35,
+      "Market Sentiment": "Bullish",
+      "Market Sentiment Score": 100,
+      "Sentiment Alignment": "Bullish Aligned",
+      "Technical Trend": "Strong Bearish",
+      "Supply/Demand Zone": "Supply: $77.02 \u2013 $79.04",
+      "In Zone": true,
+      "Zone Details": {
+        "type": "Supply",
+        "low": 77.02,
+        "high": 79.04,
+        "age_bars": 2,
+        "range_str": "$77.02 \u2013 $79.04"
+      }
     },
     {
       "Ticker": "PLTR",
@@ -126,7 +152,20 @@
         "publish_time": "Sep 20, 2026 at 11:12 PM UTC",
         "url": "https://news-static.webullfintech.com/us/news-html/20260920/15613229864797184.html"
       },
-      "SMA50_Dist": 12.25
+      "SMA50_Dist": 12.25,
+      "Market Sentiment": "Bullish",
+      "Market Sentiment Score": 100,
+      "Sentiment Alignment": "Bullish Aligned",
+      "Technical Trend": "Strong Bullish",
+      "Supply/Demand Zone": "Demand: $182.03 \u2013 $185.13",
+      "In Zone": false,
+      "Zone Details": {
+        "type": "Demand",
+        "low": 182.03,
+        "high": 185.13,
+        "age_bars": 3,
+        "range_str": "$182.03 \u2013 $185.13"
+      }
     },
     {
       "Ticker": "DELL",
@@ -159,7 +198,20 @@
       "Profit Target": 419.28,
       "Suggested Option": "\u2014",
       "News Details": null,
-      "SMA50_Dist": 22.79
+      "SMA50_Dist": 22.79,
+      "Market Sentiment": "Bullish",
+      "Market Sentiment Score": 100,
+      "Sentiment Alignment": "Counter-Trend Reversal",
+      "Technical Trend": "Strong Bullish",
+      "Supply/Demand Zone": "Supply: $535.25 \u2013 $562.99",
+      "In Zone": true,
+      "Zone Details": {
+        "type": "Supply",
+        "low": 535.25,
+        "high": 562.99,
+        "age_bars": 12,
+        "range_str": "$535.25 \u2013 $562.99"
+      }
     },
     {
       "Ticker": "DAL",
@@ -204,7 +256,20 @@
         "publish_time": "Sep 20, 2026 at 02:50 PM UTC",
         "url": "https://news-static.webullfintech.com/us/news-html/20260920/15611244324455424.html"
       },
-      "SMA50_Dist": -5.63
+      "SMA50_Dist": -5.63,
+      "Market Sentiment": "Bullish",
+      "Market Sentiment Score": 100,
+      "Sentiment Alignment": "Bullish Aligned",
+      "Technical Trend": "Bearish",
+      "Supply/Demand Zone": "Demand: $85.31 \u2013 $86.16",
+      "In Zone": true,
+      "Zone Details": {
+        "type": "Demand",
+        "low": 85.31,
+        "high": 86.16,
+        "age_bars": 51,
+        "range_str": "$85.31 \u2013 $86.16"
+      }
     },
     {
       "Ticker": "ET",
@@ -249,7 +314,48 @@
         "publish_time": "Sep 20, 2026 at 02:03 PM UTC",
         "url": "https://seekingalpha.com/article/4948142-energy-transfer-enough-is-enough-rating-downgrade?utm_source=webull.com&utm_medium=referral&feed_item_type=article"
       },
-      "SMA50_Dist": 2.19
+      "SMA50_Dist": 2.19,
+      "Market Sentiment": "Bullish",
+      "Market Sentiment Score": 100,
+      "Sentiment Alignment": "Bullish Aligned",
+      "Technical Trend": "Bullish",
+      "Supply/Demand Zone": "Demand: $20.11 \u2013 $20.20",
+      "In Zone": true,
+      "Zone Details": {
+        "type": "Demand",
+        "low": 20.11,
+        "high": 20.2,
+        "age_bars": 34,
+        "range_str": "$20.11 \u2013 $20.20"
+      }
     }
-  ]
+  ],
+  "market_sentiment": {
+    "sentiment": "Bullish",
+    "score": 100,
+    "label": "BULLISH \ud83d\udfe2",
+    "is_bullish": true,
+    "spy": {
+      "close": 771.35,
+      "change_pct": 0.54,
+      "above_ema20": true,
+      "above_sma50": true,
+      "above_sma200": true,
+      "regime": "Above 50 SMA"
+    },
+    "qqq": {
+      "close": 744.5,
+      "change_pct": 0.46,
+      "above_ema20": true,
+      "above_sma50": true,
+      "above_sma200": true,
+      "regime": "Above 50 SMA"
+    },
+    "vix": {
+      "close": 16.85,
+      "risk_state": "Risk-On (Low Vol)"
+    },
+    "summary": "Market Sentiment is Bullish (100/100) \u2014 SPY ($771.35) & QQQ ($744.5) | VIX: 16.85 (Risk-On (Low Vol))",
+    "timestamp": "09:07 PM"
+  }
 }
