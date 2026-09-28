@@ -8,6 +8,8 @@ import pytz
 import json
 import traceback as tb
 
+import numpy as np
+
 def get_ny_timezone():
     try:
         from zoneinfo import ZoneInfo
@@ -47,6 +49,33 @@ if not logger.handlers:
 _daily_bands_map = {}
 # Track the date when daily bands were calculated to cache results
 _daily_bands_last_date = None
+
+# Market sentiment cache (refreshed periodically)
+_market_sentiment_cache = None
+_market_sentiment_last_time = 0
+
+def get_cached_market_sentiment():
+    """Fetches real-time SPY, QQQ, and VIX sentiment, caching for 5 minutes."""
+    global _market_sentiment_cache, _market_sentiment_last_time
+    now = time.time()
+    if _market_sentiment_cache and (now - _market_sentiment_last_time) < 300:
+        return _market_sentiment_cache
+    try:
+        from reversal_scanner import get_market_sentiment
+        s = get_market_sentiment()
+        if s and isinstance(s, dict):
+            _market_sentiment_cache = s
+            _market_sentiment_last_time = now
+            return _market_sentiment_cache
+    except Exception as e:
+        logger.warning(f"Error fetching market sentiment for bot: {e}")
+    return _market_sentiment_cache or {
+        "sentiment": "Neutral",
+        "label": "NEUTRAL ⚪",
+        "score": 50,
+        "is_bullish": False,
+        "summary": "Market Sentiment: Neutral (50/100)"
+    }
 # Daily alert cooldown: {ticker: {"direction": "BUY"|"SELL", "date": "YYYY-MM-DD", "price": float}}
 _SCAN_DATA_DIR = os.environ.get("SCAN_DATA_DIR", os.path.dirname(__file__))
 _ALERTED_TODAY_FILE = os.path.join(_SCAN_DATA_DIR, "alerted_today.json")
@@ -153,7 +182,7 @@ def send_telegram_notification(message):
     except Exception as e:
         logger.error(f"Failed to send Telegram notification: {e}")
 
-def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=None, reason=None, score=None, grade=None, rvol=None):
+def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=None, reason=None, score=None, grade=None, rvol=None, zone_summary=None, in_zone=False, sentiment_align=None, market_sentiment_summary=None, tech_trend=None):
     bb_mult = os.getenv("BB_MULT", "3.0")
     logger.info(f"🔔 A+ SIGNAL TRIGGERED on {ticker}: {action} | Setup: {reason} | Price={last_price:.2f}, RSI={f'{rsi:.1f}' if rsi else 'N/A'}, Target VWAP={vwap_target:.2f}")
     
@@ -169,13 +198,26 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             opt_str = f"{opt_info.get('exp', '')} ${opt_info.get('strike', '')} {opt_info.get('type', '')} (@${opt_info.get('mid', 0):.2f})"
     except Exception as e:
         logger.warning(f"Option lookup failed for {ticker}: {e}")
+
+    # Format Zone and Sentiment Badges
+    zone_str = f"🧱 {zone_summary}" if zone_summary and zone_summary != "None" else "None"
+    if in_zone and zone_summary and zone_summary != "None":
+        zone_str += " 🔥 <b>In Zone</b>"
+
+    align_badge = sentiment_align or "Neutral"
+    align_icon = "🎯" if "Aligned" in align_badge else ("🔄" if "Counter" in align_badge else "⚪")
+    tech_str = f"📊 {tech_trend}" if tech_trend else "📊 Neutral"
     
     # 1. Send SMS Notification
     if alert_method in ("SMS", "BOTH"):
+        zone_sms = f"Zone: {zone_summary}{' (In Zone)' if in_zone else ''}\n" if zone_summary and zone_summary != "None" else ""
         sms_msg = (
             f"⭐️ A+ 3-SIGMA REVERSAL: {ticker}\n"
             f"Action: {action} ({signal_type.upper()})\n"
-            f"Grade: ⭐️ A+ SETUP (Score: {score or 14}/18)\n"
+            f"Grade: ⭐️ {grade or 'A+'} SETUP (Score: {score or 14}/22)\n"
+            f"Sentiment: {align_icon} {align_badge}\n"
+            f"Tech Trend: {tech_str}\n"
+            f"{zone_sms}"
             f"Setup: {reason or (action + ' Reversal')}\n"
             f"Price: ${last_price:.2f}\n"
             f"RSI: {f'{rsi:.1f}' if rsi else 'N/A'}\n"
@@ -192,7 +234,10 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
         tg_msg = (
             f"🚨 <b>⭐️ A+ 3-SIGMA REVERSAL ALERT: {ticker}</b> 🚨\n\n"
             f"<b>Action:</b> {action} ({signal_type.upper()})\n"
-            f"<b>Grade:</b> ⭐️ <b>A+ SETUP</b> (Score: {score or 14}/18)\n"
+            f"<b>Grade:</b> ⭐️ <b>{grade or 'A+'} SETUP</b> (Score: {score or 14}/22)\n"
+            f"<b>Market Sentiment:</b> {align_icon} {align_badge}\n"
+            f"<b>Technical Trend:</b> {tech_str}\n"
+            f"<b>Zone:</b> {zone_str}\n"
             f"<b>Setup:</b> {reason or '3-Sigma Breach Reversal'}\n"
             f"<b>Price:</b> ${last_price:.2f}\n"
             f"<b>RSI:</b> {rsi_formatted} (Divergence Confirmed)\n"
@@ -245,8 +290,8 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
 def evaluate_ticker_process(ticker, df):
     """
     Called in parallel background threads to evaluate the 15m dataframe against Daily Bollinger Bands.
-    Enforces 3.0-Sigma actual band breach (no proximity) and strict A+ Setup confirmation
-    (Piercing + RSI Divergence + Confluence Score >= 12).
+    Enforces 3.0-Sigma actual band breach, RSI Divergence, Technical MAs,
+    Supply/Demand zone testing, and Market Sentiment alignment.
     """
     global _daily_bands_map
     
@@ -295,25 +340,59 @@ def evaluate_ticker_process(ticker, df):
     if not (is_bullish_pierced or is_bearish_pierced):
         return None
 
-    # Calculate Confluence Factors for A+ Setup
+    # Calculate Confluence Factors for Setup
     bull_div, bear_div = False, False
     rvol = 1.0
     ema20_dist = 0.0
+    ema20 = None
+    sma50 = None
     try:
-        from reversal_scanner import detect_rsi_divergence, compute_rvol, compute_ema
+        from reversal_scanner import detect_rsi_divergence, compute_rvol, compute_ema, compute_sma
         bull_div, bear_div = detect_rsi_divergence(df['Close'], df_ind['rsi'], lookback=lookback)
         rvol = compute_rvol(df)
         ema20_series = compute_ema(df['Close'], 20)
         ema20 = float(ema20_series.iloc[-1]) if len(ema20_series) > 0 else None
         ema20_dist = ((close_price - ema20) / ema20) * 100 if ema20 else 0.0
+        
+        sma50_series = compute_sma(df['Close'], 50)
+        sma50 = float(sma50_series.iloc[-1]) if len(sma50_series) > 0 and not np.isnan(sma50_series.iloc[-1]) else None
     except Exception as e:
         logger.warning(f"Error computing confluence for {ticker}: {e}")
 
-    # Score Calculation: Pierced 3SD = 10, Divergence = +4, RSI Extreme = +2, RVOL = +2, EMA Ext = +1
+    # Technical Trend Posture
+    tech_bull = 0
+    tech_bear = 0
+    if ema20:
+        if close_price > ema20: tech_bull += 1
+        else: tech_bear += 1
+    if sma50:
+        if close_price > sma50: tech_bull += 1
+        else: tech_bear += 1
+    tech_trend = "Bullish" if tech_bull >= 2 else ("Bearish" if tech_bear >= 2 else "Neutral")
+
+    # Supply & Demand Zones Detection
+    in_demand, in_supply = False, False
+    demand_zone, supply_zone = None, None
+    try:
+        from reversal_scanner import detect_supply_demand_zones
+        in_demand, in_supply, demand_zone, supply_zone = detect_supply_demand_zones(df, lookback=40, tolerance_pct=0.015)
+    except Exception as e:
+        logger.warning(f"Error computing supply/demand zones for {ticker}: {e}")
+
+    # Resolve active zone relative to setup direction
+    zone_summary = "None"
+    in_zone = False
+    zone_details = None
+
+    # Market Sentiment alignment
+    sentiment_data = get_cached_market_sentiment()
+    m_sentiment = sentiment_data.get('sentiment', 'Neutral')
+    m_summary = sentiment_data.get('summary', '')
+
     score = 10
     reasons_list = [f"Pierced Daily {'Lower' if is_bullish_pierced else 'Upper'} {sd_label} BB"]
     has_div = False
-    
+
     if is_bullish_pierced:
         if bull_div:
             score += 4
@@ -328,6 +407,29 @@ def evaluate_ticker_process(ticker, df):
         if ema20_dist < -2.0:
             score += 1
             reasons_list.append("EMA Extension")
+
+        # Demand Zone Confluence (+2 bonus)
+        if in_demand and demand_zone:
+            in_zone = True
+            zone_summary = f"Demand: {demand_zone['range_str']}"
+            zone_details = demand_zone
+            score += 2
+            reasons_list.append(f"In Demand Zone ({demand_zone['range_str']}) 🧱")
+        elif demand_zone:
+            zone_summary = f"Demand: {demand_zone['range_str']}"
+            zone_details = demand_zone
+            reasons_list.append(f"Near Demand Zone ({demand_zone['range_str']})")
+
+        # Market Sentiment Alignment (+1 bonus)
+        if m_sentiment == "Bullish":
+            sentiment_align = "Bullish Aligned"
+            score += 1
+            reasons_list.append("Market Aligned (Bullish) 🎯")
+        elif m_sentiment == "Bearish":
+            sentiment_align = "Counter-Trend Reversal"
+            reasons_list.append("Counter-Trend Setup 🔄")
+        else:
+            sentiment_align = "Neutral Macro"
     else:
         if bear_div:
             score += 4
@@ -343,15 +445,38 @@ def evaluate_ticker_process(ticker, df):
             score += 1
             reasons_list.append("EMA Extension")
 
+        # Supply Zone Confluence (+2 bonus)
+        if in_supply and supply_zone:
+            in_zone = True
+            zone_summary = f"Supply: {supply_zone['range_str']}"
+            zone_details = supply_zone
+            score += 2
+            reasons_list.append(f"In Supply Zone ({supply_zone['range_str']}) 🧱")
+        elif supply_zone:
+            zone_summary = f"Supply: {supply_zone['range_str']}"
+            zone_details = supply_zone
+            reasons_list.append(f"Near Supply Zone ({supply_zone['range_str']})")
+
+        # Market Sentiment Alignment (+1 bonus)
+        if m_sentiment == "Bearish":
+            sentiment_align = "Bearish Aligned"
+            score += 1
+            reasons_list.append("Market Aligned (Bearish) 🎯")
+        elif m_sentiment == "Bullish":
+            sentiment_align = "Counter-Trend Reversal"
+            reasons_list.append("Counter-Trend Setup 🔄")
+        else:
+            sentiment_align = "Neutral Macro"
+
     is_a_plus = (score >= 12 and has_div)
-    grade = "A+" if is_a_plus else "A"
+    grade = "A+" if is_a_plus else ("A" if score >= 10 else "B")
     reasons = " | ".join(reasons_list)
 
     if only_a_plus and not is_a_plus:
         logger.info(f"[{ticker} 15m] Price: {close_price:.2f} | Pierced {sd_label} BB (Score: {score}, Grade: {grade}) — Skipped (Requires A+ setup with RSI Divergence)")
         return None
 
-    logger.info(f"[{ticker} 15m] 🔥 ⭐️ A+ 3-SIGMA REVERSAL CONFIRMED! Score: {score}, RSI: {rsi_val:.1f}, RVOL: {rvol:.1f}x | {reasons}")
+    logger.info(f"[{ticker} 15m] 🔥 ⭐️ A+ 3-SIGMA REVERSAL CONFIRMED! Score: {score}, RSI: {rsi_val:.1f}, RVOL: {rvol:.1f}x, Zone: {zone_summary} | {reasons}")
 
     return {
         'action': 'BUY' if is_bullish_pierced else 'SELL',
@@ -363,7 +488,14 @@ def evaluate_ticker_process(ticker, df):
         'score': score,
         'grade': 'A+',
         'reason': reasons,
-        'time': df_ind.index[-1]
+        'time': df_ind.index[-1],
+        'zone_summary': zone_summary,
+        'in_zone': in_zone,
+        'zone_details': zone_details,
+        'sentiment_align': sentiment_align,
+        'tech_trend': tech_trend,
+        'market_sentiment': m_sentiment,
+        'market_sentiment_summary': m_summary,
     }
 
 def precalculate_daily_bands(tickers):
@@ -527,6 +659,13 @@ def bot_loop():
                             "RVOL": res.get('rvol', 1.0),
                             "Entry": res['price'],
                             "Profit Target": res['vwap'],
+                            "Supply/Demand Zone": res.get('zone_summary', 'None'),
+                            "In Zone": res.get('in_zone', False),
+                            "Zone Details": res.get('zone_details'),
+                            "Market Sentiment": res.get('market_sentiment', 'Neutral'),
+                            "Market Sentiment Score": res.get('market_sentiment_score', 50),
+                            "Sentiment Alignment": res.get('sentiment_align', 'Neutral'),
+                            "Technical Trend": res.get('tech_trend', 'Neutral'),
                         })
 
                         direction = res['action']  # "BUY" or "SELL"
@@ -544,7 +683,12 @@ def bot_loop():
                             reason=res.get('reason'),
                             score=res.get('score'),
                             grade=res.get('grade'),
-                            rvol=res.get('rvol')
+                            rvol=res.get('rvol'),
+                            zone_summary=res.get('zone_summary'),
+                            in_zone=res.get('in_zone', False),
+                            sentiment_align=res.get('sentiment_align'),
+                            market_sentiment_summary=res.get('market_sentiment_summary'),
+                            tech_trend=res.get('tech_trend')
                         )
                         _record_alert(ticker, direction, res['price'])
                         triggered_count += 1
@@ -552,6 +696,7 @@ def bot_loop():
                 # Save 3-sigma scan results for web UI persistence
                 try:
                     ny_tz = get_ny_timezone()
+                    current_sentiment = get_cached_market_sentiment()
                     save_file = os.path.join(_SCAN_DATA_DIR, "last_3sigma_scan.json")
                     with open(save_file, "w") as f:
                         json.dump({
@@ -559,6 +704,7 @@ def bot_loop():
                             "mode": "3sigma",
                             "timestamp": datetime.now(ny_tz).strftime("%b %d, %Y  %I:%M %p"),
                             "count": len(all_signals),
+                            "market_sentiment": current_sentiment,
                             "results": all_signals
                         }, f, indent=2)
                 except Exception as save_err:
