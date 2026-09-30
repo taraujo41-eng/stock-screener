@@ -183,8 +183,10 @@ def send_telegram_notification(message):
         logger.error(f"Failed to send Telegram notification: {e}")
 
 def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=None, reason=None, score=None, grade=None, rvol=None, zone_summary=None, in_zone=False, sentiment_align=None, market_sentiment_summary=None, tech_trend=None):
-    bb_mult = os.getenv("BB_MULT", "3.0")
-    logger.info(f"🔔 A+ SIGNAL TRIGGERED on {ticker}: {action} | Setup: {reason} | Price={last_price:.2f}, RSI={f'{rsi:.1f}' if rsi else 'N/A'}, Target VWAP={vwap_target:.2f}")
+    bb_mult = os.getenv("BB_MULT", "2.5")
+    grade_str = grade or ("A+" if (score and score >= 12) else "A")
+    grade_icon = "⭐️" if grade_str == "A+" else "🔥"
+    logger.info(f"🔔 {grade_str} SIGNAL TRIGGERED on {ticker}: {action} | Setup: {reason} | Price={last_price:.2f}, RSI={f'{rsi:.1f}' if rsi else 'N/A'}, Target VWAP={vwap_target:.2f}")
     
     alert_method = os.getenv("ALERT_METHOD", "TELEGRAM").upper()
     
@@ -212,9 +214,9 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
     if alert_method in ("SMS", "BOTH"):
         zone_sms = f"Zone: {zone_summary}{' (In Zone)' if in_zone else ''}\n" if zone_summary and zone_summary != "None" else ""
         sms_msg = (
-            f"⭐️ A+ 3-SIGMA REVERSAL: {ticker}\n"
+            f"{grade_icon} {grade_str} REVERSAL: {ticker}\n"
             f"Action: {action} ({signal_type.upper()})\n"
-            f"Grade: ⭐️ {grade or 'A+'} SETUP (Score: {score or 14}/22)\n"
+            f"Grade: {grade_icon} {grade_str} SETUP (Score: {score or 10}/22)\n"
             f"Sentiment: {align_icon} {align_badge}\n"
             f"Tech Trend: {tech_str}\n"
             f"{zone_sms}"
@@ -231,16 +233,17 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
     if alert_method in ("TELEGRAM", "BOTH"):
         rsi_formatted = f"{rsi:.1f}" if rsi is not None else "N/A"
         rvol_formatted = f"{rvol:.1f}x" if rvol is not None else "N/A"
+        div_note = " (Divergence Confirmed)" if "Divergence" in (reason or "") else ""
         tg_msg = (
-            f"🚨 <b>⭐️ A+ 3-SIGMA REVERSAL ALERT: {ticker}</b> 🚨\n\n"
+            f"🚨 <b>{grade_icon} {grade_str} REVERSAL ALERT: {ticker}</b> 🚨\n\n"
             f"<b>Action:</b> {action} ({signal_type.upper()})\n"
-            f"<b>Grade:</b> ⭐️ <b>{grade or 'A+'} SETUP</b> (Score: {score or 14}/22)\n"
+            f"<b>Grade:</b> {grade_icon} <b>{grade_str} SETUP</b> (Score: {score or 10}/22)\n"
             f"<b>Market Sentiment:</b> {align_icon} {align_badge}\n"
             f"<b>Technical Trend:</b> {tech_str}\n"
             f"<b>Zone:</b> {zone_str}\n"
-            f"<b>Setup:</b> {reason or '3-Sigma Breach Reversal'}\n"
+            f"<b>Setup:</b> {reason or (action + ' Reversal')}\n"
             f"<b>Price:</b> ${last_price:.2f}\n"
-            f"<b>RSI:</b> {rsi_formatted} (Divergence Confirmed)\n"
+            f"<b>RSI:</b> {rsi_formatted}{div_note}\n"
             f"<b>RVOL:</b> {rvol_formatted}\n"
             f"<b>VWAP Target:</b> ${vwap_target:.2f}\n"
             f"<b>Suggested Option:</b> {opt_str}"
@@ -261,11 +264,11 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             )
             if result:
                 mode_str = result.get('mode', 'Simulation')
-                logger.info(f"📈 A+ Paper trade placed for {ticker}: {result.get('option_symbol', '')} @ ${result.get('entry_price', 0):.2f} ({mode_str})")
+                logger.info(f"📈 {grade_str} Paper trade placed for {ticker}: {result.get('option_symbol', '')} @ ${result.get('entry_price', 0):.2f} ({mode_str})")
                 
                 # Send trade notification via same alert method
                 trade_msg = (
-                    f"📈 ⭐️ A+ PAPER TRADE PLACED: {ticker}\n"
+                    f"📈 {grade_icon} {grade_str} PAPER TRADE PLACED: {ticker}\n"
                     f"Option: {result.get('type', '')} ${result.get('strike', '')} ({result.get('option_symbol', '')})\n"
                     f"Price: ${result.get('entry_price', 0):.2f}\n"
                     f"Qty: {result.get('quantity', 1)} contract(s)\n"
@@ -275,7 +278,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                     send_sms_notification(trade_msg)
                 if alert_method in ("TELEGRAM", "BOTH"):
                     tg_trade = (
-                        f"📈 <b>⭐️ A+ PAPER TRADE PLACED: {ticker}</b>\n\n"
+                        f"📈 <b>{grade_icon} {grade_str} PAPER TRADE PLACED: {ticker}</b>\n\n"
                         f"<b>Option:</b> {result.get('type', '')} ${result.get('strike', '')}\n"
                         f"<b>Contract:</b> {result.get('option_symbol', '')}\n"
                         f"<b>Entry Price:</b> ${result.get('entry_price', 0):.2f}\n"
@@ -330,14 +333,20 @@ def evaluate_ticker_process(ticker, df):
     last_row = df_ind.iloc[-1]
     is_bullish_pierced = bool(last_row.get('is_bullish_pierced', False))
     is_bearish_pierced = bool(last_row.get('is_bearish_pierced', False))
+    is_bullish_near = bool(last_row.get('is_bullish_near', False)) if proximity_pct > 0 else False
+    is_bearish_near = bool(last_row.get('is_bearish_near', False)) if proximity_pct > 0 else False
+    
+    is_bullish = is_bullish_pierced or is_bullish_near
+    is_bearish = is_bearish_pierced or is_bearish_near
+
     close_price = float(last_row['Close'])
     vwap_target = float(last_row['vwap'])
     rsi_val = float(last_row['rsi'])
     
     sd_label = f"{int(bb_mult)}SD" if bb_mult.is_integer() else f"{bb_mult}SD"
 
-    # Strict check: Must actually breach the Daily Bollinger Band
-    if not (is_bullish_pierced or is_bearish_pierced):
+    # Check: Must breach or be within proximity threshold of the Daily Bollinger Band
+    if not (is_bullish or is_bearish):
         return None
 
     # Calculate Confluence Factors for Setup
@@ -390,10 +399,11 @@ def evaluate_ticker_process(ticker, df):
     m_summary = sentiment_data.get('summary', '')
 
     score = 10
-    reasons_list = [f"Pierced Daily {'Lower' if is_bullish_pierced else 'Upper'} {sd_label} BB"]
+    sd_reach = "Pierced" if (is_bullish_pierced or is_bearish_pierced) else f"Within {proximity_pct*100:.1f}% of"
+    reasons_list = [f"{sd_reach} Daily {'Lower' if is_bullish else 'Upper'} {sd_label} BB"]
     has_div = False
 
-    if is_bullish_pierced:
+    if is_bullish:
         if bull_div:
             score += 4
             has_div = True
@@ -473,20 +483,21 @@ def evaluate_ticker_process(ticker, df):
     reasons = " | ".join(reasons_list)
 
     if only_a_plus and not is_a_plus:
-        logger.info(f"[{ticker} 15m] Price: {close_price:.2f} | Pierced {sd_label} BB (Score: {score}, Grade: {grade}) — Skipped (Requires A+ setup with RSI Divergence)")
+        logger.info(f"[{ticker} 15m] Price: {close_price:.2f} | {sd_reach} {sd_label} BB (Score: {score}, Grade: {grade}) — Skipped (Requires A+ setup with RSI Divergence)")
         return None
 
-    logger.info(f"[{ticker} 15m] 🔥 ⭐️ A+ 3-SIGMA REVERSAL CONFIRMED! Score: {score}, RSI: {rsi_val:.1f}, RVOL: {rvol:.1f}x, Zone: {zone_summary} | {reasons}")
+    grade_icon = "⭐️" if grade == "A+" else "🔥"
+    logger.info(f"[{ticker} 15m] {grade_icon} {grade} REVERSAL CONFIRMED! Score: {score}, RSI: {rsi_val:.1f}, RVOL: {rvol:.1f}x, Zone: {zone_summary} | {reasons}")
 
     return {
-        'action': 'BUY' if is_bullish_pierced else 'SELL',
-        'type': 'bullish' if is_bullish_pierced else 'bearish',
+        'action': 'BUY' if is_bullish else 'SELL',
+        'type': 'bullish' if is_bullish else 'bearish',
         'price': close_price,
         'vwap': vwap_target,
         'rsi': rsi_val,
         'rvol': rvol,
         'score': score,
-        'grade': 'A+',
+        'grade': grade,
         'reason': reasons,
         'time': df_ind.index[-1],
         'zone_summary': zone_summary,
