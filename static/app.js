@@ -1944,6 +1944,81 @@ function formatOptionExp(p) {
   return p.dte ? `${p.dte} DTE` : '—';
 }
 
+function getTradeDateKey(timeStr) {
+  if (!timeStr) return "Unknown Date";
+  try {
+    const d = new Date(timeStr);
+    if (isNaN(d.getTime())) return String(timeStr).slice(0, 10);
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(d);
+  } catch (e) {
+    return String(timeStr).slice(0, 10);
+  }
+}
+
+function formatTradeDateHeader(dateKey, sampleIsoStr) {
+  if (!dateKey || dateKey === "Unknown Date") return "Unknown Date";
+  try {
+    const d = sampleIsoStr ? new Date(sampleIsoStr) : new Date(dateKey + "T12:00:00");
+    const todayKey = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayKey = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(yesterday);
+
+    const formatted = d.toLocaleDateString("en-US", {
+      timeZone: "America/New_York",
+      weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric"
+    });
+
+    if (dateKey === todayKey) return `Today — ${formatted}`;
+    if (dateKey === yesterdayKey) return `Yesterday — ${formatted}`;
+    return formatted;
+  } catch (e) {
+    return dateKey;
+  }
+}
+
+function formatTradeDateTime(timeStr) {
+  if (!timeStr) return "—";
+  try {
+    const d = new Date(timeStr);
+    if (isNaN(d.getTime())) return String(timeStr).slice(0, 16).replace("T", " ");
+    const datePart = d.toLocaleDateString("en-US", {
+      timeZone: "America/New_York",
+      month: "short",
+      day: "numeric",
+      year: "numeric"
+    });
+    const timePart = d.toLocaleTimeString("en-US", {
+      timeZone: "America/New_York",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true
+    });
+    return `${datePart} • ${timePart} ET`;
+  } catch (e) {
+    return String(timeStr).slice(0, 16).replace("T", " ");
+  }
+}
+
+function formatTradeDateShort(timeStr) {
+  if (!timeStr) return "—";
+  try {
+    const d = new Date(timeStr);
+    if (isNaN(d.getTime())) return String(timeStr).slice(0, 10);
+    return d.toLocaleDateString("en-US", {
+      timeZone: "America/New_York",
+      month: "short",
+      day: "numeric",
+      year: "numeric"
+    });
+  } catch (e) {
+    return String(timeStr).slice(0, 10);
+  }
+}
+
 function renderPaperOpenPositions(positions) {
   const container = document.getElementById("paperOpenPositionsList");
   const badge = document.getElementById("paperBadge");
@@ -1968,8 +2043,9 @@ function renderPaperOpenPositions(positions) {
   container.innerHTML = positions.map(p => {
     const isCall = p.type === 'CALL';
     const typeClass = isCall ? 'paper-card__type--call' : 'paper-card__type--put';
-    const entryTimeStr = p.entry_time ? p.entry_time.slice(11, 16) : '—';
+    const entryTimeFormatted = formatTradeDateTime(p.entry_time);
     const expStr = formatOptionExp(p);
+    const entryDateShort = formatTradeDateShort(p.entry_time);
     
     return `
       <div class="paper-card">
@@ -1982,13 +2058,16 @@ function renderPaperOpenPositions(positions) {
             <span style="font-size: 0.75rem; color: #a78bfa; background: rgba(167, 139, 250, 0.12); padding: 3px 8px; border-radius: 6px; font-weight: 600; border: 1px solid rgba(167, 139, 250, 0.25);">
               📅 Exp: ${expStr} ${p.dte ? `(${p.dte} DTE)` : ''}
             </span>
+            <span style="font-size: 0.72rem; color: #38bdf8; background: rgba(56, 189, 248, 0.12); padding: 3px 8px; border-radius: 6px; font-weight: 600; border: 1px solid rgba(56, 189, 248, 0.25);">
+              🗓️ Entered: ${entryDateShort}
+            </span>
           </div>
           <span style="font-size: 0.75rem; color: #38bdf8; background: rgba(56, 189, 248, 0.12); padding: 3px 8px; border-radius: 6px; font-weight: 600;">
             🟢 MONITORED
           </span>
         </div>
 
-        <div class="paper-card__details" style="grid-template-columns: repeat(4, 1fr);">
+        <div class="paper-card__details paper-card__details--4col">
           <div>
             <span class="paper-card__stat-label">Entry Price</span>
             <span class="paper-card__stat-val">$${(p.entry_price || 0).toFixed(2)}</span>
@@ -2002,8 +2081,8 @@ function renderPaperOpenPositions(positions) {
             <span class="paper-card__stat-val" style="color: var(--green);">$${p.vwap_target ? p.vwap_target.toFixed(2) : '—'}</span>
           </div>
           <div>
-            <span class="paper-card__stat-label">Entry Time</span>
-            <span class="paper-card__stat-val" style="font-size: 0.75rem;">${entryTimeStr} ET</span>
+            <span class="paper-card__stat-label">Date Entered</span>
+            <span class="paper-card__stat-val" style="font-size: 0.75rem; color: #38bdf8;">${entryTimeFormatted}</span>
           </div>
         </div>
 
@@ -2051,62 +2130,116 @@ function renderPaperTradeLog(data) {
     return;
   }
 
-  // Show newest closed trades first
-  closed.sort((a, b) => new Date(b.exit_time || 0) - new Date(a.exit_time || 0));
+  // Group closed trades by the date they were entered
+  const dayGroups = {};
+  closed.forEach(t => {
+    const dayKey = getTradeDateKey(t.entry_time || t.exit_time);
+    if (!dayGroups[dayKey]) {
+      dayGroups[dayKey] = [];
+    }
+    dayGroups[dayKey].push(t);
+  });
 
-  container.innerHTML = closed.map(t => {
-    const pnl = t.pnl || 0;
-    const pnlColor = pnl >= 0 ? "var(--green)" : "var(--red)";
-    const sign = pnl >= 0 ? "+" : "";
-    const pnlPct = t.entry_price ? ((pnl / (t.entry_price * 100)) * 100).toFixed(1) : "0.0";
-    const exitTimeStr = t.exit_time ? t.exit_time.slice(11, 16) : '—';
-    const reasonBadge = t.exit_reason === 'take_profit' ? '🎯 Take Profit @ VWAP' : 
-                        t.exit_reason === 'stop_loss' ? '🛑 Stop Loss' : (t.exit_reason || 'Closed');
-    const expStr = formatOptionExp(t);
+  // Sort day groups descending (most recent entry day first)
+  const sortedDayKeys = Object.keys(dayGroups).sort((a, b) => b.localeCompare(a));
+
+  container.innerHTML = sortedDayKeys.map(dayKey => {
+    const dayTrades = dayGroups[dayKey];
+    // Sort trades within each day descending (newest entered first)
+    dayTrades.sort((a, b) => new Date(b.entry_time || b.exit_time || 0) - new Date(a.entry_time || a.exit_time || 0));
+
+    // Calculate day metrics
+    const dayPnl = dayTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+    const daySign = dayPnl >= 0 ? "+" : "";
+    const dayPnlClass = dayPnl >= 0 ? "paper-day-pnl--positive" : "paper-day-pnl--negative";
+    const dayWins = dayTrades.filter(t => (t.pnl || 0) > 0).length;
+    const dayLosses = dayTrades.filter(t => (t.pnl || 0) < 0).length;
+    const dayCount = dayTrades.length;
+    const headerTitle = formatTradeDateHeader(dayKey, dayTrades[0]?.entry_time || dayTrades[0]?.exit_time);
+
+    const tradesHtml = dayTrades.map(t => {
+      const pnl = t.pnl || 0;
+      const pnlColor = pnl >= 0 ? "var(--green)" : "var(--red)";
+      const sign = pnl >= 0 ? "+" : "";
+      const pnlPct = t.entry_price ? ((pnl / (t.entry_price * 100)) * 100).toFixed(1) : "0.0";
+      const entryTimeFormatted = formatTradeDateTime(t.entry_time);
+      const exitTimeFormatted = formatTradeDateTime(t.exit_time);
+      const reasonBadge = t.exit_reason === 'take_profit' ? '🎯 Take Profit @ VWAP' : 
+                          t.exit_reason === 'stop_loss' ? '🛑 Stop Loss' : (t.exit_reason || 'Closed');
+      const expStr = formatOptionExp(t);
+      const entryDateShort = formatTradeDateShort(t.entry_time);
+
+      return `
+        <div class="paper-card" style="opacity: 0.95;">
+          <div class="paper-card__top">
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span class="paper-card__symbol">${t.ticker}</span>
+              <span style="font-size: 0.8rem; color: #94a3b8;">${t.type} $${t.strike}</span>
+              <span style="font-size: 0.72rem; color: #a78bfa; background: rgba(167, 139, 250, 0.12); padding: 2px 6px; border-radius: 4px;">
+                📅 Exp: ${expStr}
+              </span>
+              <span style="font-size: 0.72rem; color: #38bdf8; background: rgba(56, 189, 248, 0.12); padding: 2px 6px; border-radius: 4px; border: 1px solid rgba(56, 189, 248, 0.25);">
+                🗓️ Entered: ${entryDateShort}
+              </span>
+            </div>
+            <div style="text-align: right;">
+              <span style="font-size: 0.95rem; font-weight: 800; color: ${pnlColor}; font-family: 'JetBrains Mono', monospace;">
+                ${sign}$${pnl.toFixed(2)}
+              </span>
+              <span style="display: block; font-size: 0.72rem; color: ${pnlColor}; font-weight: 600;">
+                (${sign}${pnlPct}%)
+              </span>
+            </div>
+          </div>
+
+          <div class="paper-card__details paper-card__details--4col">
+            <div>
+              <span class="paper-card__stat-label">Date Entered</span>
+              <span class="paper-card__stat-val" style="color: #38bdf8; font-size: 0.75rem;">${entryTimeFormatted}</span>
+            </div>
+            <div>
+              <span class="paper-card__stat-label">Entry → Exit</span>
+              <span class="paper-card__stat-val">$${(t.entry_price || 0).toFixed(2)} → $${(t.exit_price || 0).toFixed(2)}</span>
+            </div>
+            <div>
+              <span class="paper-card__stat-label">Exit Reason</span>
+              <span class="paper-card__stat-val" style="color: #cbd5e1; font-size: 0.75rem;">${reasonBadge}</span>
+            </div>
+            <div>
+              <span class="paper-card__stat-label">Closed Time</span>
+              <span class="paper-card__stat-val" style="font-size: 0.75rem;">${exitTimeFormatted}</span>
+            </div>
+          </div>
+
+          <div class="paper-card__bottom">
+            <span style="font-size: 0.75rem; color: #94a3b8;">Contract: <strong style="color: #cbd5e1; font-family: 'JetBrains Mono', monospace;">${t.option_symbol || 'Standard'}</strong> (${t.quantity || 1}x)</span>
+            <span style="font-size: 0.72rem; color: #64748b;">ID #${t.id}</span>
+          </div>
+        </div>
+      `;
+    }).join("");
 
     return `
-      <div class="paper-card" style="opacity: 0.95;">
-        <div class="paper-card__top">
-          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-            <span class="paper-card__symbol">${t.ticker}</span>
-            <span style="font-size: 0.8rem; color: #94a3b8;">${t.type} $${t.strike}</span>
-            <span style="font-size: 0.72rem; color: #a78bfa; background: rgba(167, 139, 250, 0.12); padding: 2px 6px; border-radius: 4px;">
-              📅 Exp: ${expStr}
-            </span>
+      <div class="paper-trade-day-group">
+        <div class="paper-day-header">
+          <div class="paper-day-title">
+            <span class="paper-day-title-icon">🗓️</span>
+            <span>${headerTitle}</span>
+            <span class="paper-day-badge">${dayCount} trade${dayCount === 1 ? '' : 's'}</span>
           </div>
-          <div style="text-align: right;">
-            <span style="font-size: 0.95rem; font-weight: 800; color: ${pnlColor}; font-family: 'JetBrains Mono', monospace;">
-              ${sign}$${pnl.toFixed(2)}
-            </span>
-            <span style="display: block; font-size: 0.72rem; color: ${pnlColor}; font-weight: 600;">
-              (${sign}${pnlPct}%)
-            </span>
+          <div class="paper-day-stats">
+            <span class="paper-day-badge" style="color: #cbd5e1;">${dayWins}W / ${dayLosses}L</span>
+            <span class="paper-day-pnl ${dayPnlClass}">Day P&L: ${daySign}$${dayPnl.toFixed(2)}</span>
           </div>
         </div>
-
-        <div class="paper-card__details">
-          <div>
-            <span class="paper-card__stat-label">Entry → Exit</span>
-            <span class="paper-card__stat-val">$${(t.entry_price || 0).toFixed(2)} → $${(t.exit_price || 0).toFixed(2)}</span>
-          </div>
-          <div>
-            <span class="paper-card__stat-label">Exit Reason</span>
-            <span class="paper-card__stat-val" style="color: #cbd5e1; font-size: 0.75rem;">${reasonBadge}</span>
-          </div>
-          <div>
-            <span class="paper-card__stat-label">Closed Time</span>
-            <span class="paper-card__stat-val" style="font-size: 0.75rem;">${exitTimeStr} ET</span>
-          </div>
-        </div>
-
-        <div class="paper-card__bottom">
-          <span style="font-size: 0.75rem; color: #94a3b8;">Contract: <strong style="color: #cbd5e1; font-family: 'JetBrains Mono', monospace;">${t.option_symbol || 'Standard'}</strong> (${t.quantity || 1}x)</span>
-          <span style="font-size: 0.72rem; color: #64748b;">ID #${t.id}</span>
+        <div class="paper-day-trades">
+          ${tradesHtml}
         </div>
       </div>
     `;
   }).join("");
 }
+
 
 async function closePaperPosition(tradeId) {
   if (!confirm(`Are you sure you want to close position #${tradeId}?`)) return;
