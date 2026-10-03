@@ -210,8 +210,10 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
     align_icon = "🎯" if "Aligned" in align_badge else ("🔄" if "Counter" in align_badge else "⚪")
     tech_str = f"📊 {tech_trend}" if tech_trend else "📊 Neutral"
     
-    # 1. Send SMS Notification
-    if alert_method in ("SMS", "BOTH"):
+    send_reversal_alert = os.getenv("SEND_REVERSAL_ALERTS", "false").lower() in ("true", "1", "yes")
+
+    # 1. Send SMS Notification (only if reversal alerts explicitly enabled)
+    if send_reversal_alert and alert_method in ("SMS", "BOTH"):
         zone_sms = f"Zone: {zone_summary}{' (In Zone)' if in_zone else ''}\n" if zone_summary and zone_summary != "None" else ""
         sms_msg = (
             f"{grade_icon} {grade_str} REVERSAL: {ticker}\n"
@@ -229,8 +231,8 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
         )
         send_sms_notification(sms_msg)
         
-    # 2. Send Telegram Notification
-    if alert_method in ("TELEGRAM", "BOTH"):
+    # 2. Send Telegram Reversal Notification (only if reversal alerts explicitly enabled)
+    if send_reversal_alert and alert_method in ("TELEGRAM", "BOTH"):
         rsi_formatted = f"{rsi:.1f}" if rsi is not None else "N/A"
         rvol_formatted = f"{rvol:.1f}x" if rvol is not None else "N/A"
         div_note = " (Divergence Confirmed)" if "Divergence" in (reason or "") else ""
@@ -250,7 +252,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
         )
         send_telegram_notification(tg_msg)
     
-    # 3. Place Paper Trade (if enabled)
+    # 3. Place Paper Trade & Send Execution Notification
     try:
         from paper_trader import get_paper_trader
         pt = get_paper_trader()
@@ -272,23 +274,35 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                     f"Option: {result.get('type', '')} ${result.get('strike', '')} ({result.get('option_symbol', '')})\n"
                     f"Price: ${result.get('entry_price', 0):.2f}\n"
                     f"Qty: {result.get('quantity', 1)} contract(s)\n"
+                    f"Stock Price: ${last_price:.2f}\n"
+                    f"VWAP Target: ${vwap_target:.2f}\n"
+                    f"Setup: {reason or (action + ' Reversal')}\n"
                     f"Mode: {mode_str}"
                 )
                 if alert_method in ("SMS", "BOTH"):
                     send_sms_notification(trade_msg)
                 if alert_method in ("TELEGRAM", "BOTH"):
+                    rsi_formatted = f"{rsi:.1f}" if rsi is not None else "N/A"
+                    rvol_formatted = f"{rvol:.1f}x" if rvol is not None else "N/A"
                     tg_trade = (
                         f"📈 <b>{grade_icon} {grade_str} PAPER TRADE PLACED: {ticker}</b>\n\n"
-                        f"<b>Option:</b> {result.get('type', '')} ${result.get('strike', '')}\n"
-                        f"<b>Contract:</b> {result.get('option_symbol', '')}\n"
+                        f"<b>Option:</b> {result.get('type', '')} ${result.get('strike', '')} ({result.get('option_symbol', '')})\n"
                         f"<b>Entry Price:</b> ${result.get('entry_price', 0):.2f}\n"
                         f"<b>Qty:</b> {result.get('quantity', 1)} contract(s)\n"
+                        f"<b>Stock Price:</b> ${last_price:.2f}\n"
+                        f"<b>VWAP Target:</b> ${vwap_target:.2f}\n"
+                        f"<b>RSI:</b> {rsi_formatted} | <b>RVOL:</b> {rvol_formatted}\n"
+                        f"<b>Market Sentiment:</b> {align_icon} {align_badge}\n"
+                        f"<b>Technical Trend:</b> {tech_str}\n"
+                        f"<b>Zone:</b> {zone_str}\n"
+                        f"<b>Setup:</b> {reason or (action + ' Reversal')}\n"
                         f"<b>Mode:</b> {mode_str}"
                     )
                     send_telegram_notification(tg_trade)
     except Exception as e:
         logger.error(f"Paper trade error for {ticker}: {e}")
-        tb.print_exc()
+        import traceback
+        traceback.print_exc()
 
 def evaluate_ticker_process(ticker, df):
     """
