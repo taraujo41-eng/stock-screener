@@ -660,51 +660,127 @@ def fetch_options_chain(ticker):
 
 
 def fetch_options_for_expiration(ticker, expiration_ts):
-    """Fetch options for a specific expiration timestamp from Webull."""
+    """Fetch live options chain for a specific expiration timestamp directly from Webull."""
     wb_un = get_unofficial_client()
     if wb_un:
         try:
+            import requests
             date_str = datetime.fromtimestamp(expiration_ts).strftime("%Y-%m-%d")
-            print(f"[Webull Unofficial] Fetching options chain for {ticker} at {date_str}...")
+            print(f"[Webull Unofficial] Fetching live options chain for {ticker} at {date_str}...")
             
-            webull_chain = wb_un.get_options(stock=ticker, expireDate=date_str)
-            calls = []
-            puts = []
-            for entry in webull_chain:
-                strike = float(entry.get("strikePrice", 0))
-                
-                if "call" in entry:
-                    c_data = entry["call"]
-                    calls.append({
-                        "contractSymbol": c_data.get("symbol"),
-                        "strike": strike,
-                        "tickerId": c_data.get("tickerId"),
-                        "bid": float(c_data.get("bid", 0)) if c_data.get("bid") else None,
-                        "ask": float(c_data.get("ask", 0)) if c_data.get("ask") else None,
-                        "volume": int(float(c_data.get("volume", 0))) if c_data.get("volume") else None,
-                        "openInterest": int(float(c_data.get("openInterest", 0))) if c_data.get("openInterest") else None,
-                        "impliedVolatility": float(c_data.get("impliedVolatility", 0)) if c_data.get("impliedVolatility") else None
-                    })
-                if "put" in entry:
-                    p_data = entry["put"]
-                    puts.append({
-                        "contractSymbol": p_data.get("symbol"),
-                        "strike": strike,
-                        "tickerId": p_data.get("tickerId"),
-                        "bid": float(p_data.get("bid", 0)) if p_data.get("bid") else None,
-                        "ask": float(p_data.get("ask", 0)) if p_data.get("ask") else None,
-                        "volume": int(float(p_data.get("volume", 0))) if p_data.get("volume") else None,
-                        "openInterest": int(float(p_data.get("openInterest", 0))) if p_data.get("openInterest") else None,
-                        "impliedVolatility": float(p_data.get("impliedVolatility", 0)) if p_data.get("impliedVolatility") else None
-                    })
-            
-            return {
-                "calls": calls,
-                "puts": puts
+            headers = wb_un.build_req_headers()
+            tid = get_stock_ticker_id(wb_un, ticker)
+            data = {
+                'count': -1,
+                'direction': 'all',
+                'tickerId': tid,
+                'expireDate': date_str,
+                'unSymbol': ticker
             }
+            res = requests.post(wb_un._urls.options_exp_dat_new(), json=data, headers=headers, timeout=wb_un.timeout)
+            if res.status_code == 200:
+                res_json = res.json()
+                calls = []
+                puts = []
+                for entry in res_json.get('expireDateList', []):
+                    if entry.get('from', {}).get('date') == date_str:
+                        for item in entry.get('data', []):
+                            strike = float(item.get('strikePrice', 0))
+                            direction = item.get('direction')
+                            
+                            bid_val = None
+                            if item.get('bidList') and isinstance(item['bidList'], list) and len(item['bidList']) > 0:
+                                try:
+                                    bid_val = float(item['bidList'][0].get('price', 0))
+                                except (ValueError, TypeError):
+                                    pass
+                            elif item.get('bid'):
+                                try:
+                                    bid_val = float(item['bid'])
+                                except (ValueError, TypeError):
+                                    pass
+
+                            ask_val = None
+                            if item.get('askList') and isinstance(item['askList'], list) and len(item['askList']) > 0:
+                                try:
+                                    ask_val = float(item['askList'][0].get('price', 0))
+                                except (ValueError, TypeError):
+                                    pass
+                            elif item.get('ask'):
+                                try:
+                                    ask_val = float(item['ask'])
+                                except (ValueError, TypeError):
+                                    pass
+                                    
+                            c_data = {
+                                "contractSymbol": item.get("symbol"),
+                                "strike": strike,
+                                "tickerId": item.get("tickerId"),
+                                "bid": bid_val,
+                                "ask": ask_val,
+                                "close": float(item["close"]) if item.get("close") else None,
+                                "volume": int(float(item.get("volume", 0))) if item.get("volume") else 0,
+                                "openInterest": int(float(item.get("openInterest", 0))) if item.get("openInterest") else 0,
+                                "impliedVolatility": float(item.get("impVol", 0)) if item.get("impVol") else None,
+                                "delta": float(item.get("delta", 0)) if item.get("delta") else None
+                            }
+                            if direction == "call":
+                                calls.append(c_data)
+                            elif direction == "put":
+                                puts.append(c_data)
+                        break
+                return {"calls": calls, "puts": puts}
         except Exception as e:
             print(f"[Webull Unofficial] Error fetching options at expiration timestamp {expiration_ts}: {e}")
 
+    return None
+
+
+def get_option_live_quote(ticker, strike, option_type, exp_date_str):
+    """
+    Fetch the exact live bid, ask, mid and details for a specific option contract from Webull.
+    exp_date_str format: 'YYYY-MM-DD'
+    """
+    wb_un = get_unofficial_client()
+    if not wb_un:
+        return None
+    try:
+        import requests
+        headers = wb_un.build_req_headers()
+        tid = get_stock_ticker_id(wb_un, ticker)
+        data = {
+            'count': -1,
+            'direction': 'all',
+            'tickerId': tid,
+            'expireDate': exp_date_str,
+            'unSymbol': ticker
+        }
+        res = requests.post(wb_un._urls.options_exp_dat_new(), json=data, headers=headers, timeout=wb_un.timeout)
+        if res.status_code != 200:
+            return None
+        for entry in res.json().get('expireDateList', []):
+            if entry.get('from', {}).get('date') == exp_date_str:
+                for item in entry.get('data', []):
+                    item_strike = float(item.get('strikePrice', 0))
+                    item_dir = item.get('direction', '').lower()
+                    if abs(item_strike - float(strike)) < 0.01 and item_dir == option_type.lower():
+                        bid = float(item['bidList'][0]['price']) if item.get('bidList') and len(item['bidList']) > 0 else None
+                        ask = float(item['askList'][0]['price']) if item.get('askList') and len(item['askList']) > 0 else None
+                        close_p = float(item.get('close')) if item.get('close') else None
+                        mid = round((bid + ask) / 2.0, 2) if (bid is not None and ask is not None) else close_p
+                        return {
+                            'symbol': item.get('symbol'),
+                            'tickerId': item.get('tickerId'),
+                            'bid': bid,
+                            'ask': ask,
+                            'mid': mid,
+                            'close': close_p,
+                            'volume': int(float(item.get('volume', 0))) if item.get('volume') else 0,
+                            'openInterest': int(float(item.get('openInterest', 0))) if item.get('openInterest') else 0,
+                            'delta': float(item.get('delta', 0)) if item.get('delta') else None
+                        }
+    except Exception as e:
+        print(f"[Webull Unofficial] Error fetching live quote for {ticker} ${strike} {option_type}: {e}")
     return None
 
 

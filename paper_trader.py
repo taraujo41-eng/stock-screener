@@ -526,22 +526,24 @@ class PaperTrader:
                 return None
 
             logger.info(
-                f"[PaperTrader] Found: {best['symbol']} | {best['type']} | "
+                f"[PaperTrader] Found Live Webull Option: {best['symbol']} | {best['type']} | "
                 f"Strike ${best['strike']} | Exp {best['exp']} | "
-                f"Mid ${best['mid']:.2f} | DTE {best['dte']}"
+                f"Bid ${best['bid']:.2f} | Ask ${best['ask']:.2f} | Mid ${best['mid']:.2f} | Spread {best.get('spread_pct', 0)}%"
             )
 
             # 2. Risk check
-            ask_price = best["mid"]
+            ask_price = best.get("ask", best["mid"])
             ok, reason = self._check_risk_limits(ask_price)
             if not ok:
                 logger.warning(f"[PaperTrader] ⛔ Risk check failed for {ticker}: {reason}")
                 return None
 
-            # 3. Get the option's instrument ID
-            instrument_id = self._get_option_instrument_id(
-                ticker, best["strike"], best["type"], best["exp"]
-            )
+            # 3. Get the option's instrument ID (from live chain or lookup)
+            instrument_id = best.get("tickerId")
+            if not instrument_id:
+                instrument_id = self._get_option_instrument_id(
+                    ticker, best["strike"], best["type"], best["exp"]
+                )
 
             if not instrument_id:
                 if getattr(self, "_is_real_paper_account", False):
@@ -604,6 +606,10 @@ class PaperTrader:
                 "type": best["type"],
                 "signal_type": signal_type,
                 "entry_price": best["mid"],
+                "bid": best.get("bid"),
+                "ask": best.get("ask"),
+                "spread": best.get("spread"),
+                "spread_pct": best.get("spread_pct"),
                 "entry_time": datetime.now(ny_tz).isoformat(),
                 "vwap_target": vwap_target,
                 "stock_price_at_entry": last_price,
@@ -647,23 +653,30 @@ class PaperTrader:
         try:
             instrument_id = trade_record.get("instrument_id")
 
-            # Get current option price for exit calculation
+            # Get current option price for exit calculation directly from Webull live data
             exit_price = None
             try:
-                from data_fetcher import get_unofficial_client
-                wb = get_unofficial_client()
-                if wb and instrument_id:
-                    quote = wb.get_option_quote(
-                        stock=trade_record["ticker"],
-                        optionId=instrument_id
-                    )
-                    if quote and "data" in quote and quote["data"]:
-                        q = quote["data"][0]
-                        bid_list = q.get("bidList", [])
-                        if bid_list:
-                            exit_price = float(bid_list[0].get("price", 0))
-            except Exception:
-                pass
+                from data_fetcher import get_option_live_quote
+                exp_str = trade_record.get("expiration", "")
+                exp_date_str = None
+                if "-" in exp_str and len(exp_str) == 10:
+                    exp_date_str = exp_str
+                else:
+                    curr_year = datetime.now().year
+                    exp_date_str = datetime.strptime(f"{exp_str} {curr_year}", "%b %d %Y").strftime("%Y-%m-%d")
+                
+                live_q = get_option_live_quote(
+                    ticker=trade_record["ticker"],
+                    strike=trade_record["strike"],
+                    option_type=trade_record["type"],
+                    exp_date_str=exp_date_str
+                )
+                if live_q and live_q.get("bid") is not None and live_q["bid"] > 0:
+                    exit_price = live_q["bid"]
+                elif live_q and live_q.get("mid") is not None:
+                    exit_price = live_q["mid"]
+            except Exception as ex:
+                logger.debug(f"[PaperTrader] Live exit quote lookup error: {ex}")
 
             client_order_id = str(uuid.uuid4())[:20]
 

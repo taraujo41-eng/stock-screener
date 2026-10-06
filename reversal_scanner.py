@@ -1168,13 +1168,15 @@ def _get_target_friday_exp(valid_exps=None, target_dte=30):
 
 def find_best_option(ticker, signal_type, last_price):
     """
-    Find the ideal contract:
-    - 30-60 DTE (snapped to standard trading Friday)
-    - Delta 0.40-0.70 (Approx by ITM/ATM standard strikes)
-    - High Volume & OI (>50) (Adjusted for after hours Webull/Yahoo fallback)
-    - Tight Spread (<12%)
+    Find the ideal live option contract from Webull:
+    - 20-65 DTE (standard expirations)
+    - Delta ~0.40-0.70 (ATM/slight ITM)
+    - Strict live quotes required: non-zero Bid and Ask
+    - Enforced tight spread (< 12% default or OPTIONS_MAX_SPREAD_PCT)
+    - Returns None if no liquid contract with valid quotes is found (no fake math)
     """
     try:
+        max_spread_pct = float(os.getenv("OPTIONS_MAX_SPREAD_PCT", "12.0"))
         chain_meta = fetch_options_chain(ticker)
         valid_exps = []
         now = time.time()
@@ -1185,149 +1187,113 @@ def find_best_option(ticker, signal_type, last_price):
                 if 20 <= dte <= 65:
                     valid_exps.append(exp)
         
+        if not valid_exps:
+            return None
+
         best_contract = None
+        best_score = -1
         
-        if valid_exps:
-            for exp_ts in valid_exps:
-                chain = fetch_options_for_expiration(ticker, exp_ts)
-                if not chain: continue
+        # Scan valid expirations (prioritizing 25-50 DTE sweet spot)
+        for exp_ts in valid_exps[:6]:
+            dte_days = max(1, int((exp_ts - now) / 86400))
+            chain = fetch_options_for_expiration(ticker, exp_ts)
+            if not chain:
+                continue
+            
+            contracts = chain.get("calls" if signal_type == "bullish" else "puts", [])
+            for c in contracts:
+                strike = c.get("strike")
+                if strike is None:
+                    continue
                 
-                contracts = chain.get("calls" if signal_type == "bullish" else "puts", [])
+                # Strike proximity: ATM or slightly ITM for maximum directional velocity
+                dist_pct = (strike - last_price) / last_price
+                if signal_type == "bullish":
+                    if not (-0.06 <= dist_pct <= 0.03):
+                        continue
+                else:
+                    if not (-0.03 <= dist_pct <= 0.06):
+                        continue
                 
-                for c in contracts:
-                    strike = c.get("strike")
-                    if strike is None: continue
-                    
-                    dist_pct = (strike - last_price) / last_price
-                    is_valid_strike = False
-                    if signal_type == "bullish":
-                        if -0.06 <= dist_pct <= 0.02: is_valid_strike = True
-                    else:
-                        if -0.02 <= dist_pct <= 0.06: is_valid_strike = True
-                    
-                    if not is_valid_strike: continue
-                    
-                    vol = c.get("volume") or 0
-                    oi = c.get("openInterest") or 0
-                    bid = c.get("bid")
-                    ask = c.get("ask")
-                    iv = c.get("impliedVolatility") or 0
-                    
-                    # Fallback to get_option_quote for bid/ask after-hours if empty
-                    if (bid is None or ask is None) and c.get("tickerId"):
-                        try:
-                            wb_un = get_unofficial_client()
-                            if wb_un:
-                                opt_quote = wb_un.get_option_quote(stock=ticker, optionId=c["tickerId"])
-                                data_list = opt_quote.get("data", [])
-                                if data_list:
-                                    q_data = data_list[0]
-                                    bid_list = q_data.get("bidList", [])
-                                    ask_list = q_data.get("askList", [])
-                                    if bid_list:
-                                        bid = float(bid_list[0].get("price", 0))
-                                    if ask_list:
-                                        ask = float(ask_list[0].get("price", 0))
-                                    if (bid is None or ask is None or (bid + ask) <= 0) and q_data.get("close"):
-                                        c_px = float(q_data["close"])
-                                        if c_px > 0:
-                                            bid = round(c_px * 0.98, 2)
-                                            ask = round(c_px * 1.02, 2)
-                                    if q_data.get("impVol"):
-                                        iv = float(q_data.get("impVol", 0))
-                                    if q_data.get("volume"):
-                                        vol = int(float(q_data.get("volume", 0)))
-                                    if q_data.get("openInterest"):
-                                        oi = int(float(q_data.get("openInterest", 0)))
-                                    if q_data.get("delta"):
-                                        est_delta = abs(float(q_data.get("delta", 0.50)))
-                        except Exception:
-                            pass
-                    
-                    if bid is not None and ask is not None and (bid + ask) > 0:
-                        mid = (bid + ask) / 2.0
-                    else:
-                        intrinsic = max(0.0, (last_price - strike) if signal_type == "bullish" else (strike - last_price))
-                        mid = round(intrinsic + (last_price * 0.035), 2)
-                        bid = round(mid * 0.95, 2)
-                        ask = round(mid * 1.05, 2)
-                    
-                    spread_pct = ((ask - bid) / max(0.01, mid)) * 100
-                    score = vol + oi
-                    
-                    dte_days = max(1, int((exp_ts - now) / 86400))
+                # 1. Strict live quote verification: non-zero Bid and Ask
+                bid = c.get("bid")
+                ask = c.get("ask")
+                if bid is None or ask is None or bid <= 0 or ask <= 0 or ask <= bid:
+                    continue
+                
+                mid = round((bid + ask) / 2.0, 2)
+                # 2. Filter out penny lottery options with huge percentage drag
+                if mid < 0.40:
+                    continue
+                
+                spread = round(ask - bid, 2)
+                spread_pct = round((spread / max(0.01, mid)) * 100, 1)
+                
+                # 3. Strict bid-ask spread filters (both percentage and dollar caps)
+                if spread_pct > max_spread_pct:
+                    continue
+                if mid < 2.0 and spread > 0.15:
+                    continue
+                elif mid < 5.0 and spread > 0.35:
+                    continue
+                
+                # 4. Liquidity gate: require active Open Interest or day volume
+                oi = c.get("openInterest") or 0
+                vol = c.get("volume") or 0
+                if oi < 20 and vol < 5:
+                    continue
+                
+                # 5. Delta filter: 0.35 to 0.70 Delta (targets sweet spot ATM 0.45 - 0.55)
+                delta = c.get("delta")
+                est_delta = abs(float(delta)) if delta else 0.50
+                if not (0.35 <= est_delta <= 0.70):
+                    continue
+                
+                # 6. Anti-IV Crush filter: avoid buying into overinflated IV (> 115%)
+                iv_val = (c.get("impliedVolatility") or 0.35)
+                iv_pct = iv_val * 100.0 if iv_val < 5.0 else iv_val
+                if iv_pct > 115.0:
+                    continue
+                
+                # 7. Comprehensive Scoring Formula:
+                # - Rewards ATM Delta (closest to 0.50)
+                # - Rewards the tightest percentage spread
+                # - Rewards the optimal 30-40 DTE window
+                # - Rewards high institutional liquidity (OI & Volume)
+                delta_fit = max(0.2, 1.0 - abs(est_delta - 0.50) * 2.0)
+                spread_fit = max(0.2, 1.0 - (spread_pct / max_spread_pct))
+                dte_fit = max(0.2, 1.0 - abs(dte_days - 35) / 35.0)
+                liq_score = min(5000, oi + (vol * 2))
+                
+                score = (liq_score ** 0.5) * 10.0 * spread_fit * delta_fit * dte_fit
+                
+                if score > best_score:
+                    best_score = score
                     exp_dt = datetime.fromtimestamp(exp_ts)
                     contract_sym = c.get("contractSymbol") or f"{ticker}{exp_dt.strftime('%y%m%d')}{'C' if signal_type == 'bullish' else 'P'}{int(strike*1000):08d}"
-                    
-                    if not best_contract or score > best_contract.get("score", -1):
-                        best_contract = {
-                            "symbol": contract_sym,
-                            "strike": strike,
-                            "type": "CALL" if signal_type == "bullish" else "PUT",
-                            "exp": exp_dt.strftime("%b %d"),
-                            "dte": dte_days,
-                            "mid": round(mid, 2),
-                            "bid": round(bid, 2),
-                            "ask": round(ask, 2),
-                            "iv": round(iv * 100, 1) if iv else 35.0,
-                            "volume": vol,
-                            "oi": oi,
-                            "spread_pct": round(spread_pct, 1),
-                            "est_delta": round(est_delta if 'est_delta' in locals() else 0.50, 2),
-                            "score": score
-                        }
-                
-                if best_contract and best_contract.get("score", 0) > 0:
-                    break
-        
-        if not best_contract:
-            # Fallback: calculate standard Friday expiration and standard strike
-            target_strike = _round_to_standard_strike(last_price)
-            exp_dt, dte_days = _get_target_friday_exp(valid_exps, target_dte=30)
-            intrinsic = max(0.0, (last_price - target_strike) if signal_type == "bullish" else (target_strike - last_price))
-            mid_val = round(intrinsic + (last_price * 0.035), 2)
-            occ_sym = f"{ticker}{exp_dt.strftime('%y%m%d')}{'C' if signal_type == 'bullish' else 'P'}{int(target_strike*1000):08d}"
-            
-            best_contract = {
-                "symbol": occ_sym,
-                "strike": target_strike,
-                "type": "CALL" if signal_type == "bullish" else "PUT",
-                "exp": exp_dt.strftime("%b %d"),
-                "dte": dte_days,
-                "mid": mid_val,
-                "bid": round(mid_val * 0.95, 2),
-                "ask": round(mid_val * 1.05, 2),
-                "iv": 35.0,
-                "volume": 150,
-                "oi": 500,
-                "spread_pct": 5.0,
-                "est_delta": 0.50,
-                "score": 50
-            }
+                    best_contract = {
+                        "symbol": contract_sym,
+                        "tickerId": str(c.get("tickerId", "")),
+                        "strike": strike,
+                        "type": "CALL" if signal_type == "bullish" else "PUT",
+                        "exp": exp_dt.strftime("%b %d"),
+                        "dte": dte_days,
+                        "mid": mid,
+                        "bid": bid,
+                        "ask": ask,
+                        "spread": spread,
+                        "spread_pct": spread_pct,
+                        "iv": round(iv_pct, 1),
+                        "volume": vol,
+                        "oi": oi,
+                        "est_delta": round(est_delta, 2),
+                        "score": round(score, 1)
+                    }
 
         return best_contract
-    except Exception:
-        target_strike = _round_to_standard_strike(last_price)
-        exp_dt, dte_days = _get_target_friday_exp(None, target_dte=30)
-        intrinsic = max(0.0, (last_price - target_strike) if signal_type == "bullish" else (target_strike - last_price))
-        mid_val = round(intrinsic + (last_price * 0.035), 2)
-        occ_sym = f"{ticker}{exp_dt.strftime('%y%m%d')}{'C' if signal_type == 'bullish' else 'P'}{int(target_strike*1000):08d}"
-        return {
-            "symbol": occ_sym,
-            "strike": target_strike,
-            "type": "CALL" if signal_type == "bullish" else "PUT",
-            "exp": exp_dt.strftime("%b %d"),
-            "dte": dte_days,
-            "mid": mid_val,
-            "bid": round(mid_val * 0.95, 2),
-            "ask": round(mid_val * 1.05, 2),
-            "iv": 35.0,
-            "volume": 150,
-            "oi": 500,
-            "spread_pct": 5.0,
-            "est_delta": 0.50,
-            "score": 50
-        }
+    except Exception as e:
+        print(f"[reversal_scanner] Error finding best option for {ticker}: {e}")
+        return None
 
 
 # =====================================================================
