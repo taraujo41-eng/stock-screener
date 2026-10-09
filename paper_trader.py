@@ -127,8 +127,13 @@ class PaperTrader:
         self.max_risk_per_trade = _cfg("PAPER_MAX_RISK_PER_TRADE", "500", float)
         self.max_open_positions = _cfg("PAPER_MAX_OPEN_POSITIONS", "5", int)
         self.max_daily_trades = _cfg("PAPER_MAX_DAILY_TRADES", "10", int)
-        self.stop_loss_pct = _cfg("PAPER_STOP_LOSS_PCT", "50", float)
+        self.stop_loss_pct = _cfg("PAPER_STOP_LOSS_PCT", "35", float)
         self.take_profit_vwap = _cfg("PAPER_TAKE_PROFIT_VWAP", "true", bool)
+        self.vwap_min_profit_pct = _cfg("PAPER_VWAP_MIN_PROFIT_PCT", "5", float)
+        self.take_profit_pct = _cfg("PAPER_TAKE_PROFIT_PCT", "25", float)
+        self.trailing_stop_enabled = _cfg("PAPER_TRAILING_STOP_ENABLED", "true", bool)
+        self.trailing_stop_activation_pct = _cfg("PAPER_TRAILING_STOP_ACTIVATION_PCT", "15", float)
+        self.trailing_stop_callback_pct = _cfg("PAPER_TRAILING_STOP_CALLBACK_PCT", "8", float)
         self.close_before_eod = _cfg("PAPER_CLOSE_BEFORE_MARKET_CLOSE", "true", bool)
 
     # ── Authentication ──────────────────────────────────────────────
@@ -645,6 +650,59 @@ class PaperTrader:
 
     # ── Position Management / Exits ─────────────────────────────────
 
+    def get_trade_option_quote(self, trade_record):
+        """Fetch live option quote (bid, ask, mid) for an open trade."""
+        ticker = trade_record.get("ticker")
+        strike = trade_record.get("strike")
+        opt_type = trade_record.get("type")
+        exp_str = trade_record.get("expiration", "")
+
+        # 1. Primary: Query Webull real-time options chain quote
+        exp_date_str = None
+        if "-" in exp_str and len(exp_str) == 10:
+            exp_date_str = exp_str
+        elif exp_str:
+            curr_year = datetime.now().year
+            try:
+                exp_date_str = datetime.strptime(f"{exp_str} {curr_year}", "%b %d %Y").strftime("%Y-%m-%d")
+            except Exception:
+                pass
+
+        if ticker and strike and opt_type and exp_date_str:
+            try:
+                from data_fetcher import get_option_live_quote
+                live_q = get_option_live_quote(
+                    ticker=ticker,
+                    strike=strike,
+                    option_type=opt_type,
+                    exp_date_str=exp_date_str
+                )
+                if live_q:
+                    return live_q
+            except Exception as ex:
+                logger.debug(f"[PaperTrader] Live option quote error for {ticker}: {ex}")
+
+        # 2. Fallback: Query Webull quote by instrument_id if available
+        instrument_id = trade_record.get("instrument_id")
+        if ticker and instrument_id:
+            try:
+                from data_fetcher import get_unofficial_client
+                wb = get_unofficial_client()
+                if wb:
+                    quote = wb.get_option_quote(stock=ticker, optionId=instrument_id)
+                    if quote and "data" in quote and quote["data"]:
+                        q = quote["data"][0]
+                        bid_list = q.get("bidList", [])
+                        ask_list = q.get("askList", [])
+                        bid = float(bid_list[0]["price"]) if bid_list and len(bid_list) > 0 else None
+                        ask = float(ask_list[0]["price"]) if ask_list and len(ask_list) > 0 else None
+                        mid = round((bid + ask) / 2.0, 2) if (bid is not None and ask is not None) else None
+                        return {"bid": bid, "ask": ask, "mid": mid}
+            except Exception:
+                pass
+
+        return None
+
     def close_position(self, trade_record, reason="manual"):
         """Sell to close an open option position."""
         if not self._logged_in:
@@ -653,30 +711,16 @@ class PaperTrader:
         try:
             instrument_id = trade_record.get("instrument_id")
 
-            # Get current option price for exit calculation directly from Webull live data
+            # Get current option quote for realistic exit price
             exit_price = None
-            try:
-                from data_fetcher import get_option_live_quote
-                exp_str = trade_record.get("expiration", "")
-                exp_date_str = None
-                if "-" in exp_str and len(exp_str) == 10:
-                    exp_date_str = exp_str
-                else:
-                    curr_year = datetime.now().year
-                    exp_date_str = datetime.strptime(f"{exp_str} {curr_year}", "%b %d %Y").strftime("%Y-%m-%d")
-                
-                live_q = get_option_live_quote(
-                    ticker=trade_record["ticker"],
-                    strike=trade_record["strike"],
-                    option_type=trade_record["type"],
-                    exp_date_str=exp_date_str
-                )
-                if live_q and live_q.get("bid") is not None and live_q["bid"] > 0:
-                    exit_price = live_q["bid"]
-                elif live_q and live_q.get("mid") is not None:
-                    exit_price = live_q["mid"]
-            except Exception as ex:
-                logger.debug(f"[PaperTrader] Live exit quote lookup error: {ex}")
+            opt_q = self.get_trade_option_quote(trade_record)
+            if opt_q:
+                bid = opt_q.get("bid")
+                mid = opt_q.get("mid")
+                if bid is not None and bid > 0:
+                    exit_price = bid
+                elif mid is not None and mid > 0:
+                    exit_price = mid
 
             client_order_id = str(uuid.uuid4())[:20]
 
@@ -713,11 +757,13 @@ class PaperTrader:
                 entry_p = trade_record.get("entry_price", 1.0)
                 if exit_price is None or exit_price <= 0:
                     if reason == "take_profit":
-                        exit_price = round(entry_p * 1.30, 2)
-                    elif reason == "stop_loss":
-                        exit_price = round(entry_p * 0.50, 2)
-                    else:
+                        exit_price = round(entry_p * (1.0 + (self.take_profit_pct / 100.0)), 2)
+                    elif reason == "trailing_stop":
                         exit_price = round(entry_p * 1.10, 2)
+                    elif reason == "stop_loss":
+                        exit_price = round(entry_p * (1.0 - (self.stop_loss_pct / 100.0)), 2)
+                    else:
+                        exit_price = round(entry_p * 0.95, 2)
                 logger.info(f"[PaperTrader] 🛡️ [SIMULATION MODE] Simulated Close executed for {trade_record['ticker']} @ exit price ${exit_price:.2f}")
 
             # Update trade record
@@ -752,7 +798,7 @@ class PaperTrader:
             return False
 
     def _check_exits(self):
-        """Check all open positions for exit conditions (stop-loss, take-profit, EOD)."""
+        """Check all open positions for exit conditions (stop-loss, take-profit, trailing-stop, EOD)."""
         if not self._logged_in or not self._open_positions:
             return
 
@@ -762,50 +808,65 @@ class PaperTrader:
         eod_minutes = 15 * 60 + 55  # 3:55 PM
 
         positions_to_close = []
+        trade_log_dirty = False
 
         for trade in list(self._open_positions):
             if trade.get("status") != "open":
                 continue
 
-            instrument_id = trade.get("instrument_id")
-            if not instrument_id:
-                continue
-
             try:
-                # Get current option price via unofficial client
-                current_price = None
-                try:
-                    from data_fetcher import get_unofficial_client
-                    wb = get_unofficial_client()
-                    if wb:
-                        quote = wb.get_option_quote(
-                            stock=trade["ticker"], optionId=instrument_id
-                        )
-                        if quote and "data" in quote and quote["data"]:
-                            q = quote["data"][0]
-                            bid_list = q.get("bidList", [])
-                            ask_list = q.get("askList", [])
-                            bid = float(bid_list[0]["price"]) if bid_list else 0
-                            ask = float(ask_list[0]["price"]) if ask_list else 0
-                            current_price = (bid + ask) / 2 if (bid + ask) > 0 else None
-                except Exception as e:
-                    logger.warning(f"[PaperTrader] Could not get quote for {trade['ticker']}: {e}")
-                    continue
+                # 1. Fetch live option quote
+                opt_q = self.get_trade_option_quote(trade)
+                current_bid = opt_q.get("bid") if opt_q else None
+                current_mid = opt_q.get("mid") if opt_q else None
+
+                # For real executable exits and P&L, executable bid is primary
+                current_price = current_bid if (current_bid is not None and current_bid > 0) else current_mid
 
                 entry_price = trade.get("entry_price", 0)
-
-                # 1. Stop-loss
+                pnl_pct = 0.0
                 if current_price and entry_price > 0:
-                    loss_pct = ((entry_price - current_price) / entry_price) * 100
+                    pnl_pct = ((current_price - entry_price) / entry_price) * 100.0
+
+                    # Track peak P&L for trailing stop
+                    if pnl_pct > trade.get("peak_pnl_pct", -999.0):
+                        trade["peak_pnl_pct"] = round(pnl_pct, 2)
+                        trade_log_dirty = True
+
+                # 2. Hard Stop-Loss
+                if current_price and entry_price > 0:
+                    loss_pct = -pnl_pct
                     if loss_pct >= self.stop_loss_pct:
                         logger.warning(
-                            f"[PaperTrader] 🛑 STOP-LOSS on {trade['ticker']} | "
-                            f"Entry: ${entry_price:.2f} → Now: ${current_price:.2f} | Loss: {loss_pct:.1f}%"
+                            f"[PaperTrader] 🛑 STOP-LOSS triggered on {trade['ticker']} | "
+                            f"Entry: ${entry_price:.2f} → Bid: ${current_price:.2f} | Loss: {loss_pct:.1f}% >= {self.stop_loss_pct}%"
                         )
                         positions_to_close.append((trade, "stop_loss"))
                         continue
 
-                # 2. Take-profit (underlying at VWAP target)
+                # 3. Fixed Option Take-Profit Target (e.g. +25% contract gain)
+                if current_price and entry_price > 0 and self.take_profit_pct > 0:
+                    if pnl_pct >= self.take_profit_pct:
+                        logger.info(
+                            f"[PaperTrader] 🎯 TAKE-PROFIT (Target Reached) on {trade['ticker']} | "
+                            f"Entry: ${entry_price:.2f} → Bid: ${current_price:.2f} | Gain: +{pnl_pct:.1f}% >= +{self.take_profit_pct}%"
+                        )
+                        positions_to_close.append((trade, "take_profit"))
+                        continue
+
+                # 4. Trailing Stop Protection
+                if self.trailing_stop_enabled and trade.get("peak_pnl_pct", 0) >= self.trailing_stop_activation_pct:
+                    peak = trade["peak_pnl_pct"]
+                    stop_floor_pct = max(2.0, peak - self.trailing_stop_callback_pct)
+                    if pnl_pct <= stop_floor_pct:
+                        logger.info(
+                            f"[PaperTrader] 🛡️ TRAILING STOP triggered on {trade['ticker']} | "
+                            f"Peak: +{peak:.1f}% → Now: {pnl_pct:+.1f}% (Floor: +{stop_floor_pct:.1f}%) | Locking in gains"
+                        )
+                        positions_to_close.append((trade, "trailing_stop"))
+                        continue
+
+                # 5. Take-Profit @ VWAP (Requires Option Profitability Gate)
                 if self.take_profit_vwap and trade.get("vwap_target"):
                     try:
                         from data_fetcher import get_unofficial_client
@@ -818,31 +879,45 @@ class PaperTrader:
                             hit = (trade["signal_type"] == "bullish" and stock_price >= vwap_target) or \
                                   (trade["signal_type"] == "bearish" and stock_price <= vwap_target)
                             if hit:
-                                logger.info(
-                                    f"[PaperTrader] 🎯 TAKE-PROFIT on {trade['ticker']} | "
-                                    f"Price ${stock_price:.2f} vs VWAP target ${vwap_target:.2f}"
-                                )
-                                positions_to_close.append((trade, "take_profit"))
-                                continue
-                    except Exception:
-                        pass
+                                if current_price and entry_price > 0:
+                                    if pnl_pct >= self.vwap_min_profit_pct:
+                                        logger.info(
+                                            f"[PaperTrader] 🎯 TAKE-PROFIT @ VWAP on {trade['ticker']} | "
+                                            f"Stock: ${stock_price:.2f} (Target: ${vwap_target:.2f}) | Option P&L: +{pnl_pct:.1f}% >= +{self.vwap_min_profit_pct}%"
+                                        )
+                                        positions_to_close.append((trade, "take_profit"))
+                                        continue
+                                    else:
+                                        logger.info(
+                                            f"[PaperTrader] ⏳ VWAP target touched on {trade['ticker']} (${stock_price:.2f}), "
+                                            f"but option P&L is {pnl_pct:+.1f}% (< min +{self.vwap_min_profit_pct}%). Holding position."
+                                        )
+                                else:
+                                    # Fallback if quote is unavailable
+                                    positions_to_close.append((trade, "take_profit"))
+                                    continue
+                    except Exception as ex:
+                        logger.debug(f"[PaperTrader] VWAP exit check error: {ex}")
 
-                # 3. End-of-day close
+                # 6. End-of-Day (EOD) Close
                 if self.close_before_eod and current_minutes >= eod_minutes:
                     logger.info(f"[PaperTrader] 🕓 EOD close for {trade['ticker']} at {now.strftime('%H:%M')}")
                     positions_to_close.append((trade, "eod_close"))
                     continue
 
-                # Log position status
-                if current_price:
-                    pnl_pct = ((current_price - entry_price) / entry_price) * 100 if entry_price > 0 else 0
+                # Status log for monitoring
+                if current_price and entry_price > 0:
                     logger.info(
                         f"[PaperTrader] 📊 {trade['ticker']} {trade['type']} ${trade['strike']} | "
-                        f"Entry: ${entry_price:.2f} → Now: ${current_price:.2f} | P&L: {pnl_pct:+.1f}%"
+                        f"Entry: ${entry_price:.2f} → Bid: ${current_price:.2f} | P&L: {pnl_pct:+.1f}% (Peak: +{trade.get('peak_pnl_pct', 0):.1f}%)"
                     )
 
             except Exception as e:
                 logger.error(f"[PaperTrader] Error checking exit for {trade['ticker']}: {e}")
+
+        if trade_log_dirty:
+            with self._lock:
+                _save_trade_log(self._trade_log)
 
         for trade, reason in positions_to_close:
             self.close_position(trade, reason=reason)

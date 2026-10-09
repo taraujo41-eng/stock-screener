@@ -2164,8 +2164,10 @@ function renderPaperTradeLog(data) {
       const pnlPct = t.entry_price ? ((pnl / (t.entry_price * 100)) * 100).toFixed(1) : "0.0";
       const entryTimeFormatted = formatTradeDateTime(t.entry_time);
       const exitTimeFormatted = formatTradeDateTime(t.exit_time);
-      const reasonBadge = t.exit_reason === 'take_profit' ? '🎯 Take Profit @ VWAP' : 
-                          t.exit_reason === 'stop_loss' ? '🛑 Stop Loss' : (t.exit_reason || 'Closed');
+      const reasonBadge = t.exit_reason === 'take_profit' ? '🎯 Take Profit' : 
+                          t.exit_reason === 'trailing_stop' ? '🛡️ Trailing Stop' :
+                          t.exit_reason === 'stop_loss' ? '🛑 Stop Loss' :
+                          t.exit_reason === 'eod_close' ? '🕓 EOD Close' : (t.exit_reason || 'Closed');
       const expStr = formatOptionExp(t);
       const entryDateShort = formatTradeDateShort(t.entry_time);
 
