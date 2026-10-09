@@ -472,7 +472,7 @@ class PaperTrader:
 
     # ── Order Placement ─────────────────────────────────────────────
 
-    def place_option_order(self, ticker, signal_type, last_price, vwap_target=None):
+    def place_option_order(self, ticker, signal_type, last_price, vwap_target=None, zone_summary=None, in_zone=False, setup_reason=None):
         """
         Find the best option contract for the signal and place an order.
 
@@ -481,6 +481,9 @@ class PaperTrader:
             signal_type: "bullish" or "bearish"
             last_price: Current stock price
             vwap_target: Target VWAP price for take-profit (optional)
+            zone_summary: Supply/Demand zone range string (optional)
+            in_zone: Whether stock was inside an active zone (optional)
+            setup_reason: Text description of the confluence setup (optional)
 
         Returns:
             dict with order details, or None on failure
@@ -621,6 +624,9 @@ class PaperTrader:
                 "quantity": self.max_contracts,
                 "dte": best["dte"],
                 "expiration": best.get("exp", ""),
+                "zone": zone_summary,
+                "in_zone": in_zone,
+                "setup": setup_reason,
                 "status": "open",
                 "exit_price": None,
                 "exit_time": None,

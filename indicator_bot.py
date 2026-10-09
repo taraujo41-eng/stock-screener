@@ -262,20 +262,25 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                 ticker=ticker,
                 signal_type=trade_signal,
                 last_price=last_price,
-                vwap_target=vwap_target
+                vwap_target=vwap_target,
+                zone_summary=zone_summary,
+                in_zone=in_zone,
+                setup_reason=reason
             )
             if result:
                 mode_str = result.get('mode', 'Simulation')
-                logger.info(f"📈 {grade_str} Paper trade placed for {ticker}: {result.get('option_symbol', '')} @ ${result.get('entry_price', 0):.2f} ({mode_str})")
+                zone_title = f"{'DEMAND' if signal_type == 'bullish' else 'SUPPLY'} ZONE" if in_zone else "REVERSAL"
+                logger.info(f"📈 {grade_str} {zone_title} Paper trade placed for {ticker}: {result.get('option_symbol', '')} @ ${result.get('entry_price', 0):.2f} ({mode_str})")
                 
                 # Send trade notification via same alert method
                 trade_msg = (
-                    f"📈 {grade_icon} {grade_str} PAPER TRADE PLACED: {ticker}\n"
+                    f"📈 {grade_icon} {grade_str} {zone_title} TRADE PLACED: {ticker}\n"
                     f"Option: {result.get('type', '')} ${result.get('strike', '')} ({result.get('option_symbol', '')})\n"
                     f"Price: ${result.get('entry_price', 0):.2f}\n"
                     f"Qty: {result.get('quantity', 1)} contract(s)\n"
                     f"Stock Price: ${last_price:.2f}\n"
                     f"VWAP Target: ${vwap_target:.2f}\n"
+                    f"Zone: {zone_summary if zone_summary and zone_summary != 'None' else 'N/A'}\n"
                     f"Setup: {reason or (action + ' Reversal')}\n"
                     f"Mode: {mode_str}"
                 )
@@ -285,16 +290,16 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                     rsi_formatted = f"{rsi:.1f}" if rsi is not None else "N/A"
                     rvol_formatted = f"{rvol:.1f}x" if rvol is not None else "N/A"
                     tg_trade = (
-                        f"📈 <b>{grade_icon} {grade_str} PAPER TRADE PLACED: {ticker}</b>\n\n"
+                        f"📈 <b>{grade_icon} {grade_str} {zone_title} TRADE PLACED: {ticker}</b>\n\n"
                         f"<b>Option:</b> {result.get('type', '')} ${result.get('strike', '')} ({result.get('option_symbol', '')})\n"
                         f"<b>Entry Price:</b> ${result.get('entry_price', 0):.2f}\n"
                         f"<b>Qty:</b> {result.get('quantity', 1)} contract(s)\n"
                         f"<b>Stock Price:</b> ${last_price:.2f}\n"
                         f"<b>VWAP Target:</b> ${vwap_target:.2f}\n"
+                        f"<b>Zone:</b> {zone_str}\n"
                         f"<b>RSI:</b> {rsi_formatted} | <b>RVOL:</b> {rvol_formatted}\n"
                         f"<b>Market Sentiment:</b> {align_icon} {align_badge}\n"
                         f"<b>Technical Trend:</b> {tech_str}\n"
-                        f"<b>Zone:</b> {zone_str}\n"
                         f"<b>Setup:</b> {reason or (action + ' Reversal')}\n"
                         f"<b>Mode:</b> {mode_str}"
                     )
@@ -306,32 +311,31 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
 
 def evaluate_ticker_process(ticker, df):
     """
-    Called in parallel background threads to evaluate the 15m dataframe against Daily Bollinger Bands.
-    Enforces 3.0-Sigma actual band breach, RSI Divergence, Technical MAs,
-    Supply/Demand zone testing, and Market Sentiment alignment.
+    Evaluates the 15m dataframe against Institutional Supply & Demand Zones
+    and Daily Bollinger Bands. Recognizes zone hits and tests whether a viable
+    trade is possible.
     """
     global _daily_bands_map
     
     daily_upper_bb = None
     daily_lower_bb = None
-    
     if ticker in _daily_bands_map:
         daily_upper_bb, daily_lower_bb = _daily_bands_map[ticker]
-    else:
-        # Fallback if no daily bands pre-calculated
-        return None
         
     bb_length = int(os.getenv("BB_LENGTH", "20"))
-    bb_mult = float(os.getenv("BB_MULT", "3.0"))
-    proximity_pct = float(os.getenv("PROXIMITY_PCT", "0.0"))
+    bb_mult = float(os.getenv("BB_MULT", "2.5"))
+    proximity_pct = float(os.getenv("PROXIMITY_PCT", "0.015"))
     only_a_plus = os.getenv("ONLY_A_PLUS_SETUPS", "true").lower() in ("true", "1", "yes")
+    trade_zones_enabled = os.getenv("TRADE_SUPPLY_DEMAND_ZONES", "true").lower() in ("true", "1", "yes")
+    zone_lookback = int(os.getenv("ZONE_LOOKBACK", "45"))
+    zone_tolerance = float(os.getenv("ZONE_TOLERANCE_PCT", "0.015"))
     rsi_length = int(os.getenv("RSI_LENGTH", "14"))
     lookback = int(os.getenv("LOOKBACK", "15"))
     
     if len(df) < max(bb_length, rsi_length) + lookback + 5:
         return None
         
-    # Compute Reversal indicators using pre-calculated daily bands
+    # 1. Compute Reversal indicators (Bollinger Bands, RSI, VWAP)
     df_ind = calculate_3_sigma_divergence(
         df,
         bb_length=bb_length,
@@ -343,23 +347,42 @@ def evaluate_ticker_process(ticker, df):
         proximity_pct=proximity_pct
     )
     
-    # Inspect latest state
     last_row = df_ind.iloc[-1]
+    close_price = float(last_row['Close'])
+    open_price = float(last_row['Open'])
+    high_price = float(last_row['High'])
+    low_price = float(last_row['Low'])
+    vwap_target = float(last_row['vwap'])
+    rsi_val = float(last_row['rsi'])
+    
     is_bullish_pierced = bool(last_row.get('is_bullish_pierced', False))
     is_bearish_pierced = bool(last_row.get('is_bearish_pierced', False))
     is_bullish_near = bool(last_row.get('is_bullish_near', False)) if proximity_pct > 0 else False
     is_bearish_near = bool(last_row.get('is_bearish_near', False)) if proximity_pct > 0 else False
     
-    is_bullish = is_bullish_pierced or is_bullish_near
-    is_bearish = is_bearish_pierced or is_bearish_near
-
-    close_price = float(last_row['Close'])
-    vwap_target = float(last_row['vwap'])
-    rsi_val = float(last_row['rsi'])
-    
+    is_bullish_bb = is_bullish_pierced or is_bullish_near
+    is_bearish_bb = is_bearish_pierced or is_bearish_near
     sd_label = f"{int(bb_mult)}SD" if bb_mult.is_integer() else f"{bb_mult}SD"
 
-    # Check: Must breach or be within proximity threshold of the Daily Bollinger Band
+    # 2. Institutional Supply & Demand Zones Detection
+    in_demand, in_supply = False, False
+    demand_zone, supply_zone = None, None
+    try:
+        from reversal_scanner import detect_supply_demand_zones
+        in_demand, in_supply, demand_zone, supply_zone = detect_supply_demand_zones(
+            df, lookback=zone_lookback, tolerance_pct=zone_tolerance
+        )
+    except Exception as e:
+        logger.warning(f"Error computing supply/demand zones for {ticker}: {e}")
+
+    # 3. Determine Setup Candidates
+    is_bullish_zone = in_demand and trade_zones_enabled
+    is_bearish_zone = in_supply and trade_zones_enabled
+
+    is_bullish = is_bullish_zone or is_bullish_bb
+    is_bearish = is_bearish_zone or is_bearish_bb
+
+    # If neither zone hit nor BB breach/near, skip
     if not (is_bullish or is_bearish):
         return None
 
@@ -393,58 +416,73 @@ def evaluate_ticker_process(ticker, df):
         else: tech_bear += 1
     tech_trend = "Bullish" if tech_bull >= 2 else ("Bearish" if tech_bear >= 2 else "Neutral")
 
-    # Supply & Demand Zones Detection
-    in_demand, in_supply = False, False
-    demand_zone, supply_zone = None, None
-    try:
-        from reversal_scanner import detect_supply_demand_zones
-        in_demand, in_supply, demand_zone, supply_zone = detect_supply_demand_zones(df, lookback=40, tolerance_pct=0.015)
-    except Exception as e:
-        logger.warning(f"Error computing supply/demand zones for {ticker}: {e}")
-
-    # Resolve active zone relative to setup direction
-    zone_summary = "None"
-    in_zone = False
-    zone_details = None
-
     # Market Sentiment alignment
     sentiment_data = get_cached_market_sentiment()
     m_sentiment = sentiment_data.get('sentiment', 'Neutral')
     m_summary = sentiment_data.get('summary', '')
 
+    # Candlestick metrics
+    candle_rng = max(0.001, high_price - low_price)
+    lower_wick = min(open_price, close_price) - low_price
+    upper_wick = high_price - max(open_price, close_price)
+    is_green = close_price >= open_price
+    is_red = close_price <= open_price
+
     score = 10
-    sd_reach = "Pierced" if (is_bullish_pierced or is_bearish_pierced) else f"Within {proximity_pct*100:.1f}% of"
-    reasons_list = [f"{sd_reach} Daily {'Lower' if is_bullish else 'Upper'} {sd_label} BB"]
+    reasons_list = []
     has_div = False
+    in_zone = False
+    zone_summary = "None"
+    zone_details = None
+    zone_rejection = False
+    best_opt = None
+
+    sd_reach = "Pierced" if (is_bullish_pierced or is_bearish_pierced) else f"Within {proximity_pct*100:.1f}% of"
 
     if is_bullish:
-        if bull_div:
-            score += 4
-            has_div = True
-            reasons_list.append("RSI Bullish Divergence")
-        if rsi_val <= 30:
-            score += 2
-            reasons_list.append(f"RSI Oversold ({rsi_val:.1f})")
-        if rvol > 1.5:
-            score += 2
-            reasons_list.append(f"High RVOL ({rvol:.1f}x)")
-        if ema20_dist < -2.0:
-            score += 1
-            reasons_list.append("EMA Extension")
-
-        # Demand Zone Confluence (+2 bonus)
-        if in_demand and demand_zone:
+        # Zone confluence
+        if is_bullish_zone and demand_zone:
             in_zone = True
             zone_summary = f"Demand: {demand_zone['range_str']}"
             zone_details = demand_zone
-            score += 2
             reasons_list.append(f"In Demand Zone ({demand_zone['range_str']}) 🧱")
+            
+            # Check price rejection wick or green bounce candle at demand zone
+            if (lower_wick / candle_rng >= 0.28) or is_green:
+                zone_rejection = True
+                score += 2
+                reasons_list.append("Demand Zone Price Rejection 🔨")
         elif demand_zone:
             zone_summary = f"Demand: {demand_zone['range_str']}"
             zone_details = demand_zone
             reasons_list.append(f"Near Demand Zone ({demand_zone['range_str']})")
 
-        # Market Sentiment Alignment (+1 bonus)
+        # Bollinger Band confluence
+        if is_bullish_bb:
+            if is_bullish_zone:
+                score += 2  # Dual Confluence: Zone + 3-Sigma!
+            reasons_list.append(f"{sd_reach} Daily Lower {sd_label} BB")
+
+        # RSI Confluences
+        if bull_div:
+            score += 4
+            has_div = True
+            reasons_list.append("RSI Bullish Divergence")
+        if rsi_val <= 32:
+            score += 2
+            reasons_list.append(f"RSI Oversold ({rsi_val:.1f})")
+        elif rsi_val <= 42:
+            score += 1
+            reasons_list.append(f"RSI Low ({rsi_val:.1f})")
+
+        if rvol > 1.3:
+            score += 2
+            reasons_list.append(f"High RVOL ({rvol:.1f}x)")
+        if ema20_dist < -1.5:
+            score += 1
+            reasons_list.append("EMA Extension")
+
+        # Market Sentiment
         if m_sentiment == "Bullish":
             sentiment_align = "Bullish Aligned"
             score += 1
@@ -454,34 +492,73 @@ def evaluate_ticker_process(ticker, df):
             reasons_list.append("Counter-Trend Setup 🔄")
         else:
             sentiment_align = "Neutral Macro"
-    else:
-        if bear_div:
-            score += 4
-            has_div = True
-            reasons_list.append("RSI Bearish Divergence")
-        if rsi_val >= 70:
-            score += 2
-            reasons_list.append(f"RSI Overbought ({rsi_val:.1f})")
-        if rvol > 1.5:
-            score += 2
-            reasons_list.append(f"High RVOL ({rvol:.1f}x)")
-        if ema20_dist > 2.0:
-            score += 1
-            reasons_list.append("EMA Extension")
 
-        # Supply Zone Confluence (+2 bonus)
-        if in_supply and supply_zone:
+        # Check upside room to target
+        if vwap_target <= close_price * 1.002:
+            overhead = max(ema20 or 0, supply_zone['low'] if supply_zone else 0)
+            if overhead > close_price * 1.008:
+                vwap_target = round(overhead, 2)
+            else:
+                vwap_target = round(close_price * 1.025, 2)
+
+        # See if a trade is possible: Option contract check
+        try:
+            from reversal_scanner import find_best_option
+            best_opt = find_best_option(ticker, "bullish", close_price)
+        except Exception as ex:
+            logger.debug(f"Option feasibility check error for {ticker}: {ex}")
+
+        if is_bullish_zone and not best_opt:
+            logger.info(f"[{ticker} 15m] ⚠️ In Demand Zone ({zone_summary}), but no suitable liquid option contract found — trade not possible.")
+            return None
+        elif best_opt:
+            score += 1
+            reasons_list.append(f"Option Verified ({best_opt['type']} ${best_opt['strike']})")
+
+    else:
+        # Bearish setup
+        if is_bearish_zone and supply_zone:
             in_zone = True
             zone_summary = f"Supply: {supply_zone['range_str']}"
             zone_details = supply_zone
-            score += 2
             reasons_list.append(f"In Supply Zone ({supply_zone['range_str']}) 🧱")
+
+            # Check price rejection wick or red drop candle at supply zone
+            if (upper_wick / candle_rng >= 0.28) or is_red:
+                zone_rejection = True
+                score += 2
+                reasons_list.append("Supply Zone Price Rejection 🔨")
         elif supply_zone:
             zone_summary = f"Supply: {supply_zone['range_str']}"
             zone_details = supply_zone
             reasons_list.append(f"Near Supply Zone ({supply_zone['range_str']})")
 
-        # Market Sentiment Alignment (+1 bonus)
+        # Bollinger Band confluence
+        if is_bearish_bb:
+            if is_bearish_zone:
+                score += 2  # Dual Confluence: Zone + 3-Sigma!
+            reasons_list.append(f"{sd_reach} Daily Upper {sd_label} BB")
+
+        # RSI Confluences
+        if bear_div:
+            score += 4
+            has_div = True
+            reasons_list.append("RSI Bearish Divergence")
+        if rsi_val >= 68:
+            score += 2
+            reasons_list.append(f"RSI Overbought ({rsi_val:.1f})")
+        elif rsi_val >= 58:
+            score += 1
+            reasons_list.append(f"RSI High ({rsi_val:.1f})")
+
+        if rvol > 1.3:
+            score += 2
+            reasons_list.append(f"High RVOL ({rvol:.1f}x)")
+        if ema20_dist > 1.5:
+            score += 1
+            reasons_list.append("EMA Extension")
+
+        # Market Sentiment
         if m_sentiment == "Bearish":
             sentiment_align = "Bearish Aligned"
             score += 1
@@ -492,16 +569,40 @@ def evaluate_ticker_process(ticker, df):
         else:
             sentiment_align = "Neutral Macro"
 
-    is_a_plus = (score >= 12 and has_div)
+        # Check downside room to target
+        if vwap_target >= close_price * 0.998:
+            underfoot = min(ema20 or 999999, demand_zone['high'] if demand_zone else 999999)
+            if underfoot < close_price * 0.992:
+                vwap_target = round(underfoot, 2)
+            else:
+                vwap_target = round(close_price * 0.975, 2)
+
+        # See if a trade is possible: Option contract check
+        try:
+            from reversal_scanner import find_best_option
+            best_opt = find_best_option(ticker, "bearish", close_price)
+        except Exception as ex:
+            logger.debug(f"Option feasibility check error for {ticker}: {ex}")
+
+        if is_bearish_zone and not best_opt:
+            logger.info(f"[{ticker} 15m] ⚠️ In Supply Zone ({zone_summary}), but no suitable liquid option contract found — trade not possible.")
+            return None
+        elif best_opt:
+            score += 1
+            reasons_list.append(f"Option Verified ({best_opt['type']} ${best_opt['strike']})")
+
+    is_a_plus = (score >= 12 and (has_div or (in_zone and (zone_rejection or is_bullish_bb or is_bearish_bb))))
     grade = "A+" if is_a_plus else ("A" if score >= 10 else "B")
     reasons = " | ".join(reasons_list)
 
-    if only_a_plus and not is_a_plus:
-        logger.info(f"[{ticker} 15m] Price: {close_price:.2f} | {sd_reach} {sd_label} BB (Score: {score}, Grade: {grade}) — Skipped (Requires A+ setup with RSI Divergence)")
+    qualifies_for_trade = is_a_plus or (in_zone and score >= 10 and best_opt is not None)
+    if only_a_plus and not qualifies_for_trade:
+        logger.info(f"[{ticker} 15m] Price: {close_price:.2f} | Zone: {zone_summary} (Score: {score}, Grade: {grade}) — Skipped (Requires A+ setup or confirmed Zone trade)")
         return None
 
-    grade_icon = "⭐️" if grade == "A+" else "🔥"
-    logger.info(f"[{ticker} 15m] {grade_icon} {grade} REVERSAL CONFIRMED! Score: {score}, RSI: {rsi_val:.1f}, RVOL: {rvol:.1f}x, Zone: {zone_summary} | {reasons}")
+    grade_icon = "🧱" if in_zone else ("⭐️" if grade == "A+" else "🔥")
+    zone_label = f" ({zone_summary})" if in_zone else ""
+    logger.info(f"[{ticker} 15m] {grade_icon} {grade} TRADE CONFIRMED! Score: {score}, RSI: {rsi_val:.1f}, RVOL: {rvol:.1f}x, Zone: {zone_summary}{zone_label} | {reasons}")
 
     return {
         'action': 'BUY' if is_bullish else 'SELL',
@@ -521,6 +622,7 @@ def evaluate_ticker_process(ticker, df):
         'tech_trend': tech_trend,
         'market_sentiment': m_sentiment,
         'market_sentiment_summary': m_summary,
+        'suggested_option': best_opt,
     }
 
 def precalculate_daily_bands(tickers):
