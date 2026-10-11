@@ -1341,6 +1341,26 @@ def paper_toggle():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/paper/reset", methods=["POST"])
+def paper_reset():
+    """Reset trade history and start fresh with configured starting balance."""
+    try:
+        from paper_trader import get_paper_trader
+        pt = get_paper_trader()
+        pt.reset_trade_log()
+        
+        # Also clear alerted today cooldown so Monday gets a clean slate
+        try:
+            from indicator_bot import ALERTED_TODAY_FILE, _save_alerted
+            if os.path.exists(ALERTED_TODAY_FILE):
+                _save_alerted({})
+        except Exception:
+            pass
+
+        return jsonify({"ok": True, "message": "Account reset to starting balance and trade history cleared."}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 # ── Start ────────────────────────────────────────────────────────────
 
 def get_local_ip():

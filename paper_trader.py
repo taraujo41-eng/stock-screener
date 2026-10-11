@@ -123,6 +123,7 @@ class PaperTrader:
 
         # Risk controls (loaded from .env)
         self.enabled = _cfg("PAPER_TRADE_ENABLED", "true", bool)
+        self.starting_balance = _cfg("PAPER_STARTING_BALANCE", "3000.0", float)
         self.max_contracts = _cfg("PAPER_MAX_CONTRACTS", "1", int)
         self.max_risk_per_trade = _cfg("PAPER_MAX_RISK_PER_TRADE", "500", float)
         self.max_open_positions = _cfg("PAPER_MAX_OPEN_POSITIONS", "5", int)
@@ -321,7 +322,7 @@ class PaperTrader:
             total_pnl = sum(t["pnl"] for t in closed)
             open_cost = sum(p.get("entry_price", 0) * 100 * p.get("quantity", 1) for p in self._open_positions if p.get("status") == "open")
             
-            starting_balance = 100000.0
+            starting_balance = getattr(self, "starting_balance", 3000.0)
             net_liq = starting_balance + total_pnl
             cash_bal = net_liq - open_cost
             
@@ -998,6 +999,15 @@ class PaperTrader:
             self.enabled = not self.enabled
         logger.info(f"[PaperTrader] Paper trading {'ENABLED' if self.enabled else 'DISABLED'}")
         return self.enabled
+
+    def reset_trade_log(self):
+        """Reset trade history and open positions to start fresh."""
+        with self._lock:
+            self._trade_log = {"trades": [], "daily_stats": {}}
+            self._open_positions = []
+            _save_trade_log(self._trade_log)
+        logger.info("[PaperTrader] 🔄 Trade log and open positions have been reset to empty.")
+        return True
 
 
 # ── Module-Level Singleton ──────────────────────────────────────────────
