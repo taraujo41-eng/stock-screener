@@ -978,6 +978,7 @@ class PaperTrader:
             "loss_count": losses,
             "win_rate": round(wins / max(1, wins + losses) * 100, 1),
             "account_balance": account,
+            "status": account,
             "risk_limits": {
                 "max_contracts": self.max_contracts,
                 "max_risk_per_trade": self.max_risk_per_trade,

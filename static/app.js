@@ -1907,7 +1907,7 @@ async function fetchPaperData() {
 }
 
 function updatePaperStatusUI(data) {
-  const status = data.status || {};
+  const status = data.account_balance || data.status || {};
   const risk = data.risk_limits || {};
 
   const netLiqEl = document.getElementById("paperNetLiq");
