@@ -392,8 +392,15 @@ def evaluate_ticker_process(ticker, df):
     ema20_dist = 0.0
     ema20 = None
     sma50 = None
+    macd_bull_cross = False
+    macd_bear_cross = False
+    macd_bull_curl = False
+    macd_bear_curl = False
+    macd_line = None
+    signal_line = None
+    macd_hist = None
     try:
-        from reversal_scanner import detect_rsi_divergence, compute_rvol, compute_ema, compute_sma
+        from reversal_scanner import detect_rsi_divergence, compute_rvol, compute_ema, compute_sma, compute_macd
         bull_div, bear_div = detect_rsi_divergence(df['Close'], df_ind['rsi'], lookback=lookback)
         rvol = compute_rvol(df)
         ema20_series = compute_ema(df['Close'], 20)
@@ -402,6 +409,16 @@ def evaluate_ticker_process(ticker, df):
         
         sma50_series = compute_sma(df['Close'], 50)
         sma50 = float(sma50_series.iloc[-1]) if len(sma50_series) > 0 and not np.isnan(sma50_series.iloc[-1]) else None
+
+        # MACD (12, 26, 9)
+        macd_line, signal_line, macd_hist = compute_macd(df['Close'])
+        if macd_hist is not None and len(macd_hist) >= 2:
+            last_hist = float(macd_hist.iloc[-1])
+            prev_hist = float(macd_hist.iloc[-2])
+            macd_bull_cross = (last_hist > 0 and prev_hist <= 0)
+            macd_bear_cross = (last_hist < 0 and prev_hist >= 0)
+            macd_bull_curl = (last_hist > prev_hist)
+            macd_bear_curl = (last_hist < prev_hist)
     except Exception as e:
         logger.warning(f"Error computing confluence for {ticker}: {e}")
 
@@ -413,6 +430,9 @@ def evaluate_ticker_process(ticker, df):
         else: tech_bear += 1
     if sma50:
         if close_price > sma50: tech_bull += 1
+        else: tech_bear += 1
+    if macd_line is not None and signal_line is not None and len(macd_line) > 0 and len(signal_line) > 0:
+        if float(macd_line.iloc[-1]) > float(signal_line.iloc[-1]): tech_bull += 1
         else: tech_bear += 1
     tech_trend = "Bullish" if tech_bull >= 2 else ("Bearish" if tech_bear >= 2 else "Neutral")
 
@@ -474,6 +494,14 @@ def evaluate_ticker_process(ticker, df):
         elif rsi_val <= 42:
             score += 1
             reasons_list.append(f"RSI Low ({rsi_val:.1f})")
+
+        # MACD Confluences
+        if macd_bull_cross:
+            score += 2
+            reasons_list.append("MACD Bullish Cross 📈")
+        elif macd_bull_curl and macd_line is not None and len(macd_line) > 0 and float(macd_line.iloc[-1]) < 0:
+            score += 1
+            reasons_list.append("MACD Histogram Curling Up ↗️")
 
         if rvol > 1.3:
             score += 2
@@ -551,6 +579,14 @@ def evaluate_ticker_process(ticker, df):
             score += 1
             reasons_list.append(f"RSI High ({rsi_val:.1f})")
 
+        # MACD Confluences
+        if macd_bear_cross:
+            score += 2
+            reasons_list.append("MACD Bearish Cross 📉")
+        elif macd_bear_curl and macd_line is not None and len(macd_line) > 0 and float(macd_line.iloc[-1]) > 0:
+            score += 1
+            reasons_list.append("MACD Histogram Curling Down ↘️")
+
         if rvol > 1.3:
             score += 2
             reasons_list.append(f"High RVOL ({rvol:.1f}x)")
@@ -591,7 +627,8 @@ def evaluate_ticker_process(ticker, df):
             score += 1
             reasons_list.append(f"Option Verified ({best_opt['type']} ${best_opt['strike']})")
 
-    is_a_plus = (score >= 12 and (has_div or (in_zone and (zone_rejection or is_bullish_bb or is_bearish_bb))))
+    has_macd_cross = (is_bullish and macd_bull_cross) or (is_bearish and macd_bear_cross)
+    is_a_plus = (score >= 12 and (has_div or has_macd_cross or (in_zone and (zone_rejection or is_bullish_bb or is_bearish_bb))))
     grade = "A+" if is_a_plus else ("A" if score >= 10 else "B")
     reasons = " | ".join(reasons_list)
 
@@ -603,6 +640,8 @@ def evaluate_ticker_process(ticker, df):
     grade_icon = "🧱" if in_zone else ("⭐️" if grade == "A+" else "🔥")
     zone_label = f" ({zone_summary})" if in_zone else ""
     logger.info(f"[{ticker} 15m] {grade_icon} {grade} TRADE CONFIRMED! Score: {score}, RSI: {rsi_val:.1f}, RVOL: {rvol:.1f}x, Zone: {zone_summary}{zone_label} | {reasons}")
+
+    macd_status = "Bullish Cross" if macd_bull_cross else ("Bearish Cross" if macd_bear_cross else ("Bullish" if (macd_line is not None and signal_line is not None and len(macd_line) > 0 and float(macd_line.iloc[-1]) > float(signal_line.iloc[-1])) else "Bearish"))
 
     return {
         'action': 'BUY' if is_bullish else 'SELL',
@@ -623,6 +662,8 @@ def evaluate_ticker_process(ticker, df):
         'market_sentiment': m_sentiment,
         'market_sentiment_summary': m_summary,
         'suggested_option': best_opt,
+        'macd_cross': has_macd_cross,
+        'macd_status': macd_status,
     }
 
 def precalculate_daily_bands(tickers):
@@ -793,6 +834,7 @@ def bot_loop():
                             "Market Sentiment Score": res.get('market_sentiment_score', 50),
                             "Sentiment Alignment": res.get('sentiment_align', 'Neutral'),
                             "Technical Trend": res.get('tech_trend', 'Neutral'),
+                            "MACD": res.get('macd_status', 'Neutral'),
                         })
 
                         direction = res['action']  # "BUY" or "SELL"
