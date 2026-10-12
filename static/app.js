@@ -1808,19 +1808,28 @@ function switchMainTab(tab) {
   currentMainTab = tab;
   const scannerView = document.getElementById("scannerView");
   const paperView = document.getElementById("paperTraderView");
+  const moversView = document.getElementById("dailyMoversView");
   const scannerBtn = document.getElementById("tabScannerBtn");
   const paperBtn = document.getElementById("tabPaperBtn");
+  const moversBtn = document.getElementById("tabMoversBtn");
+
+  if (scannerView) scannerView.classList.add("hidden");
+  if (paperView) paperView.classList.add("hidden");
+  if (moversView) moversView.classList.add("hidden");
+  if (scannerBtn) scannerBtn.classList.remove("main-tab--active");
+  if (paperBtn) paperBtn.classList.remove("main-tab--active");
+  if (moversBtn) moversBtn.classList.remove("main-tab--active");
 
   if (tab === "paper") {
-    if (scannerView) scannerView.classList.add("hidden");
     if (paperView) paperView.classList.remove("hidden");
-    if (scannerBtn) scannerBtn.classList.remove("main-tab--active");
     if (paperBtn) paperBtn.classList.add("main-tab--active");
     fetchPaperData();
+  } else if (tab === "movers") {
+    if (moversView) moversView.classList.remove("hidden");
+    if (moversBtn) moversBtn.classList.add("main-tab--active");
+    loadDailyMovers();
   } else {
-    if (paperView) paperView.classList.add("hidden");
     if (scannerView) scannerView.classList.remove("hidden");
-    if (paperBtn) paperBtn.classList.remove("main-tab--active");
     if (scannerBtn) scannerBtn.classList.add("main-tab--active");
   }
 }
@@ -2282,6 +2291,401 @@ document.addEventListener("DOMContentLoaded", () => {
   fetchPaperData();
   setInterval(fetchPaperData, 4000);
 });
+
+// ============================================================
+// Daily Movers (Market Close Top 10 Gainers & Losers) Controller
+// ============================================================
+
+let currentMoversDate = null;
+let moversAvailableDates = [];
+let allMoversDataList = [];
+let currentMoversSubtab = "both";
+let moversRefreshTimer = null;
+
+function formatCompactVolume(vol) {
+  if (!vol || isNaN(vol)) return "—";
+  if (vol >= 1e9) return (vol / 1e9).toFixed(2) + "B";
+  if (vol >= 1e6) return (vol / 1e6).toFixed(1) + "M";
+  if (vol >= 1e3) return (vol / 1e3).toFixed(0) + "K";
+  return vol.toLocaleString();
+}
+
+async function loadDailyMovers(targetDate = null) {
+  try {
+    const url = targetDate ? `/api/movers?date=${encodeURIComponent(targetDate)}` : "/api/movers";
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (!data.ok) {
+      console.error("Failed to load daily movers:", data.error);
+      return;
+    }
+
+    currentMoversDate = data.date;
+    moversAvailableDates = data.available_dates || [];
+    allMoversDataList = data.all_movers || [];
+
+    // Populate or sync date dropdown
+    populateMoversDateDropdown(data.available_dates, data.date);
+
+    // Update Subtitle & Status
+    const subtitleEl = document.getElementById("moversSubtitle");
+    if (subtitleEl && data.display_date) {
+      subtitleEl.textContent = `Official Market Close • ${data.display_date}`;
+    }
+
+    const asOfEl = document.getElementById("moversAsOfText");
+    if (asOfEl && data.updated_at) {
+      try {
+        const d = new Date(data.updated_at);
+        asOfEl.textContent = `Snapshotted: ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} ET`;
+      } catch (e) {
+        asOfEl.textContent = `Updated: ${data.date}`;
+      }
+    }
+
+    // Update Prev / Next buttons
+    updateMoversNavButtons(data.date);
+
+    // Update KPIs
+    updateMoversKPIs(data.stats, data.top_gainers, data.top_losers);
+
+    // Render Lists
+    renderMoversList("topGainersList", data.top_gainers || [], "gainer");
+    renderMoversList("topLosersList", data.top_losers || [], "loser");
+
+    // Update Badges
+    const gRangeEl = document.getElementById("gainersRangeBadge");
+    if (gRangeEl && data.top_gainers && data.top_gainers.length > 0) {
+      const gFirst = data.top_gainers[0].change_pct;
+      const gLast = data.top_gainers[data.top_gainers.length - 1].change_pct;
+      gRangeEl.textContent = `+${gLast.toFixed(2)}% to +${gFirst.toFixed(2)}%`;
+    }
+
+    const lRangeEl = document.getElementById("losersRangeBadge");
+    if (lRangeEl && data.top_losers && data.top_losers.length > 0) {
+      const lFirst = data.top_losers[0].change_pct;
+      const lLast = data.top_losers[data.top_losers.length - 1].change_pct;
+      lRangeEl.textContent = `${lFirst.toFixed(2)}% to ${lLast.toFixed(2)}%`;
+    }
+
+    // Render Full Watchlist Table
+    renderAllMoversTable(allMoversDataList);
+
+  } catch (err) {
+    console.error("Error fetching daily movers:", err);
+  }
+}
+
+function populateMoversDateDropdown(availableDates, activeDate) {
+  const select = document.getElementById("moversDateSelect");
+  if (!select || !availableDates || availableDates.length === 0) return;
+
+  select.innerHTML = "";
+  availableDates.forEach(d => {
+    const opt = document.createElement("option");
+    opt.value = d.date;
+    opt.textContent = d.label;
+    if (d.date === activeDate) {
+      opt.selected = true;
+    }
+    select.appendChild(opt);
+  });
+}
+
+function updateMoversNavButtons(activeDate) {
+  const prevBtn = document.getElementById("moversPrevBtn");
+  const nextBtn = document.getElementById("moversNextBtn");
+  if (!prevBtn || !nextBtn || !moversAvailableDates.length) return;
+
+  // availableDates is ordered descending (latest is index 0)
+  const idx = moversAvailableDates.findIndex(d => d.date === activeDate);
+  if (idx === -1) return;
+
+  // Next Day (more recent) is index - 1
+  nextBtn.disabled = (idx <= 0);
+  // Prev Day (older) is index + 1
+  prevBtn.disabled = (idx >= moversAvailableDates.length - 1);
+}
+
+function onMoversDateChange(selectedDate) {
+  if (selectedDate && selectedDate !== currentMoversDate) {
+    loadDailyMovers(selectedDate);
+  }
+}
+
+function navigateMoversDate(direction) {
+  if (!moversAvailableDates.length || !currentMoversDate) return;
+  const idx = moversAvailableDates.findIndex(d => d.date === currentMoversDate);
+  if (idx === -1) return;
+
+  let targetIdx = idx;
+  if (direction === "prev" && idx < moversAvailableDates.length - 1) {
+    targetIdx = idx + 1;
+  } else if (direction === "next" && idx > 0) {
+    targetIdx = idx - 1;
+  }
+
+  const targetDate = moversAvailableDates[targetIdx].date;
+  const select = document.getElementById("moversDateSelect");
+  if (select) select.value = targetDate;
+  loadDailyMovers(targetDate);
+}
+
+function updateMoversKPIs(stats, gainers, losers) {
+  if (!stats) return;
+
+  const totalEl = document.getElementById("moversKpiTotal");
+  if (totalEl) totalEl.textContent = stats.total_scanned || 0;
+
+  const breadthEl = document.getElementById("moversKpiBreadth");
+  if (breadthEl) {
+    breadthEl.textContent = `${stats.gainers_count || 0}🟢 / ${stats.losers_count || 0}🔴`;
+  }
+
+  const avgEl = document.getElementById("moversKpiAvg");
+  if (avgEl) {
+    const avg = stats.avg_change_pct || 0;
+    avgEl.textContent = (avg >= 0 ? `+${avg.toFixed(2)}%` : `${avg.toFixed(2)}%`);
+    avgEl.className = "movers-kpi__val " + (avg >= 0 ? "movers-kpi__val--green" : "movers-kpi__val--red");
+  }
+
+  const topGainerEl = document.getElementById("moversKpiTopGainer");
+  const topGainerSub = document.getElementById("moversKpiTopGainerSub");
+  if (topGainerEl && stats.top_gainer) {
+    topGainerEl.textContent = `${stats.top_gainer.ticker} +${(stats.top_gainer.change_pct || 0).toFixed(2)}%`;
+    if (topGainerSub) topGainerSub.textContent = `$${(stats.top_gainer.close || 0).toFixed(2)}`;
+  } else if (topGainerEl && gainers && gainers.length > 0) {
+    topGainerEl.textContent = `${gainers[0].ticker} +${gainers[0].change_pct.toFixed(2)}%`;
+    if (topGainerSub) topGainerSub.textContent = `$${gainers[0].close.toFixed(2)}`;
+  }
+
+  const topLoserEl = document.getElementById("moversKpiTopLoser");
+  const topLoserSub = document.getElementById("moversKpiTopLoserSub");
+  if (topLoserEl && stats.top_loser) {
+    topLoserEl.textContent = `${stats.top_loser.ticker} ${(stats.top_loser.change_pct || 0).toFixed(2)}%`;
+    if (topLoserSub) topLoserSub.textContent = `$${(stats.top_loser.close || 0).toFixed(2)}`;
+  } else if (topLoserEl && losers && losers.length > 0) {
+    topLoserEl.textContent = `${losers[0].ticker} ${losers[0].change_pct.toFixed(2)}%`;
+    if (topLoserSub) topLoserSub.textContent = `$${losers[0].close.toFixed(2)}`;
+  }
+}
+
+function renderMoversList(containerId, list, type) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  if (!list || list.length === 0) {
+    container.innerHTML = `
+      <div style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 0.85rem;">
+        No ${type}s recorded for this trading day.
+      </div>
+    `;
+    return;
+  }
+
+  const isGainer = (type === "gainer");
+  container.innerHTML = list.map(item => {
+    const isUp = item.change >= 0;
+    const sign = isUp ? "+" : "";
+    const pctBadgeClass = isUp ? "mover-pct-badge--up" : "mover-pct-badge--down";
+    const rankClass = item.rank <= 3 ? `mover-rank--${item.rank}` : "";
+
+    // Range bar position clamped between 0 and 100%
+    const rangePos = Math.max(0, Math.min(100, item.range_pos !== undefined ? item.range_pos : 50));
+
+    return `
+      <div class="mover-card">
+        <div class="mover-card-top">
+          <div class="mover-card-left">
+            <span class="mover-rank ${rankClass}">#${item.rank}</span>
+            <div class="mover-ticker-info">
+              <span class="mover-ticker-sym" onclick="openChartModal('${item.ticker}')" title="Click to view chart">${item.ticker}</span>
+              <span class="mover-ticker-name" title="${item.name || item.ticker}">${item.name || item.ticker}</span>
+            </div>
+          </div>
+          <div class="mover-card-right">
+            <div class="mover-price-wrap">
+              <span class="mover-price">$${item.close.toFixed(2)}</span>
+              <span class="mover-diff">${sign}$${item.change.toFixed(2)}</span>
+            </div>
+            <span class="mover-pct-badge ${pctBadgeClass}">${sign}${item.change_pct.toFixed(2)}%</span>
+          </div>
+        </div>
+
+        <div class="mover-card-bottom">
+          <div class="mover-range-wrap">
+            <div class="mover-range-labels">
+              <span>L: $${item.low.toFixed(2)}</span>
+              <span>H: $${item.high.toFixed(2)}</span>
+            </div>
+            <div class="mover-range-bar" title="Closed at ${rangePos}% of daily range">
+              <div class="mover-range-pointer" style="left: ${rangePos}%;"></div>
+            </div>
+          </div>
+
+          <div class="mover-meta-wrap">
+            <span class="mover-vol-badge" title="Volume / 20D Avg">${formatCompactVolume(item.volume)} (${item.rvol || 1.0}x)</span>
+            <button class="mover-chart-btn" onclick="openChartModal('${item.ticker}')">📈 Chart</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function setMoversSubtab(tab) {
+  currentMoversSubtab = tab;
+
+  // Toggle active button
+  const btns = ["subtabBoth", "subtabGainers", "subtabLosers", "subtabAll"];
+  btns.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove("movers-subtab--active");
+  });
+
+  const activeBtnId = tab === "both" ? "subtabBoth" :
+                      tab === "gainers" ? "subtabGainers" :
+                      tab === "losers" ? "subtabLosers" : "subtabAll";
+  const activeBtn = document.getElementById(activeBtnId);
+  if (activeBtn) activeBtn.classList.add("movers-subtab--active");
+
+  const colsContainer = document.getElementById("moversColumns");
+  const colGainers = document.getElementById("colGainers");
+  const colLosers = document.getElementById("colLosers");
+  const allWrap = document.getElementById("moversAllWrap");
+
+  if (tab === "all") {
+    if (colsContainer) colsContainer.classList.add("hidden");
+    if (allWrap) allWrap.classList.remove("hidden");
+  } else {
+    if (allWrap) allWrap.classList.add("hidden");
+    if (colsContainer) colsContainer.classList.remove("hidden");
+
+    if (tab === "gainers") {
+      if (colGainers) colGainers.classList.remove("hidden");
+      if (colLosers) colLosers.classList.add("hidden");
+    } else if (tab === "losers") {
+      if (colGainers) colGainers.classList.add("hidden");
+      if (colLosers) colLosers.classList.remove("hidden");
+    } else {
+      if (colGainers) colGainers.classList.remove("hidden");
+      if (colLosers) colLosers.classList.remove("hidden");
+    }
+  }
+}
+
+function renderAllMoversTable(list) {
+  const tbody = document.getElementById("allMoversTableBody");
+  if (!tbody) return;
+
+  if (!list || list.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; padding: 20px;">No stocks found.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = list.map((item, idx) => {
+    const isUp = item.change >= 0;
+    const sign = isUp ? "+" : "";
+    const colorClass = isUp ? "td-green" : "td-red";
+    return `
+      <tr>
+        <td class="td-mono">${idx + 1}</td>
+        <td>
+          <strong style="color: #38bdf8; cursor: pointer;" onclick="openChartModal('${item.ticker}')">${item.ticker}</strong>
+          <div style="font-size: 0.7rem; color: var(--text-muted);">${item.name || ''}</div>
+        </td>
+        <td class="td-mono">$${item.close.toFixed(2)}</td>
+        <td class="td-mono ${colorClass}">${sign}$${item.change.toFixed(2)}</td>
+        <td class="td-mono ${colorClass}">${sign}${item.change_pct.toFixed(2)}%</td>
+        <td class="td-mono" style="font-size: 0.72rem;">$${item.low.toFixed(2)} – $${item.high.toFixed(2)}</td>
+        <td class="td-mono">${formatCompactVolume(item.volume)}</td>
+        <td>
+          <button class="mover-chart-btn" onclick="openChartModal('${item.ticker}')">📈</button>
+        </td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function filterAllMovers(query) {
+  const q = (query || "").trim().toUpperCase();
+  if (!q) {
+    renderAllMoversTable(allMoversDataList);
+    return;
+  }
+  const filtered = allMoversDataList.filter(item => {
+    return item.ticker.toUpperCase().includes(q) ||
+           (item.name && item.name.toUpperCase().includes(q));
+  });
+  renderAllMoversTable(filtered);
+}
+
+async function triggerMoversRefresh() {
+  const spinner = document.getElementById("moversSpinner");
+  const btnText = document.getElementById("moversRefreshText");
+  const progressWrap = document.getElementById("moversProgressWrap");
+
+  if (spinner) spinner.classList.remove("hidden");
+  if (btnText) btnText.textContent = "Scanning...";
+  if (progressWrap) progressWrap.classList.remove("hidden");
+
+  try {
+    const res = await fetch("/api/movers/refresh", { method: "POST" });
+    const data = await res.json();
+    if (data.ok) {
+      pollMoversProgress();
+    } else {
+      alert(`Could not start scan: ${data.message || 'Busy'}`);
+      if (spinner) spinner.classList.add("hidden");
+      if (btnText) btnText.textContent = "🔄 Refresh Close";
+      if (progressWrap) progressWrap.classList.add("hidden");
+    }
+  } catch (e) {
+    console.error("Error triggering refresh:", e);
+    if (spinner) spinner.classList.add("hidden");
+    if (btnText) btnText.textContent = "🔄 Refresh Close";
+    if (progressWrap) progressWrap.classList.add("hidden");
+  }
+}
+
+function pollMoversProgress() {
+  if (moversRefreshTimer) clearInterval(moversRefreshTimer);
+
+  moversRefreshTimer = setInterval(async () => {
+    try {
+      const res = await fetch("/api/movers/progress");
+      const prog = await res.json();
+
+      const phaseEl = document.getElementById("moversProgressPhase");
+      const pctEl = document.getElementById("moversProgressPct");
+      const fillEl = document.getElementById("moversProgressFill");
+
+      if (phaseEl && prog.message) phaseEl.textContent = prog.message;
+      if (pctEl) pctEl.textContent = `${prog.pct || 0}%`;
+      if (fillEl) fillEl.style.width = `${prog.pct || 0}%`;
+
+      if (prog.status === "complete" || prog.status === "error" || (prog.pct >= 100)) {
+        clearInterval(moversRefreshTimer);
+        moversRefreshTimer = null;
+
+        setTimeout(() => {
+          const spinner = document.getElementById("moversSpinner");
+          const btnText = document.getElementById("moversRefreshText");
+          const progressWrap = document.getElementById("moversProgressWrap");
+
+          if (spinner) spinner.classList.add("hidden");
+          if (btnText) btnText.textContent = "🔄 Refresh Close";
+          if (progressWrap) progressWrap.classList.add("hidden");
+
+          loadDailyMovers();
+        }, 800);
+      }
+    } catch (e) {
+      console.error("Error polling movers progress:", e);
+    }
+  }, 1000);
+}
 
 
 

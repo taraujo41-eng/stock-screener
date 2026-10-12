@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="/icon.png">
   <link rel="icon" href="/icon.png">
-  <link rel="stylesheet" href="/style.css?v=4.5">
+  <link rel="stylesheet" href="/style.css?v=5.0">
   <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body>
@@ -29,13 +29,16 @@
       <p class="header__subtitle" id="headerSubtitle">Technicals & Market Sentiment Reversal Scanner</p>
     </header>
 
-    <!-- Navigation Tabs (Scanner vs Paper Trader) -->
+    <!-- Navigation Tabs (Scanner vs Paper Trader vs Daily Movers) -->
     <div class="main-tabs">
       <button class="main-tab main-tab--active" id="tabScannerBtn" onclick="switchMainTab('scanner')">
         🔎 Reversal Scanner
       </button>
       <button class="main-tab" id="tabPaperBtn" onclick="switchMainTab('paper')">
         🤖 3-Sigma Auto Trader <span class="tab-badge" id="paperBadge">0</span>
+      </button>
+      <button class="main-tab" id="tabMoversBtn" onclick="switchMainTab('movers')">
+        📊 Daily Movers
       </button>
     </div>
 
@@ -278,6 +281,165 @@
 
     </div>
 
+    <!-- DAILY MOVERS (MARKET CLOSE TOP 10 GAINERS & LOSERS) VIEW -->
+    <div id="dailyMoversView" class="hidden">
+
+      <!-- View Header & Controls -->
+      <div class="movers-header-card">
+        <div class="movers-header-top">
+          <div class="movers-title-wrap">
+            <span class="movers-icon">📊</span>
+            <div>
+              <h2 class="movers-title">Watchlist Market Close Movers</h2>
+              <p class="movers-subtitle" id="moversSubtitle">Official Top 10 Gainers &amp; Losers for Watchlist Tickers</p>
+            </div>
+          </div>
+          <button class="movers-refresh-btn" id="moversRefreshBtn" onclick="triggerMoversRefresh()" title="Rescan and recalculate official closing prices">
+            <span class="refresh-spinner hidden" id="moversSpinner"></span>
+            <span id="moversRefreshText">🔄 Refresh Close</span>
+          </button>
+        </div>
+
+        <!-- Date Navigator Bar -->
+        <div class="movers-date-nav">
+          <button class="movers-nav-btn" id="moversPrevBtn" onclick="navigateMoversDate('prev')" title="Previous Trading Day">
+            ◀ Prev Day
+          </button>
+          <div class="movers-select-wrap">
+            <select class="movers-date-select" id="moversDateSelect" onchange="onMoversDateChange(this.value)">
+              <option value="">Loading Trading Days...</option>
+            </select>
+          </div>
+          <button class="movers-nav-btn" id="moversNextBtn" onclick="navigateMoversDate('next')" title="Next Trading Day">
+            Next Day ▶
+          </button>
+        </div>
+
+        <!-- Session Status & Auto-Snapshot Pill -->
+        <div class="movers-status-bar">
+          <div class="movers-status-pill" id="moversStatusPill">
+            <span class="status-dot green-dot"></span>
+            <span id="moversStatusText">Session: Official Market Close</span>
+          </div>
+          <span class="movers-asof" id="moversAsOfText">Updated: —</span>
+        </div>
+      </div>
+
+      <!-- Scan Progress (when refreshing) -->
+      <div class="progress-wrap hidden" id="moversProgressWrap" style="margin-bottom: 16px;">
+        <div class="progress-header">
+          <span class="progress-phase" id="moversProgressPhase">Analyzing market close data...</span>
+          <span class="progress-pct" id="moversProgressPct">0%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-bar__fill" id="moversProgressFill" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <!-- Summary KPI Grid -->
+      <div class="movers-kpi-grid">
+        <div class="movers-kpi">
+          <span class="movers-kpi__label">Watchlist Scanned</span>
+          <span class="movers-kpi__val" id="moversKpiTotal">0</span>
+          <span class="movers-kpi__sub" id="moversKpiBreadth">0🟢 / 0🔴</span>
+        </div>
+        <div class="movers-kpi">
+          <span class="movers-kpi__label">Average Return</span>
+          <span class="movers-kpi__val" id="moversKpiAvg">0.00%</span>
+          <span class="movers-kpi__sub">Equal-Weighted</span>
+        </div>
+        <div class="movers-kpi movers-kpi--bull">
+          <span class="movers-kpi__label">Top Gainer</span>
+          <span class="movers-kpi__val movers-kpi__val--green" id="moversKpiTopGainer">—</span>
+          <span class="movers-kpi__sub" id="moversKpiTopGainerSub">—</span>
+        </div>
+        <div class="movers-kpi movers-kpi--bear">
+          <span class="movers-kpi__label">Top Loser</span>
+          <span class="movers-kpi__val movers-kpi__val--red" id="moversKpiTopLoser">—</span>
+          <span class="movers-kpi__sub" id="moversKpiTopLoserSub">—</span>
+        </div>
+      </div>
+
+      <!-- Sub Filter Tabs within Movers -->
+      <div class="movers-subtabs">
+        <button class="movers-subtab movers-subtab--active" id="subtabBoth" onclick="setMoversSubtab('both')">
+          ⚡ Top 10 Gainers &amp; Losers
+        </button>
+        <button class="movers-subtab" id="subtabGainers" onclick="setMoversSubtab('gainers')">
+          🟢 Gainers (10)
+        </button>
+        <button class="movers-subtab" id="subtabLosers" onclick="setMoversSubtab('losers')">
+          🔴 Losers (10)
+        </button>
+        <button class="movers-subtab" id="subtabAll" onclick="setMoversSubtab('all')">
+          📋 All Watchlist
+        </button>
+      </div>
+
+      <!-- Dual Columns for Gainers & Losers -->
+      <div class="movers-columns" id="moversColumns">
+        
+        <!-- Column 1: Top 10 Gainers -->
+        <div class="movers-col" id="colGainers">
+          <div class="movers-col-header movers-col-header--gainers">
+            <div class="movers-col-title">
+              <span class="col-dot green-dot"></span>
+              <span>TOP 10 GAINERS</span>
+            </div>
+            <span class="movers-col-range" id="gainersRangeBadge">+0.00% to +0.00%</span>
+          </div>
+          <div class="movers-list" id="topGainersList">
+            <!-- Dynamic Mover Cards -->
+          </div>
+        </div>
+
+        <!-- Column 2: Top 10 Losers -->
+        <div class="movers-col" id="colLosers">
+          <div class="movers-col-header movers-col-header--losers">
+            <div class="movers-col-title">
+              <span class="col-dot red-dot"></span>
+              <span>TOP 10 LOSERS</span>
+            </div>
+            <span class="movers-col-range" id="losersRangeBadge">-0.00% to -0.00%</span>
+          </div>
+          <div class="movers-list" id="topLosersList">
+            <!-- Dynamic Mover Cards -->
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Full Watchlist Table View (Hidden by default, shown when subtab 'all' selected) -->
+      <div class="movers-all-wrap hidden" id="moversAllWrap">
+        <div class="movers-all-header">
+          <div class="movers-all-title">📋 Full Watchlist Performance</div>
+          <div class="movers-search-wrap">
+            <input type="text" class="movers-search-input" id="moversSearchInput" placeholder="Filter ticker or name..." oninput="filterAllMovers(this.value)">
+          </div>
+        </div>
+        <div class="movers-table-container">
+          <table class="movers-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Ticker</th>
+                <th>Close</th>
+                <th>Change</th>
+                <th>% Change</th>
+                <th>Day Range</th>
+                <th>Volume</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="allMoversTableBody">
+              <!-- Rendered via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
   </div>
 
   <!-- Toast Notification Container -->
@@ -384,6 +546,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=6.6"></script>
+  <script src="/app.js?v=7.0"></script>
 </body>
 </html>

@@ -64,6 +64,12 @@ else:
     except Exception as e:
         print(f"Error starting background indicator bot: {e}")
 
+try:
+    from daily_movers import start_movers_background_watcher
+    start_movers_background_watcher()
+except Exception as e:
+    print(f"Error starting daily movers background watcher: {e}")
+
 # ── Scan Persistence ───────────────────────────────────────────────────
 # Use SCAN_DATA_DIR env var for Docker volume persistence; falls back to app directory for local dev
 SCAN_DATA_DIR = os.environ.get("SCAN_DATA_DIR", os.path.dirname(__file__))
@@ -981,6 +987,58 @@ def watchlist_screen_criteria():
         print(f"Error running criteria screening: {e}")
         traceback.print_exc()
         return jsonify({"ok": False, "error": str(e)}), 500
+
+# ── API: Daily Movers (Market Close Top 10 Gainers & Losers) ────────────
+
+@app.route("/api/movers", methods=["GET"])
+def get_daily_movers():
+    """Return top 10 gainers and losers for a trading day."""
+    target_date = request.args.get("date")
+    force = request.args.get("force", "").lower() in ("1", "true", "yes")
+    try:
+        from daily_movers import get_daily_movers_data
+        data = get_daily_movers_data(target_date=target_date, force_refresh=force)
+        return jsonify(data)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/movers/dates", methods=["GET"])
+def get_daily_movers_dates():
+    """Return list of available historical trading days."""
+    try:
+        from daily_movers import load_movers_cache, format_display_date
+        cache = load_movers_cache()
+        dates = cache.get("dates", [])
+        latest_date = dates[-1] if dates else None
+        res = []
+        for d in reversed(dates):
+            lbl = format_display_date(d)
+            if d == latest_date:
+                lbl += " (Latest Market Close)"
+            res.append({"date": d, "label": lbl, "is_latest": (d == latest_date)})
+        return jsonify({"ok": True, "dates": res})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/movers/refresh", methods=["POST"])
+def refresh_daily_movers():
+    """Trigger background refresh of daily movers."""
+    try:
+        from daily_movers import refresh_movers_async
+        res = refresh_movers_async()
+        return jsonify(res)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/movers/progress", methods=["GET"])
+def daily_movers_progress():
+    """Return progress of ongoing movers scan."""
+    try:
+        from daily_movers import get_refresh_progress
+        return jsonify(get_refresh_progress())
+    except Exception as e:
+        return jsonify({"status": "idle", "error": str(e)}), 500
 
 # ── API: Reset Stuck Scan State ─────────────────────────────────────
 
