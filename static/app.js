@@ -1432,9 +1432,18 @@ async function fetchWatchlist() {
       try { userWatchlist = JSON.parse(saved); } catch (_) {}
     }
   }
+  updatePaperBannerCount();
+}
+
+function updatePaperBannerCount() {
+  const el = document.getElementById("paperWatchlistCount");
+  if (el && Array.isArray(userWatchlist) && userWatchlist.length > 0) {
+    el.textContent = userWatchlist.length;
+  }
 }
 
 function renderWatchlistUI() {
+  updatePaperBannerCount();
   const container = document.getElementById("watchlistContainer");
   const countEl = document.getElementById("watchlistCount");
   if (!container) return;
@@ -1870,6 +1879,7 @@ function showTradeToast(trade) {
 }
 
 async function fetchPaperData() {
+  updatePaperBannerCount();
   try {
     // 1. Fetch Paper Status
     const resStatus = await fetch("/api/paper/status");
