@@ -1176,7 +1176,9 @@ def find_best_option(ticker, signal_type, last_price):
     - Returns None if no liquid contract with valid quotes is found (no fake math)
     """
     try:
-        max_spread_pct = float(os.getenv("OPTIONS_MAX_SPREAD_PCT", "12.0"))
+        max_spread_pct = float(os.getenv("OPTIONS_MAX_SPREAD_PCT", "6.0"))
+        min_dte = int(os.getenv("OPTIONS_MIN_DTE", "7"))
+        max_dte = int(os.getenv("OPTIONS_MAX_DTE", "28"))
         chain_meta = fetch_options_chain(ticker)
         valid_exps = []
         now = time.time()
@@ -1184,7 +1186,7 @@ def find_best_option(ticker, signal_type, last_price):
         if chain_meta and chain_meta.get("expirations"):
             for exp in chain_meta.get("expirations", []):
                 dte = (exp - now) / 86400
-                if 20 <= dte <= 65:
+                if min_dte <= dte <= max_dte:
                     valid_exps.append(exp)
         
         if not valid_exps:
@@ -1193,7 +1195,7 @@ def find_best_option(ticker, signal_type, last_price):
         best_contract = None
         best_score = -1
         
-        # Scan valid expirations (prioritizing 25-50 DTE sweet spot)
+        # Scan valid expirations (prioritizing 7-28 DTE sweet spot for intraday day trades)
         for exp_ts in valid_exps[:6]:
             dte_days = max(1, int((exp_ts - now) / 86400))
             chain = fetch_options_for_expiration(ticker, exp_ts)
@@ -1232,9 +1234,9 @@ def find_best_option(ticker, signal_type, last_price):
                 # 3. Strict bid-ask spread filters (both percentage and dollar caps)
                 if spread_pct > max_spread_pct:
                     continue
-                if mid < 2.0 and spread > 0.15:
+                if mid < 2.0 and spread > 0.10:
                     continue
-                elif mid < 5.0 and spread > 0.35:
+                elif mid < 5.0 and spread > 0.25:
                     continue
                 
                 # 4. Liquidity gate: require active Open Interest or day volume
@@ -1258,11 +1260,12 @@ def find_best_option(ticker, signal_type, last_price):
                 # 7. Comprehensive Scoring Formula:
                 # - Rewards ATM Delta (closest to 0.50)
                 # - Rewards the tightest percentage spread
-                # - Rewards the optimal 30-40 DTE window
+                # - Rewards the optimal 14-21 DTE window
                 # - Rewards high institutional liquidity (OI & Volume)
                 delta_fit = max(0.2, 1.0 - abs(est_delta - 0.50) * 2.0)
                 spread_fit = max(0.2, 1.0 - (spread_pct / max_spread_pct))
-                dte_fit = max(0.2, 1.0 - abs(dte_days - 35) / 35.0)
+                ideal_dte = (min_dte + max_dte) / 2.0
+                dte_fit = max(0.2, 1.0 - abs(dte_days - ideal_dte) / max(1.0, ideal_dte))
                 liq_score = min(5000, oi + (vol * 2))
                 
                 score = (liq_score ** 0.5) * 10.0 * spread_fit * delta_fit * dte_fit

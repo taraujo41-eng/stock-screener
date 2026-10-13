@@ -131,10 +131,12 @@ class PaperTrader:
         self.stop_loss_pct = _cfg("PAPER_STOP_LOSS_PCT", "35", float)
         self.take_profit_vwap = _cfg("PAPER_TAKE_PROFIT_VWAP", "true", bool)
         self.vwap_min_profit_pct = _cfg("PAPER_VWAP_MIN_PROFIT_PCT", "5", float)
-        self.take_profit_pct = _cfg("PAPER_TAKE_PROFIT_PCT", "25", float)
+        self.take_profit_pct = _cfg("PAPER_TAKE_PROFIT_PCT", "15", float)
         self.trailing_stop_enabled = _cfg("PAPER_TRAILING_STOP_ENABLED", "true", bool)
-        self.trailing_stop_activation_pct = _cfg("PAPER_TRAILING_STOP_ACTIVATION_PCT", "15", float)
-        self.trailing_stop_callback_pct = _cfg("PAPER_TRAILING_STOP_CALLBACK_PCT", "8", float)
+        self.trailing_stop_activation_pct = _cfg("PAPER_TRAILING_STOP_ACTIVATION_PCT", "8", float)
+        self.trailing_stop_callback_pct = _cfg("PAPER_TRAILING_STOP_CALLBACK_PCT", "4", float)
+        self.max_hold_minutes = _cfg("PAPER_MAX_HOLD_MINUTES", "120", int)
+        self.earliest_trade_mins = _cfg("EARLIEST_TRADE_TIME_MINS", "590", int)
         self.close_before_eod = _cfg("PAPER_CLOSE_BEFORE_MARKET_CLOSE", "true", bool)
 
     # ── Authentication ──────────────────────────────────────────────
@@ -498,6 +500,19 @@ class PaperTrader:
                 logger.error("[PaperTrader] Cannot place order — not logged in")
                 return None
 
+        # Guard: Opening bell buffer (avoid noisy first 20 minutes: 9:30 - 9:50 AM ET)
+        if self.earliest_trade_mins > 0:
+            ny_tz = get_ny_timezone()
+            now = datetime.now(ny_tz)
+            current_mins = now.hour * 60 + now.minute
+            if current_mins < self.earliest_trade_mins:
+                open_hr = self.earliest_trade_mins // 60
+                open_mn = self.earliest_trade_mins % 60
+                logger.info(
+                    f"[PaperTrader] ⏳ Opening bell buffer active (trading begins at {open_hr}:{open_mn:02d} AM ET) — skipping {ticker}"
+                )
+                return None
+
         # Verify ticker is in approved watchlist (165 tickers)
         try:
             wl_file = os.path.join(_SCAN_DATA_DIR, "watchlist.json")
@@ -766,9 +781,11 @@ class PaperTrader:
                     if reason == "take_profit":
                         exit_price = round(entry_p * (1.0 + (self.take_profit_pct / 100.0)), 2)
                     elif reason == "trailing_stop":
-                        exit_price = round(entry_p * 1.10, 2)
+                        exit_price = round(entry_p * 1.05, 2)
                     elif reason == "stop_loss":
                         exit_price = round(entry_p * (1.0 - (self.stop_loss_pct / 100.0)), 2)
+                    elif reason == "time_stop":
+                        exit_price = round(entry_p * 0.98, 2)
                     else:
                         exit_price = round(entry_p * 0.95, 2)
                 logger.info(f"[PaperTrader] 🛡️ [SIMULATION MODE] Simulated Close executed for {trade_record['ticker']} @ exit price ${exit_price:.2f}")
@@ -906,7 +923,22 @@ class PaperTrader:
                     except Exception as ex:
                         logger.debug(f"[PaperTrader] VWAP exit check error: {ex}")
 
-                # 6. End-of-Day (EOD) Close
+                # 6. Stagnation / Time-Stop Exit (Exits trades open >= max_hold_minutes to avoid theta drag)
+                if self.max_hold_minutes > 0 and trade.get("entry_time"):
+                    try:
+                        entry_dt = datetime.fromisoformat(trade["entry_time"])
+                        hold_duration_mins = (now - entry_dt).total_seconds() / 60.0
+                        if hold_duration_mins >= self.max_hold_minutes:
+                            logger.info(
+                                f"[PaperTrader] ⌛ TIME-STOP / STAGNATION on {trade['ticker']} | "
+                                f"Held {hold_duration_mins:.0f}m >= {self.max_hold_minutes}m | P&L: {pnl_pct:+.1f}% | Exiting to avoid theta bleed"
+                            )
+                            positions_to_close.append((trade, "time_stop"))
+                            continue
+                    except Exception as ex:
+                        logger.debug(f"[PaperTrader] Time-stop check error: {ex}")
+
+                # 7. End-of-Day (EOD) Close
                 if self.close_before_eod and current_minutes >= eod_minutes:
                     logger.info(f"[PaperTrader] 🕓 EOD close for {trade['ticker']} at {now.strftime('%H:%M')}")
                     positions_to_close.append((trade, "eod_close"))

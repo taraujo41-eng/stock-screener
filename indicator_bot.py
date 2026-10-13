@@ -628,13 +628,16 @@ def evaluate_ticker_process(ticker, df):
             reasons_list.append(f"Option Verified ({best_opt['type']} ${best_opt['strike']})")
 
     has_macd_cross = (is_bullish and macd_bull_cross) or (is_bearish and macd_bear_cross)
+    has_macd_curl = (is_bullish and macd_bull_curl) or (is_bearish and macd_bear_curl)
+    has_momentum_conf = (zone_rejection or has_macd_cross or has_macd_curl or has_div or is_bullish_bb or is_bearish_bb)
     is_a_plus = (score >= 12 and (has_div or has_macd_cross or (in_zone and (zone_rejection or is_bullish_bb or is_bearish_bb))))
     grade = "A+" if is_a_plus else ("A" if score >= 10 else "B")
     reasons = " | ".join(reasons_list)
 
-    qualifies_for_trade = is_a_plus or (in_zone and score >= 10 and best_opt is not None)
+    # Require at least one confirming momentum / candle signal for zone trades (no blind knife-catching)
+    qualifies_for_trade = is_a_plus or (in_zone and score >= 10 and best_opt is not None and has_momentum_conf)
     if only_a_plus and not qualifies_for_trade:
-        logger.info(f"[{ticker} 15m] Price: {close_price:.2f} | Zone: {zone_summary} (Score: {score}, Grade: {grade}) — Skipped (Requires A+ setup or confirmed Zone trade)")
+        logger.info(f"[{ticker} 15m] Price: {close_price:.2f} | Zone: {zone_summary} (Score: {score}, Grade: {grade}) — Skipped (Requires A+ setup or confirmed Zone rejection/momentum)")
         return None
 
     grade_icon = "🧱" if in_zone else ("⭐️" if grade == "A+" else "🔥")
@@ -766,6 +769,18 @@ def bot_loop():
             if not is_market_hours():
                 logger.info("Market is closed (weekends or outside 9:30 AM - 4:15 PM EST). Bot sleeping for 5 minutes...")
                 time.sleep(300)
+                continue
+
+            # Opening bell buffer (wait for initial 20 minutes of market open to stabilize)
+            ny_tz = get_ny_timezone()
+            now = datetime.now(ny_tz)
+            current_mins = now.hour * 60 + now.minute
+            earliest_trade_mins = int(os.getenv("EARLIEST_TRADE_TIME_MINS", "590"))  # 9:50 AM ET
+            if current_mins < earliest_trade_mins:
+                open_hr = earliest_trade_mins // 60
+                open_mn = earliest_trade_mins % 60
+                logger.info(f"Opening bell volatility buffer active (market settling until {open_hr}:{open_mn:02d} AM EST). Bot sleeping for 30s...")
+                time.sleep(30)
                 continue
 
             logger.info("--- Starting 3-Sigma A+ Reversal Bot Cycle ---")
