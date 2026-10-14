@@ -128,14 +128,17 @@ class PaperTrader:
         self.max_risk_per_trade = _cfg("PAPER_MAX_RISK_PER_TRADE", "500", float)
         self.max_open_positions = _cfg("PAPER_MAX_OPEN_POSITIONS", "5", int)
         self.max_daily_trades = _cfg("PAPER_MAX_DAILY_TRADES", "10", int)
-        self.stop_loss_pct = _cfg("PAPER_STOP_LOSS_PCT", "35", float)
+        self.max_daily_loss = _cfg("PAPER_MAX_DAILY_LOSS", "150.0", float)
+        self.min_entry_interval_secs = _cfg("PAPER_MIN_ENTRY_INTERVAL_SECS", "300", int)
+        self.stop_loss_pct = _cfg("PAPER_STOP_LOSS_PCT", "20", float)
         self.take_profit_vwap = _cfg("PAPER_TAKE_PROFIT_VWAP", "true", bool)
         self.vwap_min_profit_pct = _cfg("PAPER_VWAP_MIN_PROFIT_PCT", "5", float)
-        self.take_profit_pct = _cfg("PAPER_TAKE_PROFIT_PCT", "15", float)
+        self.take_profit_pct = _cfg("PAPER_TAKE_PROFIT_PCT", "20", float)
         self.trailing_stop_enabled = _cfg("PAPER_TRAILING_STOP_ENABLED", "true", bool)
-        self.trailing_stop_activation_pct = _cfg("PAPER_TRAILING_STOP_ACTIVATION_PCT", "8", float)
-        self.trailing_stop_callback_pct = _cfg("PAPER_TRAILING_STOP_CALLBACK_PCT", "4", float)
-        self.max_hold_minutes = _cfg("PAPER_MAX_HOLD_MINUTES", "120", int)
+        self.trailing_stop_activation_pct = _cfg("PAPER_TRAILING_STOP_ACTIVATION_PCT", "5.0", float)
+        self.trailing_stop_callback_pct = _cfg("PAPER_TRAILING_STOP_CALLBACK_PCT", "2.5", float)
+        self.breakeven_stop_pct = _cfg("PAPER_BREAKEVEN_STOP_PCT", "5.0", float)
+        self.max_hold_minutes = _cfg("PAPER_MAX_HOLD_MINUTES", "50", int)
         self.earliest_trade_mins = _cfg("EARLIEST_TRADE_TIME_MINS", "590", int)
         self.close_before_eod = _cfg("PAPER_CLOSE_BEFORE_MARKET_CLOSE", "true", bool)
 
@@ -411,6 +414,32 @@ class PaperTrader:
                 count += 1
         return count
 
+    def _daily_realized_pnl(self):
+        """Calculate total realized PnL for trades closed today."""
+        ny_tz = get_ny_timezone()
+        today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
+        total_pnl = 0.0
+        for trade in self._trade_log.get("trades", []):
+            if trade.get("exit_time", "").startswith(today_str) and trade.get("status") == "closed":
+                total_pnl += float(trade.get("pnl", 0.0))
+        return total_pnl
+
+    def _last_entry_time(self):
+        """Return datetime of most recent trade entered today, or None."""
+        ny_tz = get_ny_timezone()
+        today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
+        latest = None
+        for trade in self._trade_log.get("trades", []):
+            etime_str = trade.get("entry_time", "")
+            if etime_str.startswith(today_str):
+                try:
+                    dt = datetime.fromisoformat(etime_str)
+                    if latest is None or dt > latest:
+                        latest = dt
+                except Exception:
+                    pass
+        return latest
+
     def _open_position_count(self):
         """Count currently tracked open positions."""
         return len([p for p in self.get_open_positions() if p.get("status") == "open"])
@@ -422,8 +451,27 @@ class PaperTrader:
         """
         if self._daily_trade_count() >= self.max_daily_trades:
             return False, f"Daily trade limit reached ({self.max_daily_trades})"
+
+        # Daily Max Loss Circuit Breaker
+        if self.max_daily_loss > 0:
+            realized_pnl = self._daily_realized_pnl()
+            if realized_pnl <= -abs(self.max_daily_loss):
+                return False, f"Daily max loss circuit breaker triggered (${realized_pnl:.2f} <= -${self.max_daily_loss:.2f})"
+
+        # Entry pacing / interval cooldown (avoid entering multiple trades in seconds)
+        if self.min_entry_interval_secs > 0:
+            last_entry = self._last_entry_time()
+            if last_entry:
+                ny_tz = get_ny_timezone()
+                now = datetime.now(ny_tz)
+                elapsed = (now - last_entry).total_seconds()
+                if elapsed < self.min_entry_interval_secs:
+                    wait_left = int(self.min_entry_interval_secs - elapsed)
+                    return False, f"Entry pacing: waiting {wait_left}s before next entry ({elapsed:.0f}s / {self.min_entry_interval_secs}s)"
+
         if self._open_position_count() >= self.max_open_positions:
             return False, f"Max open positions reached ({self.max_open_positions})"
+
         if ask_price and ask_price > 0:
             total_cost = ask_price * 100 * self.max_contracts
             if total_cost > self.max_risk_per_trade:
@@ -782,6 +830,8 @@ class PaperTrader:
                         exit_price = round(entry_p * (1.0 + (self.take_profit_pct / 100.0)), 2)
                     elif reason == "trailing_stop":
                         exit_price = round(entry_p * 1.05, 2)
+                    elif reason == "breakeven_stop":
+                        exit_price = round(entry_p * 1.0, 2)
                     elif reason == "stop_loss":
                         exit_price = round(entry_p * (1.0 - (self.stop_loss_pct / 100.0)), 2)
                     elif reason == "time_stop":
@@ -868,7 +918,24 @@ class PaperTrader:
                         positions_to_close.append((trade, "stop_loss"))
                         continue
 
-                # 3. Fixed Option Take-Profit Target (e.g. +25% contract gain)
+                # 3. Breakeven Stop Protection (Locks in Breakeven once trade gains >= breakeven_stop_pct)
+                if self.breakeven_stop_pct > 0:
+                    peak = trade.get("peak_pnl_pct", 0.0)
+                    if peak >= self.breakeven_stop_pct:
+                        if not trade.get("breakeven_locked"):
+                            trade["breakeven_locked"] = True
+                            trade_log_dirty = True
+                            logger.info(f"[PaperTrader] 🔒 BREAKEVEN LOCKED for {trade['ticker']} (Peak: +{peak:.1f}% >= +{self.breakeven_stop_pct}%)")
+
+                        if pnl_pct <= 0.0:
+                            logger.info(
+                                f"[PaperTrader] 🛡️ BREAKEVEN STOP triggered on {trade['ticker']} | "
+                                f"Peak was +{peak:.1f}%, now {pnl_pct:+.1f}% <= 0.0% | Exiting to protect capital."
+                            )
+                            positions_to_close.append((trade, "breakeven_stop"))
+                            continue
+
+                # 4. Fixed Option Take-Profit Target (e.g. +20% contract gain)
                 if current_price and entry_price > 0 and self.take_profit_pct > 0:
                     if pnl_pct >= self.take_profit_pct:
                         logger.info(
@@ -878,10 +945,11 @@ class PaperTrader:
                         positions_to_close.append((trade, "take_profit"))
                         continue
 
-                # 4. Trailing Stop Protection
+                # 5. Trailing Stop Protection
                 if self.trailing_stop_enabled and trade.get("peak_pnl_pct", 0) >= self.trailing_stop_activation_pct:
                     peak = trade["peak_pnl_pct"]
-                    stop_floor_pct = max(2.0, peak - self.trailing_stop_callback_pct)
+                    min_floor = 0.5 if trade.get("breakeven_locked") else 0.0
+                    stop_floor_pct = max(min_floor, peak - self.trailing_stop_callback_pct)
                     if pnl_pct <= stop_floor_pct:
                         logger.info(
                             f"[PaperTrader] 🛡️ TRAILING STOP triggered on {trade['ticker']} | "
@@ -1016,7 +1084,14 @@ class PaperTrader:
                 "max_risk_per_trade": self.max_risk_per_trade,
                 "max_open_positions": self.max_open_positions,
                 "max_daily_trades": self.max_daily_trades,
+                "max_daily_loss": self.max_daily_loss,
                 "stop_loss_pct": self.stop_loss_pct,
+                "take_profit_pct": self.take_profit_pct,
+                "breakeven_stop_pct": self.breakeven_stop_pct,
+                "trailing_stop_activation_pct": self.trailing_stop_activation_pct,
+                "trailing_stop_callback_pct": self.trailing_stop_callback_pct,
+                "max_hold_minutes": self.max_hold_minutes,
+                "min_entry_interval_secs": self.min_entry_interval_secs,
             }
         }
 

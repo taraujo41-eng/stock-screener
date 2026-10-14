@@ -2185,6 +2185,7 @@ function renderPaperTradeLog(data) {
       const exitTimeFormatted = formatTradeDateTime(t.exit_time);
       const reasonBadge = t.exit_reason === 'take_profit' ? '🎯 Take Profit' : 
                           t.exit_reason === 'trailing_stop' ? '🛡️ Trailing Stop' :
+                          t.exit_reason === 'breakeven_stop' ? '🔒 Breakeven' :
                           t.exit_reason === 'time_stop' ? '⌛ Time Stop' :
                           t.exit_reason === 'stop_loss' ? '🛑 Stop Loss' :
                           t.exit_reason === 'eod_close' ? '🕓 EOD Close' : (t.exit_reason || 'Closed');
