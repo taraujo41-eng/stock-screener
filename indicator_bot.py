@@ -226,7 +226,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             f"Price: ${last_price:.2f}\n"
             f"RSI: {f'{rsi:.1f}' if rsi else 'N/A'}\n"
             f"RVOL: {f'{rvol:.1f}x' if rvol else 'N/A'}\n"
-            f"VWAP Target: ${vwap_target:.2f}\n"
+            f"VWAP (Retest Level): ${vwap_target:.2f}\nTarget: TP +20% | SL -20%\n"
             f"Suggested Option: {opt_str}"
         )
         send_sms_notification(sms_msg)
@@ -247,7 +247,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             f"<b>Price:</b> ${last_price:.2f}\n"
             f"<b>RSI:</b> {rsi_formatted}{div_note}\n"
             f"<b>RVOL:</b> {rvol_formatted}\n"
-            f"<b>VWAP Target:</b> ${vwap_target:.2f}\n"
+            f"<b>VWAP (Retest Level):</b> ${vwap_target:.2f}\n<b>Targets:</b> 🎯 Take Profit +20% | 🛑 Stop Loss -20%\n"
             f"<b>Suggested Option:</b> {opt_str}"
         )
         send_telegram_notification(tg_msg)
@@ -279,7 +279,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                     f"Price: ${result.get('entry_price', 0):.2f}\n"
                     f"Qty: {result.get('quantity', 1)} contract(s)\n"
                     f"Stock Price: ${last_price:.2f}\n"
-                    f"VWAP Target: ${vwap_target:.2f}\n"
+                    f"VWAP (Retest Level): ${vwap_target:.2f}\nTarget: TP +20% | SL -20%\n"
                     f"Zone: {zone_summary if zone_summary and zone_summary != 'None' else 'N/A'}\n"
                     f"Setup: {reason or (action + ' Reversal')}\n"
                     f"Mode: {mode_str}"
@@ -295,7 +295,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                         f"<b>Entry Price:</b> ${result.get('entry_price', 0):.2f}\n"
                         f"<b>Qty:</b> {result.get('quantity', 1)} contract(s)\n"
                         f"<b>Stock Price:</b> ${last_price:.2f}\n"
-                        f"<b>VWAP Target:</b> ${vwap_target:.2f}\n"
+                        f"<b>VWAP (Retest Level):</b> ${vwap_target:.2f}\n<b>Targets:</b> 🎯 Take Profit +20% | 🛑 Stop Loss -20%\n"
                         f"<b>Zone:</b> {zone_str}\n"
                         f"<b>RSI:</b> {rsi_formatted} | <b>RVOL:</b> {rvol_formatted}\n"
                         f"<b>Market Sentiment:</b> {align_icon} {align_badge}\n"
@@ -311,363 +311,167 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
 
 def evaluate_ticker_process(ticker, df):
     """
-    Evaluates the 15m dataframe against Institutional Supply & Demand Zones
-    and Daily Bollinger Bands. Recognizes zone hits and tests whether a viable
-    trade is possible.
+    Evaluates intraday data for Premarket Breakout + VWAP Retest Strategy:
+    1. Extracts Premarket High (PMH) & Premarket Low (PML) between 04:00 and 09:29:59 ET.
+    2. Computes Regular Trading Hours (RTH) VWAP starting from 09:30 ET.
+    3. LONG Setup:
+       - Price has broken above PMH during RTH and is above VWAP.
+       - Price pulls back to retest VWAP (Low reaches VWAP within 0.25%, Close holds at/above VWAP).
+       - Candle confirms bounce off VWAP (green candle or lower rejection wick).
+    4. SHORT Setup:
+       - Price has broken below PML during RTH and is below VWAP.
+       - Price rallies to retest VWAP from below (High reaches VWAP within 0.25%, Close held at/below VWAP).
+       - Candle confirms rejection at VWAP (red candle or upper rejection wick).
+    5. Options Verification:
+       - Confirms liquid option contract (CALL for Long, PUT for Short) with tight spread.
     """
-    global _daily_bands_map
-    
-    daily_upper_bb = None
-    daily_lower_bb = None
-    if ticker in _daily_bands_map:
-        daily_upper_bb, daily_lower_bb = _daily_bands_map[ticker]
-        
-    bb_length = int(os.getenv("BB_LENGTH", "20"))
-    bb_mult = float(os.getenv("BB_MULT", "2.5"))
-    proximity_pct = float(os.getenv("PROXIMITY_PCT", "0.015"))
-    only_a_plus = os.getenv("ONLY_A_PLUS_SETUPS", "true").lower() in ("true", "1", "yes")
-    trade_zones_enabled = os.getenv("TRADE_SUPPLY_DEMAND_ZONES", "true").lower() in ("true", "1", "yes")
-    zone_lookback = int(os.getenv("ZONE_LOOKBACK", "45"))
-    zone_tolerance = float(os.getenv("ZONE_TOLERANCE_PCT", "0.015"))
-    rsi_length = int(os.getenv("RSI_LENGTH", "14"))
-    lookback = int(os.getenv("LOOKBACK", "15"))
-    
-    if len(df) < max(bb_length, rsi_length) + lookback + 5:
-        return None
-        
-    # 1. Compute Reversal indicators (Bollinger Bands, RSI, VWAP)
-    df_ind = calculate_3_sigma_divergence(
-        df,
-        bb_length=bb_length,
-        bb_mult=bb_mult,
-        rsi_length=rsi_length,
-        lookback=lookback,
-        daily_upper_bb=daily_upper_bb,
-        daily_lower_bb=daily_lower_bb,
-        proximity_pct=proximity_pct
-    )
-    
-    last_row = df_ind.iloc[-1]
-    close_price = float(last_row['Close'])
-    open_price = float(last_row['Open'])
-    high_price = float(last_row['High'])
-    low_price = float(last_row['Low'])
-    vwap_target = float(last_row['vwap'])
-    rsi_val = float(last_row['rsi'])
-    
-    is_bullish_pierced = bool(last_row.get('is_bullish_pierced', False))
-    is_bearish_pierced = bool(last_row.get('is_bearish_pierced', False))
-    is_bullish_near = bool(last_row.get('is_bullish_near', False)) if proximity_pct > 0 else False
-    is_bearish_near = bool(last_row.get('is_bearish_near', False)) if proximity_pct > 0 else False
-    
-    is_bullish_bb = is_bullish_pierced or is_bullish_near
-    is_bearish_bb = is_bearish_pierced or is_bearish_near
-    sd_label = f"{int(bb_mult)}SD" if bb_mult.is_integer() else f"{bb_mult}SD"
-
-    # 2. Institutional Supply & Demand Zones Detection
-    in_demand, in_supply = False, False
-    demand_zone, supply_zone = None, None
-    try:
-        from reversal_scanner import detect_supply_demand_zones
-        in_demand, in_supply, demand_zone, supply_zone = detect_supply_demand_zones(
-            df, lookback=zone_lookback, tolerance_pct=zone_tolerance
-        )
-    except Exception as e:
-        logger.warning(f"Error computing supply/demand zones for {ticker}: {e}")
-
-    # 3. Determine Setup Candidates
-    is_bullish_zone = in_demand and trade_zones_enabled
-    is_bearish_zone = in_supply and trade_zones_enabled
-
-    is_bullish = is_bullish_zone or is_bullish_bb
-    is_bearish = is_bearish_zone or is_bearish_bb
-
-    # If neither zone hit nor BB breach/near, skip
-    if not (is_bullish or is_bearish):
+    if df is None or len(df) < 5:
         return None
 
-    # Calculate Confluence Factors for Setup
-    bull_div, bear_div = False, False
-    rvol = 1.0
-    ema20_dist = 0.0
-    ema20 = None
-    sma50 = None
-    macd_bull_cross = False
-    macd_bear_cross = False
-    macd_bull_curl = False
-    macd_bear_curl = False
-    macd_line = None
-    signal_line = None
-    macd_hist = None
     try:
-        from reversal_scanner import detect_rsi_divergence, compute_rvol, compute_ema, compute_sma, compute_macd
-        bull_div, bear_div = detect_rsi_divergence(df['Close'], df_ind['rsi'], lookback=lookback)
-        rvol = compute_rvol(df)
-        ema20_series = compute_ema(df['Close'], 20)
-        ema20 = float(ema20_series.iloc[-1]) if len(ema20_series) > 0 else None
-        ema20_dist = ((close_price - ema20) / ema20) * 100 if ema20 else 0.0
+        # Filter today's session
+        today_date = df.index[-1].date()
+        today_df = df[df.index.date == today_date]
         
-        sma50_series = compute_sma(df['Close'], 50)
-        sma50 = float(sma50_series.iloc[-1]) if len(sma50_series) > 0 and not np.isnan(sma50_series.iloc[-1]) else None
-
-        # MACD (12, 26, 9)
-        macd_line, signal_line, macd_hist = compute_macd(df['Close'])
-        if macd_hist is not None and len(macd_hist) >= 2:
-            last_hist = float(macd_hist.iloc[-1])
-            prev_hist = float(macd_hist.iloc[-2])
-            macd_bull_cross = (last_hist > 0 and prev_hist <= 0)
-            macd_bear_cross = (last_hist < 0 and prev_hist >= 0)
-            macd_bull_curl = (last_hist > prev_hist)
-            macd_bear_curl = (last_hist < prev_hist)
-    except Exception as e:
-        logger.warning(f"Error computing confluence for {ticker}: {e}")
-
-    # Technical Trend Posture
-    tech_bull = 0
-    tech_bear = 0
-    if ema20:
-        if close_price > ema20: tech_bull += 1
-        else: tech_bear += 1
-    if sma50:
-        if close_price > sma50: tech_bull += 1
-        else: tech_bear += 1
-    if macd_line is not None and signal_line is not None and len(macd_line) > 0 and len(signal_line) > 0:
-        if float(macd_line.iloc[-1]) > float(signal_line.iloc[-1]): tech_bull += 1
-        else: tech_bear += 1
-    tech_trend = "Bullish" if tech_bull >= 2 else ("Bearish" if tech_bear >= 2 else "Neutral")
-
-    # Market Sentiment alignment
-    sentiment_data = get_cached_market_sentiment()
-    m_sentiment = sentiment_data.get('sentiment', 'Neutral')
-    m_summary = sentiment_data.get('summary', '')
-
-    # Candlestick metrics
-    candle_rng = max(0.001, high_price - low_price)
-    lower_wick = min(open_price, close_price) - low_price
-    upper_wick = high_price - max(open_price, close_price)
-    is_green = close_price >= open_price
-    is_red = close_price <= open_price
-
-    score = 10
-    reasons_list = []
-    has_div = False
-    in_zone = False
-    zone_summary = "None"
-    zone_details = None
-    zone_rejection = False
-    best_opt = None
-
-    sd_reach = "Pierced" if (is_bullish_pierced or is_bearish_pierced) else f"Within {proximity_pct*100:.1f}% of"
-
-    if is_bullish:
-        # Zone confluence
-        if is_bullish_zone and demand_zone:
-            in_zone = True
-            zone_summary = f"Demand: {demand_zone['range_str']}"
-            zone_details = demand_zone
-            reasons_list.append(f"In Demand Zone ({demand_zone['range_str']}) 🧱")
+        pm_bars = today_df.between_time("04:00", "09:29:59")
+        rth_bars = today_df.between_time("09:30", "16:00")
+        
+        if len(pm_bars) == 0 or len(rth_bars) < 2:
+            return None
             
-            # Check price rejection wick or green bounce candle at demand zone
-            if (lower_wick / candle_rng >= 0.28) or is_green:
-                zone_rejection = True
-                score += 2
-                reasons_list.append("Demand Zone Price Rejection 🔨")
-        elif demand_zone:
-            zone_summary = f"Demand: {demand_zone['range_str']}"
-            zone_details = demand_zone
-            reasons_list.append(f"Near Demand Zone ({demand_zone['range_str']})")
-
-        # Bollinger Band confluence
-        if is_bullish_bb:
-            if is_bullish_zone:
-                score += 2  # Dual Confluence: Zone + 3-Sigma!
-            reasons_list.append(f"{sd_reach} Daily Lower {sd_label} BB")
-
-        # RSI Confluences
-        if bull_div:
-            score += 4
-            has_div = True
-            reasons_list.append("RSI Bullish Divergence")
-        if rsi_val <= 32:
-            score += 2
-            reasons_list.append(f"RSI Oversold ({rsi_val:.1f})")
-        elif rsi_val <= 42:
-            score += 1
-            reasons_list.append(f"RSI Low ({rsi_val:.1f})")
-
-        # MACD Confluences
-        if macd_bull_cross:
-            score += 2
-            reasons_list.append("MACD Bullish Cross 📈")
-        elif macd_bull_curl and macd_line is not None and len(macd_line) > 0 and float(macd_line.iloc[-1]) < 0:
-            score += 1
-            reasons_list.append("MACD Histogram Curling Up ↗️")
-
-        if rvol > 1.3:
-            score += 2
-            reasons_list.append(f"High RVOL ({rvol:.1f}x)")
-        if ema20_dist < -1.5:
-            score += 1
-            reasons_list.append("EMA Extension")
-
-        # Market Sentiment
-        if m_sentiment == "Bullish":
-            sentiment_align = "Bullish Aligned"
-            score += 1
-            reasons_list.append("Market Aligned (Bullish) 🎯")
-        elif m_sentiment == "Bearish":
-            sentiment_align = "Counter-Trend Reversal"
-            reasons_list.append("Counter-Trend Setup 🔄")
-        else:
-            sentiment_align = "Neutral Macro"
-
-        # Check upside room to target
-        if vwap_target <= close_price * 1.002:
-            overhead = max(ema20 or 0, supply_zone['low'] if supply_zone else 0)
-            if overhead > close_price * 1.008:
-                vwap_target = round(overhead, 2)
-            else:
-                vwap_target = round(close_price * 1.025, 2)
-
-        # See if a trade is possible: Option contract check
+        pm_high = float(pm_bars["High"].max())
+        pm_low = float(pm_bars["Low"].min())
+        
+        # Calculate RTH VWAP
+        typical_price = (rth_bars["High"] + rth_bars["Low"] + rth_bars["Close"]) / 3.0
+        cum_vol = rth_bars["Volume"].cumsum()
+        cum_vol = cum_vol.replace(0, 1)
+        vwap_series = (typical_price * rth_bars["Volume"]).cumsum() / cum_vol
+        
+        last_row = rth_bars.iloc[-1]
+        close_price = float(last_row["Close"])
+        open_price = float(last_row["Open"])
+        high_price = float(last_row["High"])
+        low_price = float(last_row["Low"])
+        current_vwap = float(vwap_series.iloc[-1])
+        
+        # Check breakout conditions during RTH
+        rth_highs = rth_bars["High"]
+        rth_lows = rth_bars["Low"]
+        broke_pmh = bool((rth_highs > pm_high).any())
+        broke_pml = bool((rth_lows < pm_low).any())
+        
+        candle_rng = max(0.001, high_price - low_price)
+        lower_wick = min(open_price, close_price) - low_price
+        upper_wick = high_price - max(open_price, close_price)
+        
+        is_long = False
+        is_short = False
+        
+        # Long: Broke PMH, now pulls back to retest VWAP and bounces
+        if broke_pmh:
+            # Low tested VWAP (within 0.25% or dipped through to test it), close held above VWAP
+            tested_vwap = (low_price <= current_vwap * 1.0025) and (close_price >= current_vwap * 0.9975)
+            confirmed_bounce = (close_price >= open_price) or (lower_wick / candle_rng >= 0.20)
+            if tested_vwap and confirmed_bounce and close_price >= current_vwap:
+                is_long = True
+                
+        # Short: Broke PML, now rallies to retest VWAP from below and gets rejected
+        if broke_pml and not is_long:
+            # High tested VWAP (within 0.25% or touched it from below), close held below VWAP
+            tested_vwap = (high_price >= current_vwap * 0.9975) and (close_price <= current_vwap * 1.0025)
+            confirmed_rejection = (close_price <= open_price) or (upper_wick / candle_rng >= 0.20)
+            if tested_vwap and confirmed_rejection and close_price <= current_vwap:
+                is_short = True
+                
+        if not (is_long or is_short):
+            return None
+            
+        action = "BUY" if is_long else "SELL"
+        signal_type = "bullish" if is_long else "bearish"
+        
+        # Find liquid option contract
+        best_opt = None
         try:
             from reversal_scanner import find_best_option
-            best_opt = find_best_option(ticker, "bullish", close_price)
+            best_opt = find_best_option(ticker, signal_type, close_price)
         except Exception as ex:
-            logger.debug(f"Option feasibility check error for {ticker}: {ex}")
-
-        if is_bullish_zone and not best_opt:
-            logger.info(f"[{ticker} 15m] ⚠️ In Demand Zone ({zone_summary}), but no suitable liquid option contract found — trade not possible.")
+            logger.debug(f"Option search error for {ticker}: {ex}")
+            
+        if not best_opt:
+            logger.info(f"[{ticker}] ⚠️ {action} Setup at VWAP (${current_vwap:.2f}), but no liquid option contract found.")
             return None
-        elif best_opt:
-            score += 1
-            reasons_list.append(f"Option Verified ({best_opt['type']} ${best_opt['strike']})")
-
-    else:
-        # Bearish setup
-        if is_bearish_zone and supply_zone:
-            in_zone = True
-            zone_summary = f"Supply: {supply_zone['range_str']}"
-            zone_details = supply_zone
-            reasons_list.append(f"In Supply Zone ({supply_zone['range_str']}) 🧱")
-
-            # Check price rejection wick or red drop candle at supply zone
-            if (upper_wick / candle_rng >= 0.28) or is_red:
-                zone_rejection = True
-                score += 2
-                reasons_list.append("Supply Zone Price Rejection 🔨")
-        elif supply_zone:
-            zone_summary = f"Supply: {supply_zone['range_str']}"
-            zone_details = supply_zone
-            reasons_list.append(f"Near Supply Zone ({supply_zone['range_str']})")
-
-        # Bollinger Band confluence
-        if is_bearish_bb:
-            if is_bearish_zone:
-                score += 2  # Dual Confluence: Zone + 3-Sigma!
-            reasons_list.append(f"{sd_reach} Daily Upper {sd_label} BB")
-
-        # RSI Confluences
-        if bear_div:
-            score += 4
-            has_div = True
-            reasons_list.append("RSI Bearish Divergence")
-        if rsi_val >= 68:
-            score += 2
-            reasons_list.append(f"RSI Overbought ({rsi_val:.1f})")
-        elif rsi_val >= 58:
-            score += 1
-            reasons_list.append(f"RSI High ({rsi_val:.1f})")
-
-        # MACD Confluences
-        if macd_bear_cross:
-            score += 2
-            reasons_list.append("MACD Bearish Cross 📉")
-        elif macd_bear_curl and macd_line is not None and len(macd_line) > 0 and float(macd_line.iloc[-1]) > 0:
-            score += 1
-            reasons_list.append("MACD Histogram Curling Down ↘️")
-
-        if rvol > 1.3:
-            score += 2
-            reasons_list.append(f"High RVOL ({rvol:.1f}x)")
-        if ema20_dist > 1.5:
-            score += 1
-            reasons_list.append("EMA Extension")
-
-        # Market Sentiment
-        if m_sentiment == "Bearish":
-            sentiment_align = "Bearish Aligned"
-            score += 1
-            reasons_list.append("Market Aligned (Bearish) 🎯")
-        elif m_sentiment == "Bullish":
-            sentiment_align = "Counter-Trend Reversal"
-            reasons_list.append("Counter-Trend Setup 🔄")
-        else:
-            sentiment_align = "Neutral Macro"
-
-        # Check downside room to target
-        if vwap_target >= close_price * 0.998:
-            underfoot = min(ema20 or 999999, demand_zone['high'] if demand_zone else 999999)
-            if underfoot < close_price * 0.992:
-                vwap_target = round(underfoot, 2)
-            else:
-                vwap_target = round(close_price * 0.975, 2)
-
-        # See if a trade is possible: Option contract check
+            
+        # Compute technical confluences for scoring and display
+        rsi_val = None
+        rvol = 1.0
         try:
-            from reversal_scanner import find_best_option
-            best_opt = find_best_option(ticker, "bearish", close_price)
-        except Exception as ex:
-            logger.debug(f"Option feasibility check error for {ticker}: {ex}")
-
-        if is_bearish_zone and not best_opt:
-            logger.info(f"[{ticker} 15m] ⚠️ In Supply Zone ({zone_summary}), but no suitable liquid option contract found — trade not possible.")
-            return None
-        elif best_opt:
+            from indicator import compute_rsi
+            from reversal_scanner import compute_rvol
+            rsi_s = compute_rsi(rth_bars["Close"], 14)
+            if len(rsi_s) > 0 and not np.isnan(rsi_s.iloc[-1]):
+                rsi_val = float(rsi_s.iloc[-1])
+            rvol = compute_rvol(rth_bars)
+        except Exception:
+            pass
+            
+        # Market Sentiment
+        sentiment_data = get_cached_market_sentiment()
+        m_sentiment = sentiment_data.get('sentiment', 'Neutral')
+        m_summary = sentiment_data.get('summary', '')
+        
+        sentiment_align = "Market Aligned 🎯" if (
+            (is_long and m_sentiment == "Bullish") or (is_short and m_sentiment == "Bearish")
+        ) else "Counter-Trend 🔄"
+        
+        setup_reason = (
+            f"Over PMH (${pm_high:.2f}) + VWAP Retest Bounce (${current_vwap:.2f}) 🚀"
+            if is_long else
+            f"Under PML (${pm_low:.2f}) + VWAP Retest Rejection (${current_vwap:.2f}) 🩸"
+        )
+        
+        score = 15
+        if sentiment_align.startswith("Market Aligned"):
+            score += 2
+        if rvol > 1.2:
+            score += 2
+        if (is_long and rsi_val and rsi_val < 45) or (is_short and rsi_val and rsi_val > 55):
             score += 1
-            reasons_list.append(f"Option Verified ({best_opt['type']} ${best_opt['strike']})")
-
-    has_macd_cross = (is_bullish and macd_bull_cross) or (is_bearish and macd_bear_cross)
-    has_macd_curl = (is_bullish and macd_bull_curl) or (is_bearish and macd_bear_curl)
-    has_momentum_conf = (zone_rejection or has_macd_cross or has_macd_curl or has_div or is_bullish_bb or is_bearish_bb)
-    is_a_plus = (score >= 12 and (has_div or has_macd_cross or (in_zone and (zone_rejection or is_bullish_bb or is_bearish_bb))))
-    grade = "A+" if is_a_plus else ("A" if score >= 10 else "B")
-    reasons = " | ".join(reasons_list)
-
-    # Require at least one confirming momentum / candle signal for zone trades (no blind knife-catching)
-    qualifies_for_trade = is_a_plus or (in_zone and score >= 10 and best_opt is not None and has_momentum_conf)
-    if only_a_plus and not qualifies_for_trade:
-        logger.info(f"[{ticker} 15m] Price: {close_price:.2f} | Zone: {zone_summary} (Score: {score}, Grade: {grade}) — Skipped (Requires A+ setup or confirmed Zone rejection/momentum)")
+            
+        grade = "A+"
+        
+        logger.info(
+            f"[{ticker}] 🎯 {grade} {action} SIGNAL! Price: ${close_price:.2f} | "
+            f"VWAP: ${current_vwap:.2f} | PMH: ${pm_high:.2f} | PML: ${pm_low:.2f} | {setup_reason}"
+        )
+        
+        return {
+            'action': action,
+            'type': signal_type,
+            'price': close_price,
+            'vwap': round(current_vwap, 2),
+            'pm_high': round(pm_high, 2),
+            'pm_low': round(pm_low, 2),
+            'rsi': rsi_val or 50.0,
+            'rvol': rvol,
+            'score': score,
+            'grade': grade,
+            'reason': setup_reason,
+            'time': rth_bars.index[-1],
+            'zone_summary': f"PMH ${pm_high:.2f} / PML ${pm_low:.2f}",
+            'in_zone': True,
+            'zone_details': {'pm_high': pm_high, 'pm_low': pm_low},
+            'sentiment_align': sentiment_align,
+            'tech_trend': "Bullish" if is_long else "Bearish",
+            'market_sentiment': m_sentiment,
+            'market_sentiment_summary': m_summary,
+            'suggested_option': best_opt,
+            'macd_cross': False,
+            'macd_status': "Bullish" if is_long else "Bearish",
+        }
+    except Exception as e:
+        logger.error(f"Error evaluating ticker {ticker}: {e}\n{tb.format_exc()}")
         return None
-
-    grade_icon = "🧱" if in_zone else ("⭐️" if grade == "A+" else "🔥")
-    zone_label = f" ({zone_summary})" if in_zone else ""
-    logger.info(f"[{ticker} 15m] {grade_icon} {grade} TRADE CONFIRMED! Score: {score}, RSI: {rsi_val:.1f}, RVOL: {rvol:.1f}x, Zone: {zone_summary}{zone_label} | {reasons}")
-
-    macd_status = "Bullish Cross" if macd_bull_cross else ("Bearish Cross" if macd_bear_cross else ("Bullish" if (macd_line is not None and signal_line is not None and len(macd_line) > 0 and float(macd_line.iloc[-1]) > float(signal_line.iloc[-1])) else "Bearish"))
-
-    return {
-        'action': 'BUY' if is_bullish else 'SELL',
-        'type': 'bullish' if is_bullish else 'bearish',
-        'price': close_price,
-        'vwap': vwap_target,
-        'rsi': rsi_val,
-        'rvol': rvol,
-        'score': score,
-        'grade': grade,
-        'reason': reasons,
-        'time': df_ind.index[-1],
-        'zone_summary': zone_summary,
-        'in_zone': in_zone,
-        'zone_details': zone_details,
-        'sentiment_align': sentiment_align,
-        'tech_trend': tech_trend,
-        'market_sentiment': m_sentiment,
-        'market_sentiment_summary': m_summary,
-        'suggested_option': best_opt,
-        'macd_cross': has_macd_cross,
-        'macd_status': macd_status,
-    }
 
 def precalculate_daily_bands(tickers):
     """
@@ -802,21 +606,21 @@ def bot_loop():
                 if not tickers:
                     tickers = ["AAPL", "MSFT", "NVDA", "SPY", "QQQ"]
 
-                candle_interval = os.getenv("CANDLE_INTERVAL_3SIGMA", "15m")
+                candle_interval = os.getenv("CANDLE_INTERVAL_3SIGMA", "5m")
                 scan_interval = int(os.getenv("SCAN_INTERVAL_3SIGMA", "60"))
                 
                 # 2. Pre-calculate daily bands
                 precalculate_daily_bands(tickers)
                 
-                logger.info(f"Scanning {len(tickers)} watchlist tickers in parallel ({candle_interval} candles, 3.0SD Breach + A+ Setups)...")
+                logger.info(f"Scanning {len(tickers)} watchlist tickers in parallel ({candle_interval} candles, PM Breakout + VWAP Retest)...")
 
                 # 3. Download and compute in parallel
                 results = fetch_batch_concurrent(
                     tickers=tickers,
-                    days=15,
+                    days=5,
                     max_workers=25,
                     interval=candle_interval,
-                    includePrePost="false",
+                    includePrePost="true",
                     process_fn=evaluate_ticker_process,
                     skip_webull=False
                 )
