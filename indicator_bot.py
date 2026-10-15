@@ -590,21 +590,31 @@ def bot_loop():
             logger.info("--- Starting 3-Sigma A+ Reversal Bot Cycle ---")
 
             try:
-                # 1. Determine tickers to scan: Restricted strictly to Watchlist tickers (165 tickers)
-                watchlist_tickers = []
+                # 1. Determine tickers to scan: Default to Top 50 Stocks
+                tickers_mode = os.getenv("TICKERS_3SIGMA", "TOP50").strip().upper()
+                selected_tickers = []
                 try:
-                    watchlist_file = os.path.join(_SCAN_DATA_DIR, "watchlist.json")
-                    if not os.path.exists(watchlist_file):
-                        watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
-                    if os.path.exists(watchlist_file):
-                        with open(watchlist_file, "r") as f:
-                            watchlist_tickers = json.load(f)
+                    if tickers_mode in ("TOP50", "TOP_50"):
+                        top50_file = os.path.join(_SCAN_DATA_DIR, "top50_stocks.json")
+                        if not os.path.exists(top50_file):
+                            top50_file = os.path.join(os.path.dirname(__file__), "top50_stocks.json")
+                        if os.path.exists(top50_file):
+                            with open(top50_file, "r") as f:
+                                data = json.load(f)
+                                selected_tickers = [item["ticker"] for item in data if isinstance(item, dict) and item.get("ticker")]
+                    else:
+                        watchlist_file = os.path.join(_SCAN_DATA_DIR, "watchlist.json")
+                        if not os.path.exists(watchlist_file):
+                            watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
+                        if os.path.exists(watchlist_file):
+                            with open(watchlist_file, "r") as f:
+                                selected_tickers = json.load(f)
                 except Exception as e:
-                    logger.error(f"Failed to load watchlist.json: {e}")
+                    logger.error(f"Failed to load tickers for {tickers_mode}: {e}")
 
-                tickers = list(dict.fromkeys([t.strip().upper() for t in watchlist_tickers if t and isinstance(t, str)]))
+                tickers = list(dict.fromkeys([t.strip().upper() for t in selected_tickers if t and isinstance(t, str)]))
                 if not tickers:
-                    tickers = ["AAPL", "MSFT", "NVDA", "SPY", "QQQ"]
+                    tickers = ["NVDA", "TSLA", "AAPL", "AMZN", "MSFT", "META", "AMD", "SPY", "QQQ"]
 
                 candle_interval = os.getenv("CANDLE_INTERVAL_3SIGMA", "5m")
                 scan_interval = int(os.getenv("SCAN_INTERVAL_3SIGMA", "60"))
@@ -612,7 +622,7 @@ def bot_loop():
                 # 2. Pre-calculate daily bands
                 precalculate_daily_bands(tickers)
                 
-                logger.info(f"Scanning {len(tickers)} watchlist tickers in parallel ({candle_interval} candles, PM Breakout + VWAP Retest)...")
+                logger.info(f"Scanning {len(tickers)} {tickers_mode} tickers in parallel ({candle_interval} candles, PM Breakout + VWAP Retest)...")
 
                 # 3. Download and compute in parallel
                 results = fetch_batch_concurrent(
