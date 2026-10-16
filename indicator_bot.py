@@ -186,7 +186,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
     bb_mult = os.getenv("BB_MULT", "2.5")
     grade_str = grade or ("A+" if (score and score >= 12) else "A")
     grade_icon = "⭐️" if grade_str == "A+" else "🔥"
-    logger.info(f"🔔 {grade_str} SIGNAL TRIGGERED on {ticker}: {action} | Setup: {reason} | Price={last_price:.2f}, RSI={f'{rsi:.1f}' if rsi else 'N/A'}, Target VWAP={vwap_target:.2f}")
+    logger.info(f"🔔 {grade_str} SIGNAL TRIGGERED on {ticker}: {action} | Setup: {reason} | Price={last_price:.2f}, RSI={f'{rsi:.1f}' if rsi else 'N/A'}, VWAP Entry={vwap_target:.2f}")
     
     alert_method = os.getenv("ALERT_METHOD", "TELEGRAM").upper()
     
@@ -226,7 +226,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             f"Price: ${last_price:.2f}\n"
             f"RSI: {f'{rsi:.1f}' if rsi else 'N/A'}\n"
             f"RVOL: {f'{rvol:.1f}x' if rvol else 'N/A'}\n"
-            f"VWAP (Retest Level): ${vwap_target:.2f}\nTarget: TP +20% | SL -20%\n"
+            f"VWAP Retest (Entry): ${vwap_target:.2f}\nTarget: Option TP +20% | SL -20%\n"
             f"Suggested Option: {opt_str}"
         )
         send_sms_notification(sms_msg)
@@ -247,7 +247,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             f"<b>Price:</b> ${last_price:.2f}\n"
             f"<b>RSI:</b> {rsi_formatted}{div_note}\n"
             f"<b>RVOL:</b> {rvol_formatted}\n"
-            f"<b>VWAP (Retest Level):</b> ${vwap_target:.2f}\n<b>Targets:</b> 🎯 Take Profit +20% | 🛑 Stop Loss -20%\n"
+            f"<b>VWAP Retest (Entry Level):</b> ${vwap_target:.2f}\n<b>Targets:</b> 🎯 Take Profit +20% | 🛑 Stop Loss -20%\n"
             f"<b>Suggested Option:</b> {opt_str}"
         )
         send_telegram_notification(tg_msg)
@@ -279,7 +279,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                     f"Price: ${result.get('entry_price', 0):.2f}\n"
                     f"Qty: {result.get('quantity', 1)} contract(s)\n"
                     f"Stock Price: ${last_price:.2f}\n"
-                    f"VWAP (Retest Level): ${vwap_target:.2f}\nTarget: TP +20% | SL -20%\n"
+                    f"VWAP Retest (Entry): ${vwap_target:.2f}\nTarget: Option TP +20% | SL -20%\n"
                     f"Zone: {zone_summary if zone_summary and zone_summary != 'None' else 'N/A'}\n"
                     f"Setup: {reason or (action + ' Reversal')}\n"
                     f"Mode: {mode_str}"
@@ -295,7 +295,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                         f"<b>Entry Price:</b> ${result.get('entry_price', 0):.2f}\n"
                         f"<b>Qty:</b> {result.get('quantity', 1)} contract(s)\n"
                         f"<b>Stock Price:</b> ${last_price:.2f}\n"
-                        f"<b>VWAP (Retest Level):</b> ${vwap_target:.2f}\n<b>Targets:</b> 🎯 Take Profit +20% | 🛑 Stop Loss -20%\n"
+                        f"<b>VWAP Retest (Entry Level):</b> ${vwap_target:.2f}\n<b>Targets:</b> 🎯 Take Profit +20% | 🛑 Stop Loss -20%\n"
                         f"<b>Zone:</b> {zone_str}\n"
                         f"<b>RSI:</b> {rsi_formatted} | <b>RVOL:</b> {rvol_formatted}\n"
                         f"<b>Market Sentiment:</b> {align_icon} {align_badge}\n"
@@ -361,28 +361,43 @@ def evaluate_ticker_process(ticker, df):
         broke_pmh = bool((rth_highs > pm_high).any())
         broke_pml = bool((rth_lows < pm_low).any())
         
-        candle_rng = max(0.001, high_price - low_price)
-        lower_wick = min(open_price, close_price) - low_price
-        upper_wick = high_price - max(open_price, close_price)
-        
         is_long = False
         is_short = False
         
-        # Long: Broke PMH, now pulls back to retest VWAP and bounces
-        if broke_pmh:
-            # Low tested VWAP (within 0.25% or dipped through to test it), close held above VWAP
-            tested_vwap = (low_price <= current_vwap * 1.0025) and (close_price >= current_vwap * 0.9975)
-            confirmed_bounce = (close_price >= open_price) or (lower_wick / candle_rng >= 0.20)
-            if tested_vwap and confirmed_bounce and close_price >= current_vwap:
-                is_long = True
-                
-        # Short: Broke PML, now rallies to retest VWAP from below and gets rejected
-        if broke_pml and not is_long:
-            # High tested VWAP (within 0.25% or touched it from below), close held below VWAP
-            tested_vwap = (high_price >= current_vwap * 0.9975) and (close_price <= current_vwap * 1.0025)
-            confirmed_rejection = (close_price <= open_price) or (upper_wick / candle_rng >= 0.20)
-            if tested_vwap and confirmed_rejection and close_price <= current_vwap:
-                is_short = True
+        # Check both the current forming candle and the last completed candle for VWAP retest
+        candles_to_evaluate = []
+        if len(rth_bars) >= 2:
+            candles_to_evaluate.append(rth_bars.iloc[-2])  # completed candle
+        candles_to_evaluate.append(rth_bars.iloc[-1])      # current forming candle
+        
+        for candle in candles_to_evaluate:
+            c_high = float(candle["High"])
+            c_low = float(candle["Low"])
+            c_open = float(candle["Open"])
+            c_close = float(candle["Close"])
+            c_vwap = float(vwap_series.loc[candle.name]) if candle.name in vwap_series.index else current_vwap
+            
+            c_rng = max(0.001, c_high - c_low)
+            c_lower_wick = min(c_open, c_close) - c_low
+            c_upper_wick = c_high - max(c_open, c_close)
+            
+            # Long Setup: Broke PMH, candle retested VWAP from above and bounced
+            if broke_pmh and not is_long:
+                tested_vwap = (c_low <= c_vwap * 1.003)
+                confirmed_bounce = (c_close >= c_open) or (c_lower_wick / c_rng >= 0.20)
+                held_above = (c_close >= c_vwap * 0.998)
+                if tested_vwap and confirmed_bounce and held_above:
+                    is_long = True
+                    break
+                    
+            # Short Setup: Broke PML, candle retested VWAP from below and rejected
+            if broke_pml and not is_long and not is_short:
+                tested_vwap = (c_high >= c_vwap * 0.997)
+                confirmed_rejection = (c_close <= c_open) or (c_upper_wick / c_rng >= 0.20)
+                held_below = (c_close <= c_vwap * 1.002)
+                if tested_vwap and confirmed_rejection and held_below:
+                    is_short = True
+                    break
                 
         if not (is_long or is_short):
             return None
@@ -579,7 +594,7 @@ def bot_loop():
             ny_tz = get_ny_timezone()
             now = datetime.now(ny_tz)
             current_mins = now.hour * 60 + now.minute
-            earliest_trade_mins = int(os.getenv("EARLIEST_TRADE_TIME_MINS", "590"))  # 9:50 AM ET
+            earliest_trade_mins = int(os.getenv("EARLIEST_TRADE_TIME_MINS", "570"))  # 9:30 AM ET (market open)
             if current_mins < earliest_trade_mins:
                 open_hr = earliest_trade_mins // 60
                 open_mn = earliest_trade_mins % 60
@@ -655,7 +670,9 @@ def bot_loop():
                             "Patterns": res.get('reason', ''),
                             "RVOL": res.get('rvol', 1.0),
                             "Entry": res['price'],
-                            "Profit Target": res['vwap'],
+                            "VWAP Level": res['vwap'],
+                            "Profit Target": "+20% (Option TP)",
+                            "Stop Loss": "-20% (Option SL)",
                             "Supply/Demand Zone": res.get('zone_summary', 'None'),
                             "In Zone": res.get('in_zone', False),
                             "Zone Details": res.get('zone_details'),

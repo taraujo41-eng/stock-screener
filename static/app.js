@@ -340,21 +340,26 @@ function buildCard(item, index) {
         ${bullish.length ? `<div class="signal-row"><span class="signal-row__icon">${bullIcon}</span>${bullPills}</div>` : ""}
         ${bearish.length ? `<div class="signal-row"><span class="signal-row__icon">${bearIcon}</span>${bearPills}</div>` : ""}
       </div>
-      ${item["Stop Loss"] ? `
+      ${item["Stop Loss"] || item["Profit Target"] ? `
         <div class="card__trade-levels">
           <div class="trade-level">
-            <span class="trade-level__label">Entry</span>
-            <span class="trade-level__value trade-level__value--entry">$${item["Entry"]?.toFixed(2)}</span>
+            <span class="trade-level__label">Stock Entry</span>
+            <span class="trade-level__value trade-level__value--entry">$${typeof item["Entry"] === 'number' ? item["Entry"].toFixed(2) : (item["Entry"] || '—')}</span>
           </div>
           <div class="trade-level">
             <span class="trade-level__label">Stop Loss</span>
-            <span class="trade-level__value trade-level__value--sl">$${item["Stop Loss"]?.toFixed(2)}</span>
+            <span class="trade-level__value trade-level__value--sl">${typeof item["Stop Loss"] === 'number' ? '$' + item["Stop Loss"].toFixed(2) : (item["Stop Loss"] || '-20% SL')}</span>
           </div>
           <div class="trade-level">
             <span class="trade-level__label">Target</span>
-            <span class="trade-level__value trade-level__value--target">$${item["Profit Target"]?.toFixed(2)}</span>
+            <span class="trade-level__value trade-level__value--target">${typeof item["Profit Target"] === 'number' ? '$' + item["Profit Target"].toFixed(2) : (item["Profit Target"] || '+20% TP')}</span>
           </div>
         </div>
+        ${item["VWAP Level"] ? `
+          <div style="margin-top: 0.35rem; font-size: 0.75rem; color: #facc15; font-weight: 600;">
+            ⚡ VWAP Retest Entry: $${typeof item["VWAP Level"] === 'number' ? item["VWAP Level"].toFixed(2) : item["VWAP Level"]}
+          </div>
+        ` : ""}
       ` : ""}
       ${item["Option Play"] && typeof item["Option Play"] === "object" ? `
         <div class="card__option">
@@ -555,21 +560,26 @@ function buildOptionsCard(item, index) {
           ${catalystPills}
         </div>
       </div>
-      ${item["Stop Loss"] ? `
+      ${item["Stop Loss"] || item["Profit Target"] ? `
         <div class="card__trade-levels">
           <div class="trade-level">
-            <span class="trade-level__label">Entry</span>
-            <span class="trade-level__value trade-level__value--entry">$${item["Entry"]?.toFixed(2)}</span>
+            <span class="trade-level__label">Stock Entry</span>
+            <span class="trade-level__value trade-level__value--entry">$${typeof item["Entry"] === 'number' ? item["Entry"].toFixed(2) : (item["Entry"] || '—')}</span>
           </div>
           <div class="trade-level">
             <span class="trade-level__label">Stop Loss</span>
-            <span class="trade-level__value trade-level__value--sl">$${item["Stop Loss"]?.toFixed(2)}</span>
+            <span class="trade-level__value trade-level__value--sl">${typeof item["Stop Loss"] === 'number' ? '$' + item["Stop Loss"].toFixed(2) : (item["Stop Loss"] || '-20% SL')}</span>
           </div>
           <div class="trade-level">
             <span class="trade-level__label">Target</span>
-            <span class="trade-level__value trade-level__value--target">$${item["Profit Target"]?.toFixed(2)}</span>
+            <span class="trade-level__value trade-level__value--target">${typeof item["Profit Target"] === 'number' ? '$' + item["Profit Target"].toFixed(2) : (item["Profit Target"] || '+20% TP')}</span>
           </div>
         </div>
+        ${item["VWAP Level"] ? `
+          <div style="margin-top: 0.35rem; font-size: 0.75rem; color: #facc15; font-weight: 600;">
+            ⚡ VWAP Retest Entry: $${typeof item["VWAP Level"] === 'number' ? item["VWAP Level"].toFixed(2) : item["VWAP Level"]}
+          </div>
+        ` : ""}
       ` : ""}
     </div>
   `;
@@ -1861,7 +1871,7 @@ function showTradeToast(trade) {
       <div class="trade-toast__title">New 3-Sigma Trade Placed</div>
       <div class="trade-toast__desc">
         ${actionEmoji} <strong>${trade.ticker}</strong> ${trade.type} $${trade.strike} @ $${(trade.entry_price || 0).toFixed(2)}<br>
-        <span style="color: #94a3b8; font-size: 0.75rem;">Target VWAP: $${trade.vwap_target ? trade.vwap_target.toFixed(2) : '—'}</span>
+        <span style="color: #94a3b8; font-size: 0.75rem;">VWAP Retest (Entry): $${(trade.vwap_entry || trade.vwap_target) ? (trade.vwap_entry || trade.vwap_target).toFixed(2) : '—'} | Target: +20% | SL: -20%</span>
       </div>
       <div class="trade-toast__time">Just now • Tap to view simulator</div>
     </div>
@@ -2096,8 +2106,8 @@ function renderPaperOpenPositions(positions) {
             <span class="paper-card__stat-val" style="color: #c4b5fd; font-weight: 700;">${expStr}</span>
           </div>
           <div>
-            <span class="paper-card__stat-label">Target VWAP</span>
-            <span class="paper-card__stat-val" style="color: var(--green);">$${p.vwap_target ? p.vwap_target.toFixed(2) : '—'}</span>
+            <span class="paper-card__stat-label">VWAP Retest Level</span>
+            <span class="paper-card__stat-val" style="color: #facc15;">$${(p.vwap_entry || p.vwap_target) ? (p.vwap_entry || p.vwap_target).toFixed(2) : '—'}</span>
           </div>
           <div>
             <span class="paper-card__stat-label">Date Entered</span>

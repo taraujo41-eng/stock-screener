@@ -1313,6 +1313,7 @@ def paper_positions():
                     "entry_price": p.get("entry_price"),
                     "entry_time": p.get("entry_time"),
                     "vwap_target": p.get("vwap_target"),
+                    "vwap_entry": p.get("vwap_entry") or p.get("vwap_target"),
                     "quantity": p.get("quantity"),
                     "signal_type": p.get("signal_type"),
                     "instrument_id": p.get("instrument_id"),

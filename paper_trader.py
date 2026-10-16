@@ -139,7 +139,7 @@ class PaperTrader:
         self.trailing_stop_callback_pct = _cfg("PAPER_TRAILING_STOP_CALLBACK_PCT", "2.5", float)
         self.breakeven_stop_pct = _cfg("PAPER_BREAKEVEN_STOP_PCT", "0.0", float)
         self.max_hold_minutes = _cfg("PAPER_MAX_HOLD_MINUTES", "50", int)
-        self.earliest_trade_mins = _cfg("EARLIEST_TRADE_TIME_MINS", "590", int)
+        self.earliest_trade_mins = _cfg("EARLIEST_TRADE_TIME_MINS", "570", int)
         self.close_before_eod = _cfg("PAPER_CLOSE_BEFORE_MARKET_CLOSE", "true", bool)
 
     # ── Authentication ──────────────────────────────────────────────
@@ -410,7 +410,7 @@ class PaperTrader:
         today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
         count = 0
         for trade in self._trade_log.get("trades", []):
-            if trade.get("entry_time", "").startswith(today_str):
+            if (trade.get("entry_time") or "").startswith(today_str):
                 count += 1
         return count
 
@@ -420,7 +420,8 @@ class PaperTrader:
         today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
         total_pnl = 0.0
         for trade in self._trade_log.get("trades", []):
-            if trade.get("exit_time", "").startswith(today_str) and trade.get("status") == "closed":
+            exit_time_str = trade.get("exit_time") or ""
+            if exit_time_str.startswith(today_str) and trade.get("status") == "closed":
                 total_pnl += float(trade.get("pnl", 0.0))
         return total_pnl
 
@@ -430,7 +431,7 @@ class PaperTrader:
         today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
         latest = None
         for trade in self._trade_log.get("trades", []):
-            etime_str = trade.get("entry_time", "")
+            etime_str = trade.get("entry_time") or ""
             if etime_str.startswith(today_str):
                 try:
                     dt = datetime.fromisoformat(etime_str)
@@ -683,7 +684,8 @@ class PaperTrader:
                 "spread": best.get("spread"),
                 "spread_pct": best.get("spread_pct"),
                 "entry_time": datetime.now(ny_tz).isoformat(),
-                "vwap_target": vwap_target,
+                "vwap_entry": vwap_target,
+                "vwap_target": None,
                 "stock_price_at_entry": last_price,
                 "quantity": self.max_contracts,
                 "dte": best["dte"],
