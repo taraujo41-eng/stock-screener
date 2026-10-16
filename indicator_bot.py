@@ -381,21 +381,23 @@ def evaluate_ticker_process(ticker, df):
             c_lower_wick = min(c_open, c_close) - c_low
             c_upper_wick = c_high - max(c_open, c_close)
             
-            # Long Setup: Broke PMH, candle retested VWAP from above and bounced
+            # Long Setup: Broke PMH, candle approached from above and retested VWAP as support and bounced
             if broke_pmh and not is_long:
+                approached_from_above = (c_open >= c_vwap * 0.998)
                 tested_vwap = (c_low <= c_vwap * 1.003)
                 confirmed_bounce = (c_close >= c_open) or (c_lower_wick / c_rng >= 0.20)
                 held_above = (c_close >= c_vwap * 0.998)
-                if tested_vwap and confirmed_bounce and held_above:
+                if approached_from_above and tested_vwap and confirmed_bounce and held_above:
                     is_long = True
                     break
                     
-            # Short Setup: Broke PML, candle retested VWAP from below and rejected
+            # Short Setup: Broke PML, candle approached from below and retested VWAP as resistance and rejected
             if broke_pml and not is_long and not is_short:
+                approached_from_below = (c_open <= c_vwap * 1.002)
                 tested_vwap = (c_high >= c_vwap * 0.997)
                 confirmed_rejection = (c_close <= c_open) or (c_upper_wick / c_rng >= 0.20)
                 held_below = (c_close <= c_vwap * 1.002)
-                if tested_vwap and confirmed_rejection and held_below:
+                if approached_from_below and tested_vwap and confirmed_rejection and held_below:
                     is_short = True
                     break
                 
@@ -598,8 +600,14 @@ def bot_loop():
             if current_mins < earliest_trade_mins:
                 open_hr = earliest_trade_mins // 60
                 open_mn = earliest_trade_mins % 60
-                logger.info(f"Opening bell volatility buffer active (market settling until {open_hr}:{open_mn:02d} AM EST). Bot sleeping for 30s...")
+                logger.info(f"Opening bell buffer active (market settling until {open_hr}:{open_mn:02d} AM EST). Bot sleeping for 30s...")
                 time.sleep(30)
+                continue
+
+            latest_trade_mins = int(os.getenv("LATEST_TRADE_TIME_MINS", "660"))  # 11:00 AM ET morning window cutoff
+            if current_mins > latest_trade_mins:
+                logger.info(f"Morning VWAP retest entry window closed (after {latest_trade_mins // 60}:{latest_trade_mins % 60:02d} AM EST). Monitoring open positions only. Sleeping 60s...")
+                time.sleep(60)
                 continue
 
             logger.info("--- Starting 3-Sigma A+ Reversal Bot Cycle ---")
