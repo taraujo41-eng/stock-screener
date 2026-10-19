@@ -524,7 +524,7 @@ class PaperTrader:
 
     # ── Order Placement ─────────────────────────────────────────────
 
-    def place_option_order(self, ticker, signal_type, last_price, vwap_target=None, zone_summary=None, in_zone=False, setup_reason=None):
+    def place_option_order(self, ticker, signal_type, last_price, vwap_target=None, zone_summary=None, in_zone=False, setup_reason=None, hod=None, lod=None, pmh=None, pml=None, ema8=None):
         """
         Find the best option contract for the signal and place an order.
 
@@ -532,10 +532,15 @@ class PaperTrader:
             ticker: Stock symbol (e.g. "AAPL")
             signal_type: "bullish" or "bearish"
             last_price: Current stock price
-            vwap_target: Target VWAP price for take-profit (optional)
+            vwap_target: Target VWAP price for take-profit / entry (optional)
             zone_summary: Supply/Demand zone range string (optional)
             in_zone: Whether stock was inside an active zone (optional)
             setup_reason: Text description of the confluence setup (optional)
+            hod: High of Day at trigger
+            lod: Low of Day at trigger
+            pmh: Premarket High
+            pml: Premarket Low
+            ema8: 8 EMA at trigger
 
         Returns:
             dict with order details, or None on failure
@@ -686,6 +691,14 @@ class PaperTrader:
                 "entry_time": datetime.now(ny_tz).isoformat(),
                 "vwap_entry": vwap_target,
                 "vwap_target": None,
+                "ema8_entry": ema8,
+                "hod": hod,
+                "lod": lod,
+                "pmh": pmh,
+                "pml": pml,
+                "tp1_target": hod if signal_type == "bullish" else lod,
+                "tp1_hit": False,
+                "runner_active": False,
                 "stock_price_at_entry": last_price,
                 "quantity": self.max_contracts,
                 "dte": best["dte"],
@@ -775,30 +788,33 @@ class PaperTrader:
 
         return None
 
-    def close_position(self, trade_record, reason="manual"):
-        """Sell to close an open option position."""
+    def close_position(self, trade_record, exit_price=None, reason="manual", qty_to_close=None):
+        """Sell to close an open option position (supports full or partial exit)."""
         if not self._logged_in:
             return False
 
         try:
             instrument_id = trade_record.get("instrument_id")
+            total_qty = trade_record.get("quantity", 1)
+            close_qty = int(qty_to_close) if (qty_to_close and 1 <= int(qty_to_close) < total_qty) else total_qty
+            is_partial = (close_qty < total_qty)
 
             # Get current option quote for realistic exit price
-            exit_price = None
-            opt_q = self.get_trade_option_quote(trade_record)
-            if opt_q:
-                bid = opt_q.get("bid")
-                mid = opt_q.get("mid")
-                if bid is not None and bid > 0:
-                    exit_price = bid
-                elif mid is not None and mid > 0:
-                    exit_price = mid
+            if exit_price is None or exit_price <= 0:
+                opt_q = self.get_trade_option_quote(trade_record)
+                if opt_q:
+                    bid = opt_q.get("bid")
+                    mid = opt_q.get("mid")
+                    if bid is not None and bid > 0:
+                        exit_price = bid
+                    elif mid is not None and mid > 0:
+                        exit_price = mid
 
             client_order_id = str(uuid.uuid4())[:20]
 
             logger.info(
-                f"[PaperTrader] 📤 Closing position: {trade_record['ticker']} "
-                f"{trade_record['type']} ${trade_record['strike']} | Reason: {reason}"
+                f"[PaperTrader] 📤 Closing {'partial' if is_partial else 'full'} position: {trade_record['ticker']} "
+                f"{trade_record['type']} ${trade_record['strike']} | Qty: {close_qty}/{total_qty} | Reason: {reason}"
             )
 
             if getattr(self, "_is_real_paper_account", False) and instrument_id:
@@ -813,7 +829,7 @@ class PaperTrader:
                         "instrument_type": "OPTION",
                         "market": "US",
                         "side": "SELL",
-                        "qty": str(trade_record.get("quantity", 1)),
+                        "qty": str(close_qty),
                         "limit_price": str(exit_price) if exit_price else None,
                     }]
                 }]
@@ -828,41 +844,51 @@ class PaperTrader:
             else:
                 entry_p = trade_record.get("entry_price", 1.0)
                 if exit_price is None or exit_price <= 0:
-                    if reason == "take_profit":
+                    if reason in ("take_profit", "take_profit_hod_lod", "tp1_hod_lod"):
                         exit_price = round(entry_p * (1.0 + (self.take_profit_pct / 100.0)), 2)
-                    elif reason == "trailing_stop":
-                        exit_price = round(entry_p * 1.05, 2)
+                    elif reason in ("runner_exit_8ema", "trailing_stop"):
+                        exit_price = round(entry_p * 1.15, 2)
                     elif reason == "breakeven_stop":
                         exit_price = round(entry_p * 1.0, 2)
-                    elif reason == "stop_loss":
+                    elif reason in ("stop_loss", "stop_loss_vwap"):
                         exit_price = round(entry_p * (1.0 - (self.stop_loss_pct / 100.0)), 2)
                     elif reason == "time_stop":
                         exit_price = round(entry_p * 0.98, 2)
                     else:
                         exit_price = round(entry_p * 0.95, 2)
-                logger.info(f"[PaperTrader] 🛡️ [SIMULATION MODE] Simulated Close executed for {trade_record['ticker']} @ exit price ${exit_price:.2f}")
+                logger.info(f"[PaperTrader] 🛡️ [SIMULATION MODE] Simulated Close executed for {trade_record['ticker']} (Qty: {close_qty}) @ exit price ${exit_price:.2f}")
 
             # Update trade record
             ny_tz = get_ny_timezone()
             entry_price = trade_record.get("entry_price", 0)
-            qty = trade_record.get("quantity", 1)
-            pnl = ((exit_price or 0) - entry_price) * 100 * qty if exit_price is not None else 0.0
+            pnl = ((exit_price or 0) - entry_price) * 100 * close_qty if exit_price is not None else 0.0
 
             with self._lock:
-                trade_record["status"] = "closed"
-                trade_record["exit_price"] = exit_price
-                trade_record["exit_time"] = datetime.now(ny_tz).isoformat()
-                trade_record["exit_reason"] = reason
-                trade_record["pnl"] = round(pnl, 2)
-                self._open_positions = [
-                    p for p in self._open_positions if p.get("id") != trade_record.get("id")
-                ]
+                if is_partial:
+                    trade_record["quantity"] = total_qty - close_qty
+                    trade_record.setdefault("partial_exits", []).append({
+                        "exit_price": exit_price,
+                        "exit_time": datetime.now(ny_tz).isoformat(),
+                        "exit_reason": reason,
+                        "quantity": close_qty,
+                        "pnl": round(pnl, 2)
+                    })
+                    trade_record["pnl"] = round(trade_record.get("pnl", 0.0) + pnl, 2)
+                else:
+                    trade_record["status"] = "closed"
+                    trade_record["exit_price"] = exit_price
+                    trade_record["exit_time"] = datetime.now(ny_tz).isoformat()
+                    trade_record["exit_reason"] = reason
+                    trade_record["pnl"] = round(trade_record.get("pnl", 0.0) + pnl, 2)
+                    self._open_positions = [
+                        p for p in self._open_positions if p.get("id") != trade_record.get("id")
+                    ]
                 _save_trade_log(self._trade_log)
 
             pnl_str = f"${pnl:+.2f}" if pnl is not None else "unknown"
             logger.info(
                 f"[PaperTrader] {'🟢' if (pnl or 0) >= 0 else '🔴'} "
-                f"Closed {trade_record['ticker']} {trade_record['type']} | "
+                f"Closed {'partial' if is_partial else 'full'} {trade_record['ticker']} {trade_record['type']} | "
                 f"P&L: {pnl_str} | Reason: {reason}"
             )
             return True
@@ -909,7 +935,94 @@ class PaperTrader:
                         trade["peak_pnl_pct"] = round(pnl_pct, 2)
                         trade_log_dirty = True
 
-                # 2. Hard Stop-Loss
+                # ── Strategy 5-Minute Candle Exits (Stop Loss, TP1, TP2 Runner) ──
+                try:
+                    from data_fetcher import fetch_one
+                    df_bars = fetch_one(trade["ticker"], days=2, interval="5m", includePrePost="true")
+                    if df_bars is not None and len(df_bars) >= 5:
+                        today_date = df_bars.index[-1].date()
+                        today_df = df_bars[df_bars.index.date == today_date]
+                        rth_bars = today_df.between_time("09:30", "16:00")
+                        if len(rth_bars) >= 2:
+                            typical_price = (rth_bars["High"] + rth_bars["Low"] + rth_bars["Close"]) / 3.0
+                            cum_vol = rth_bars["Volume"].cumsum().replace(0, 1)
+                            vwap_s = (typical_price * rth_bars["Volume"]).cumsum() / cum_vol
+                            ema8_s = rth_bars["Close"].ewm(span=8, adjust=False).mean()
+
+                            # Last closed 5m candle
+                            last_closed = rth_bars.iloc[-2]
+                            c_close = float(last_closed["Close"])
+                            c_vwap = float(vwap_s.loc[last_closed.name]) if last_closed.name in vwap_s.index else float(vwap_s.iloc[-1])
+                            c_ema8 = float(ema8_s.loc[last_closed.name]) if last_closed.name in ema8_s.index else float(ema8_s.iloc[-1])
+                            curr_stock_p = float(rth_bars.iloc[-1]["Close"])
+                            sig = trade.get("signal_type", "bullish")
+
+                            # Rule 6: Stop Loss (5-minute candle close past VWAP)
+                            # Price wicking slightly past VWAP without a full 5m candle close does NOT trigger SL
+                            if sig == "bullish" and c_close < c_vwap:
+                                logger.warning(
+                                    f"[PaperTrader] 🛑 STRATEGY VWAP SL triggered on {trade['ticker']} | "
+                                    f"5m candle closed below VWAP (${c_close:.2f} < ${c_vwap:.2f})"
+                                )
+                                positions_to_close.append((trade, "stop_loss_vwap"))
+                                continue
+                            elif sig == "bearish" and c_close > c_vwap:
+                                logger.warning(
+                                    f"[PaperTrader] 🛑 STRATEGY VWAP SL triggered on {trade['ticker']} | "
+                                    f"5m candle closed above VWAP (${c_close:.2f} > ${c_vwap:.2f})"
+                                )
+                                positions_to_close.append((trade, "stop_loss_vwap"))
+                                continue
+
+                            # Rule 7: Take Profit 1 (HOD / LOD Reached)
+                            tp1_target = trade.get("tp1_target") or (trade.get("hod") if sig == "bullish" else trade.get("lod"))
+                            if not trade.get("tp1_hit") and tp1_target:
+                                hit_tp1 = (sig == "bullish" and curr_stock_p >= tp1_target) or \
+                                          (sig == "bearish" and curr_stock_p <= tp1_target)
+                                if hit_tp1:
+                                    qty = trade.get("quantity", 1)
+                                    if qty > 1:
+                                        # Scale out majority, hold runner
+                                        close_qty = qty - 1
+                                        logger.info(
+                                            f"[PaperTrader] 🎯 TAKE-PROFIT 1 (Target Reached) on {trade['ticker']} | "
+                                            f"Stock: ${curr_stock_p:.2f} reached {'HOD' if sig=='bullish' else 'LOD'} ${tp1_target:.2f} | "
+                                            f"Scaling out {close_qty} contract(s), holding runner on 8 EMA trail."
+                                        )
+                                        self.close_position(trade, reason="tp1_hod_lod", qty_to_close=close_qty)
+                                        trade["tp1_hit"] = True
+                                        trade["runner_active"] = True
+                                        trade_log_dirty = True
+                                        continue
+                                    else:
+                                        logger.info(
+                                            f"[PaperTrader] 🎯 TAKE-PROFIT 1 (HOD/LOD reached) on {trade['ticker']} | "
+                                            f"Stock: ${curr_stock_p:.2f} reached {'HOD' if sig=='bullish' else 'LOD'} ${tp1_target:.2f}"
+                                        )
+                                        positions_to_close.append((trade, "take_profit_hod_lod"))
+                                        continue
+
+                            # Rule 7: Take Profit 2 / Runner Exit (8 EMA Trail)
+                            # Close remaining runner when 5m candle closes past 8 EMA
+                            if trade.get("runner_active") or trade.get("tp1_hit"):
+                                if sig == "bullish" and c_close < c_ema8:
+                                    logger.info(
+                                        f"[PaperTrader] 🏃 RUNNER EXIT (8 EMA Trail) on {trade['ticker']} | "
+                                        f"5m candle closed below 8 EMA (${c_close:.2f} < ${c_ema8:.2f})"
+                                    )
+                                    positions_to_close.append((trade, "runner_exit_8ema"))
+                                    continue
+                                elif sig == "bearish" and c_close > c_ema8:
+                                    logger.info(
+                                        f"[PaperTrader] 🏃 RUNNER EXIT (8 EMA Trail) on {trade['ticker']} | "
+                                        f"5m candle closed above 8 EMA (${c_close:.2f} > ${c_ema8:.2f})"
+                                    )
+                                    positions_to_close.append((trade, "runner_exit_8ema"))
+                                    continue
+                except Exception as ex:
+                    logger.debug(f"[PaperTrader] 5m strategy exit check error for {trade['ticker']}: {ex}")
+
+                # 2. Hard Stop-Loss (Emergency capital protection)
                 if current_price and entry_price > 0:
                     loss_pct = -pnl_pct
                     if loss_pct >= self.stop_loss_pct:
