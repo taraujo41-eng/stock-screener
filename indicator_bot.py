@@ -426,7 +426,8 @@ def evaluate_ticker_process(ticker, df):
                 c_close = float(candle["Close"])
                 c_vwap = float(vwap_series.loc[candle.name]) if candle.name in vwap_series.index else current_vwap
                 
-                touched_vwap = (c_low <= c_vwap * 1.002) and (c_low >= c_vwap * 0.995)
+                # Strict touch requirement: Candle low must physically reach or cross VWAP
+                touched_vwap = (c_low <= c_vwap) and (c_low >= c_vwap * 0.992)
                 held_above = (c_close >= c_vwap)
                 if touched_vwap and held_above and close_price >= current_vwap:
                     is_long = True
@@ -447,7 +448,8 @@ def evaluate_ticker_process(ticker, df):
                 c_close = float(candle["Close"])
                 c_vwap = float(vwap_series.loc[candle.name]) if candle.name in vwap_series.index else current_vwap
                 
-                touched_vwap = (c_high >= c_vwap * 0.998) and (c_high <= c_vwap * 1.005)
+                # Strict touch requirement: Candle high must physically reach or cross VWAP
+                touched_vwap = (c_high >= c_vwap) and (c_high <= c_vwap * 1.008)
                 held_below = (c_close <= c_vwap)
                 if touched_vwap and held_below and close_price <= current_vwap:
                     is_short = True
