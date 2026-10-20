@@ -399,6 +399,10 @@ def evaluate_ticker_process(ticker, df):
         # Long Filter: Only take long/call trades if price is above VWAP. Never long below VWAP.
         # Short Filter: Only take short/put trades if price is below VWAP. Never short above VWAP.
         
+        # Strict Rule: Never take any trade if price is trapped between Premarket Low and Premarket High (Chop Zone)
+        if pm_low <= close_price <= pm_high:
+            return None
+
         # Check breakout conditions during RTH (A 5-minute candle closes past PMH / PML)
         has_closed_above_pmh = bool((rth_bars["Close"] > pm_high).any())
         has_closed_below_pml = bool((rth_bars["Close"] < pm_low).any())
@@ -416,9 +420,10 @@ def evaluate_ticker_process(ticker, df):
         # 4. Long Entry Criteria (Buy / Call)
         # - Breakout Condition: A 5-minute candle closes above PMH
         # - VWAP Alignment: The VWAP line is above PMH
+        # - Range Filter: Price must be strictly above PMH (Never trade inside PM range)
         # - Long Filter: Price is strictly above VWAP (Never long below VWAP)
         # - Pullback Signal: Price pulls back down to test or touch the VWAP line
-        if has_closed_above_pmh and current_vwap > pm_high and close_price >= current_vwap:
+        if has_closed_above_pmh and current_vwap > pm_high and close_price > pm_high and close_price >= current_vwap:
             for candle in candles_to_evaluate:
                 c_high = float(candle["High"])
                 c_low = float(candle["Low"])
@@ -438,9 +443,10 @@ def evaluate_ticker_process(ticker, df):
         # 5. Short Entry Criteria (Sell Short / Put)
         # - Breakdown Condition: A 5-minute candle closes below PML
         # - VWAP Alignment: The VWAP line is below PML
+        # - Range Filter: Price must be strictly below PML (Never trade inside PM range)
         # - Short Filter: Price is strictly below VWAP (Never short above VWAP)
         # - Pullback Signal: Price rallies up to test or touch the VWAP line
-        if has_closed_below_pml and current_vwap < pm_low and close_price <= current_vwap and not is_long:
+        if has_closed_below_pml and current_vwap < pm_low and close_price < pm_low and close_price <= current_vwap and not is_long:
             for candle in candles_to_evaluate:
                 c_high = float(candle["High"])
                 c_low = float(candle["Low"])
