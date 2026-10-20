@@ -162,14 +162,14 @@ def send_sms_notification(message):
         logger.error(f"Failed to send SMS notification: {e}")
 
 def send_telegram_notification(message):
-    """Sends a notification to Telegram."""
+    """Sends a notification to Telegram with plain text fallback if HTML formatting fails."""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
         return
         
     try:
-        import requests
+        import requests, re
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         payload = {
             "chat_id": chat_id,
@@ -178,7 +178,18 @@ def send_telegram_notification(message):
         }
         resp = requests.post(url, json=payload, timeout=10)
         if resp.status_code != 200:
-            logger.error(f"Telegram API error: {resp.text}")
+            logger.error(f"Telegram API error: {resp.text}. Retrying with plain text fallback...")
+            # Fallback: Strip HTML tags and send as plain text so the alert is NEVER dropped
+            plain_text = re.sub(r'<[^>]+>', '', message)
+            fb_payload = {
+                "chat_id": chat_id,
+                "text": plain_text
+            }
+            fb_resp = requests.post(url, json=fb_payload, timeout=10)
+            if fb_resp.status_code == 200:
+                logger.info("Telegram alert delivered successfully via plain text fallback.")
+            else:
+                logger.error(f"Telegram fallback failed: {fb_resp.text}")
     except Exception as e:
         logger.error(f"Failed to send Telegram notification: {e}")
 
@@ -233,6 +244,11 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
         )
         send_sms_notification(sms_msg)
         
+    # Helper to escape HTML characters in dynamic data
+    def _esc(val):
+        if val is None: return ""
+        return str(val).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
     # 2. Send Telegram Reversal Notification (only if reversal alerts explicitly enabled)
     if send_reversal_alert and alert_method in ("TELEGRAM", "BOTH"):
         rsi_formatted = f"{rsi:.1f}" if rsi is not None else "N/A"
@@ -240,14 +256,14 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
         tg_msg = (
             f"🚨 <b>{grade_icon} {grade_str} STRATEGY ALERT: {ticker}</b> 🚨\n\n"
             f"<b>Action:</b> {action} ({signal_type.upper()})\n"
-            f"<b>Setup:</b> {reason or (action + ' Retest')}\n"
+            f"<b>Setup:</b> {_esc(reason or (action + ' Retest'))}\n"
             f"<b>Price:</b> ${last_price:.2f}\n"
             f"<b>VWAP Retest Level:</b> ${vwap_target:.2f}\n"
             f"<b>8 EMA:</b> ${ema8:.2f}\n"
-            f"<b>TP1 (Majority Exit):</b> 🎯 {tp1_label}\n"
-            f"<b>TP2 (Runner Trail):</b> 🏃 {runner_label}\n"
-            f"<b>Stop Loss:</b> 🛑 {sl_label}\n"
-            f"<b>Suggested Option:</b> {opt_str}"
+            f"<b>TP1 (Majority Exit):</b> 🎯 {_esc(tp1_label)}\n"
+            f"<b>TP2 (Runner Trail):</b> 🏃 {_esc(runner_label)}\n"
+            f"<b>Stop Loss:</b> 🛑 {_esc(sl_label)}\n"
+            f"<b>Suggested Option:</b> {_esc(opt_str)}"
         )
         send_telegram_notification(tg_msg)
     
@@ -295,15 +311,15 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                     rvol_formatted = f"{rvol:.1f}x" if rvol is not None else "N/A"
                     tg_trade = (
                         f"📈 <b>{grade_icon} {grade_str} {zone_title} TRADE PLACED: {ticker}</b>\n\n"
-                        f"<b>Option:</b> {result.get('type', '')} ${result.get('strike', '')} ({result.get('option_symbol', '')})\n"
+                        f"<b>Option:</b> {result.get('type', '')} ${result.get('strike', '')} ({_esc(result.get('option_symbol', ''))})\n"
                         f"<b>Entry Price:</b> ${result.get('entry_price', 0):.2f}\n"
                         f"<b>Qty:</b> {result.get('quantity', 1)} contract(s)\n"
                         f"<b>Stock Price:</b> ${last_price:.2f} | <b>VWAP:</b> ${vwap_target:.2f} | <b>8 EMA:</b> ${ema8:.2f}\n"
-                        f"<b>TP1 (Majority Exit):</b> 🎯 {tp1_label}\n"
-                        f"<b>TP2 (Runner Trail):</b> 🏃 {runner_label}\n"
-                        f"<b>Stop Loss:</b> 🛑 {sl_label}\n"
-                        f"<b>Setup:</b> {reason or action}\n"
-                        f"<b>Mode:</b> {mode_str}"
+                        f"<b>TP1 (Majority Exit):</b> 🎯 {_esc(tp1_label)}\n"
+                        f"<b>TP2 (Runner Trail):</b> 🏃 {_esc(runner_label)}\n"
+                        f"<b>Stop Loss:</b> 🛑 {_esc(sl_label)}\n"
+                        f"<b>Setup:</b> {_esc(reason or action)}\n"
+                        f"<b>Mode:</b> {_esc(mode_str)}"
                     )
                     send_telegram_notification(tg_trade)
     except Exception as e:

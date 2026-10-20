@@ -422,7 +422,7 @@ class PaperTrader:
         for trade in self._trade_log.get("trades", []):
             exit_time_str = trade.get("exit_time") or ""
             if exit_time_str.startswith(today_str) and trade.get("status") == "closed":
-                total_pnl += float(trade.get("pnl", 0.0))
+                total_pnl += float(trade.get("pnl") or 0.0)
         return total_pnl
 
     def _last_entry_time(self):
@@ -873,13 +873,13 @@ class PaperTrader:
                         "quantity": close_qty,
                         "pnl": round(pnl, 2)
                     })
-                    trade_record["pnl"] = round(trade_record.get("pnl", 0.0) + pnl, 2)
+                    trade_record["pnl"] = round((trade_record.get("pnl") or 0.0) + (pnl or 0.0), 2)
                 else:
                     trade_record["status"] = "closed"
                     trade_record["exit_price"] = exit_price
                     trade_record["exit_time"] = datetime.now(ny_tz).isoformat()
                     trade_record["exit_reason"] = reason
-                    trade_record["pnl"] = round(trade_record.get("pnl", 0.0) + pnl, 2)
+                    trade_record["pnl"] = round((trade_record.get("pnl") or 0.0) + (pnl or 0.0), 2)
                     self._open_positions = [
                         p for p in self._open_positions if p.get("id") != trade_record.get("id")
                     ]
@@ -891,6 +891,24 @@ class PaperTrader:
                 f"Closed {'partial' if is_partial else 'full'} {trade_record['ticker']} {trade_record['type']} | "
                 f"P&L: {pnl_str} | Reason: {reason}"
             )
+
+            # Send Telegram Exit Notification
+            try:
+                from indicator_bot import send_telegram_notification
+                exit_icon = "🎯" if (pnl or 0) >= 0 else "🛑"
+                pnl_pct_val = ((exit_price - entry_price) / entry_price * 100) if entry_price and exit_price else 0.0
+                exit_msg = (
+                    f"{exit_icon} <b>POSITION CLOSED: {trade_record['ticker']}</b>\n\n"
+                    f"<b>Option:</b> {trade_record.get('type', '')} ${trade_record.get('strike', '')} ({trade_record.get('option_symbol', '')})\n"
+                    f"<b>Entry:</b> ${entry_price:.2f} | <b>Exit:</b> ${exit_price:.2f}\n"
+                    f"<b>P&L:</b> {pnl_str} ({pnl_pct_val:+.1f}%)\n"
+                    f"<b>Type:</b> {'Partial (Scale Out)' if is_partial else 'Full Exit'}\n"
+                    f"<b>Reason:</b> {reason.replace('_', ' ').title()}"
+                )
+                send_telegram_notification(exit_msg)
+            except Exception as notify_err:
+                logger.warning(f"Failed to send exit notification: {notify_err}")
+
             return True
 
         except Exception as e:
