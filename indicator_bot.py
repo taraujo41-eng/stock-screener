@@ -197,6 +197,13 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
     bb_mult = os.getenv("BB_MULT", "2.5")
     grade_str = grade or ("A+" if (score and score >= 12) else "A")
     grade_icon = "⭐️" if grade_str == "A+" else "🔥"
+
+    # Strictly enforce: Only make trades that are A+ setups
+    only_a_plus = os.getenv("ONLY_A_PLUS_SETUPS", "true").lower() in ("true", "1", "yes")
+    if only_a_plus and grade_str != "A+":
+        logger.info(f"[{ticker}] ⚠️ Skipping trade execution: Grade {grade_str} is not A+.")
+        return False
+
     logger.info(f"🔔 {grade_str} SIGNAL TRIGGERED on {ticker}: {action} | Setup: {reason} | Price={last_price:.2f}, VWAP={vwap_target:.2f}, 8EMA={f'{ema8:.2f}' if ema8 else 'N/A'}")
     
     alert_method = os.getenv("ALERT_METHOD", "TELEGRAM").upper()
@@ -268,6 +275,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
         send_telegram_notification(tg_msg)
     
     # 3. Place Paper Trade & Send Execution Notification
+    trade_executed = False
     try:
         from paper_trader import get_paper_trader
         pt = get_paper_trader()
@@ -288,6 +296,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                 ema8=ema8
             )
             if result:
+                trade_executed = True
                 mode_str = result.get('mode', 'Simulation')
                 zone_title = f"{'DEMAND' if signal_type == 'bullish' else 'SUPPLY'} ZONE" if in_zone else "VWAP RETEST"
                 logger.info(f"📈 {grade_str} {zone_title} Paper trade placed for {ticker}: {result.get('option_symbol', '')} @ ${result.get('entry_price', 0):.2f} ({mode_str})")
@@ -322,10 +331,14 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                         f"<b>Mode:</b> {_esc(mode_str)}"
                     )
                     send_telegram_notification(tg_trade)
+        else:
+            trade_executed = True
     except Exception as e:
         logger.error(f"Paper trade error for {ticker}: {e}")
         import traceback
         traceback.print_exc()
+
+    return trade_executed
 
 def evaluate_ticker_process(ticker, df):
     """
@@ -361,7 +374,7 @@ def evaluate_ticker_process(ticker, df):
         if len(pm_bars) == 0 or len(rth_bars) < 2:
             return None
 
-        # 2. Execution Window: First 60 to 90 minutes of the market open (09:30 to 11:00 ET)
+        # 2. Execution Window: Open market hours (09:30 to 15:55 ET, no morning cutoff)
         last_dt = rth_bars.index[-1]
         ny_tz = get_ny_timezone()
         if hasattr(last_dt, "tzinfo") and last_dt.tzinfo is not None:
@@ -369,7 +382,8 @@ def evaluate_ticker_process(ticker, df):
         else:
             dt_ny = last_dt
         mins_from_midnight = dt_ny.hour * 60 + dt_ny.minute
-        if mins_from_midnight < 570 or mins_from_midnight > 660:
+        latest_mins = int(os.getenv("LATEST_TRADE_TIME_MINS", "955"))
+        if mins_from_midnight < 570 or mins_from_midnight > latest_mins:
             return None
             
         # 3. Key Levels to Calculate Daily
@@ -677,9 +691,20 @@ def bot_loop():
                 time.sleep(30)
                 continue
 
-            latest_trade_mins = int(os.getenv("LATEST_TRADE_TIME_MINS", "660"))  # 11:00 AM ET morning window cutoff
+            # Check daily trade limit (max 5 trades/day) before scanning
+            try:
+                from paper_trader import get_paper_trader
+                pt = get_paper_trader()
+                if pt.enabled and pt._daily_trade_count() >= pt.max_daily_trades:
+                    logger.info(f"Daily limit of {pt.max_daily_trades} trades reached for today ({pt._daily_trade_count()}/{pt.max_daily_trades}). Monitoring open positions only. Sleeping 60s...")
+                    time.sleep(60)
+                    continue
+            except Exception:
+                pass
+
+            latest_trade_mins = int(os.getenv("LATEST_TRADE_TIME_MINS", "955"))  # 3:55 PM ET EOD cutoff (no morning cutoff)
             if current_mins > latest_trade_mins:
-                logger.info(f"Morning VWAP retest entry window closed (after {latest_trade_mins // 60}:{latest_trade_mins % 60:02d} AM EST). Monitoring open positions only. Sleeping 60s...")
+                logger.info(f"Market session closing soon (after {latest_trade_mins // 60}:{latest_trade_mins % 60:02d} PM EST). Monitoring open positions only. Sleeping 60s...")
                 time.sleep(60)
                 continue
 
@@ -764,12 +789,19 @@ def bot_loop():
                             "MACD": res.get('macd_status', 'Neutral'),
                         })
 
+                        # Strictly enforce ONLY A+ setups
+                        grade = res.get('grade')
+                        score = res.get('score', 0)
+                        if grade != "A+" and score < 12:
+                            logger.info(f"[{ticker}] ⚠️ Skipping non-A+ setup (Grade: {grade}, Score: {score})")
+                            continue
+
                         direction = res['action']  # "BUY" or "SELL"
                         if _already_alerted_today(ticker, direction):
                             skipped_count += 1
                             continue
                             
-                        trigger_alerts(
+                        placed = trigger_alerts(
                             ticker=ticker,
                             action=res['action'],
                             signal_type=res['type'],
@@ -792,8 +824,9 @@ def bot_loop():
                             ema8=res.get('ema8'),
                             confluence=res.get('confluence')
                         )
-                        _record_alert(ticker, direction, res['price'])
-                        triggered_count += 1
+                        if placed:
+                            _record_alert(ticker, direction, res['price'])
+                            triggered_count += 1
 
                 # Save 3-sigma scan results for web UI persistence
                 try:

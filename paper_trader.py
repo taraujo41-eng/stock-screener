@@ -125,11 +125,11 @@ class PaperTrader:
         self.enabled = _cfg("PAPER_TRADE_ENABLED", "true", bool)
         self.starting_balance = _cfg("PAPER_STARTING_BALANCE", "3000.0", float)
         self.max_contracts = _cfg("PAPER_MAX_CONTRACTS", "1", int)
-        self.max_risk_per_trade = _cfg("PAPER_MAX_RISK_PER_TRADE", "500", float)
+        self.max_risk_per_trade = _cfg("PAPER_MAX_RISK_PER_TRADE", "0", float)  # 0 = disabled, bounded by available funds
         self.max_open_positions = _cfg("PAPER_MAX_OPEN_POSITIONS", "5", int)
-        self.max_daily_trades = _cfg("PAPER_MAX_DAILY_TRADES", "10", int)
+        self.max_daily_trades = _cfg("PAPER_MAX_DAILY_TRADES", "5", int)
         self.max_daily_loss = _cfg("PAPER_MAX_DAILY_LOSS", "150.0", float)
-        self.min_entry_interval_secs = _cfg("PAPER_MIN_ENTRY_INTERVAL_SECS", "300", int)
+        self.min_entry_interval_secs = _cfg("PAPER_MIN_ENTRY_INTERVAL_SECS", "60", int)
         self.stop_loss_pct = _cfg("PAPER_STOP_LOSS_PCT", "20", float)
         self.take_profit_vwap = _cfg("PAPER_TAKE_PROFIT_VWAP", "false", bool)
         self.vwap_min_profit_pct = _cfg("PAPER_VWAP_MIN_PROFIT_PCT", "5", float)
@@ -445,6 +445,28 @@ class PaperTrader:
         """Count currently tracked open positions."""
         return len([p for p in self.get_open_positions() if p.get("status") == "open"])
 
+    def get_available_funds(self):
+        """Returns the current available cash / buying power in the account."""
+        acc = self.get_account()
+        if not acc:
+            return getattr(self, "starting_balance", 3000.0)
+        
+        for field in ["total_cash_balance", "buying_power", "usable_cash", "day_buying_power", "cash_balance"]:
+            val = acc.get(field)
+            if val is not None:
+                try:
+                    return float(val)
+                except (ValueError, TypeError):
+                    pass
+        if isinstance(acc, dict) and "account_members" in acc:
+            for member in acc.get("account_members", []):
+                if member.get("key") in ("usable_cash", "day_buying_power", "total_cash_balance"):
+                    try:
+                        return float(member.get("value", 0))
+                    except (ValueError, TypeError):
+                        pass
+        return getattr(self, "starting_balance", 3000.0)
+
     def _check_risk_limits(self, ask_price):
         """
         Validate that placing a new trade doesn't violate risk controls.
@@ -474,9 +496,12 @@ class PaperTrader:
             return False, f"Max open positions reached ({self.max_open_positions})"
 
         if ask_price and ask_price > 0:
-            total_cost = ask_price * 100 * self.max_contracts
-            if total_cost > self.max_risk_per_trade:
-                return False, f"Trade cost ${total_cost:.0f} exceeds max risk ${self.max_risk_per_trade:.0f}"
+            single_cost = ask_price * 100
+            available_funds = self.get_available_funds()
+            if single_cost > available_funds:
+                return False, f"Single contract cost ${single_cost:.0f} exceeds account available funds (${available_funds:.2f})"
+            if self.max_risk_per_trade > 0 and single_cost > self.max_risk_per_trade:
+                return False, f"Trade cost ${single_cost:.0f} exceeds max risk ${self.max_risk_per_trade:.0f}"
         return True, "OK"
 
     # ── Option Contract Discovery ───────────────────────────────────
@@ -633,11 +658,19 @@ class PaperTrader:
 
             # 4. Place the order
             client_order_id = str(uuid.uuid4())[:20]
+            available_funds = self.get_available_funds()
+            single_cost = ask_price * 100
+            desired_qty = max(1, self.max_contracts)
+            if single_cost * desired_qty > available_funds:
+                order_qty = max(1, int(available_funds // single_cost))
+                logger.info(f"[PaperTrader] Sizing down {ticker} from {desired_qty} to {order_qty} contract(s) to fit available funds (${available_funds:.2f})")
+            else:
+                order_qty = desired_qty
 
             if getattr(self, "_is_real_paper_account", False):
                 logger.info(
                     f"[PaperTrader] 📝 Placing Webull Paper API BUY order: {best['type']} on {ticker} | "
-                    f"Strike ${best['strike']} | Qty {self.max_contracts} | "
+                    f"Strike ${best['strike']} | Qty {order_qty} | "
                     f"Limit ${best['mid']:.2f} | instrument_id={instrument_id}"
                 )
 
@@ -652,7 +685,7 @@ class PaperTrader:
                         "instrument_type": "OPTION",
                         "market": "US",
                         "side": "BUY",
-                        "qty": str(self.max_contracts),
+                        "qty": str(order_qty),
                         "limit_price": str(best["mid"]),
                     }]
                 }]
@@ -667,7 +700,7 @@ class PaperTrader:
             else:
                 logger.info(
                     f"[PaperTrader] 🛡️ [SIMULATION MODE] Executing Simulated Paper BUY: {best['type']} on {ticker} | "
-                    f"Strike ${best['strike']} | Qty {self.max_contracts} | "
+                    f"Strike ${best['strike']} | Qty {order_qty} | "
                     f"Simulated Fill Price ${best['mid']:.2f}"
                 )
                 result = {"mode": "100% Safe Local Simulation", "status": "FILLED", "fill_price": best["mid"]}
@@ -700,7 +733,7 @@ class PaperTrader:
                 "tp1_hit": False,
                 "runner_active": False,
                 "stock_price_at_entry": last_price,
-                "quantity": self.max_contracts,
+                "quantity": order_qty,
                 "dte": best["dte"],
                 "expiration": best.get("exp", ""),
                 "zone": zone_summary,
