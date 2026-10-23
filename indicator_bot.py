@@ -437,25 +437,21 @@ def evaluate_ticker_process(ticker, df):
         # - VWAP Alignment: The VWAP line is above PMH
         # - Range Filter: Current price must be strictly above PMH (Never trade inside PM range)
         # - Long Filter: Price is strictly above VWAP (Never long below VWAP)
-        # - VWAP Proximity: Price must currently be testing / hitting VWAP (within 0.35% of VWAP)
-        # - Pullback Signal: Price pulls back down to test or touch the VWAP line
-        is_near_vwap_long = (close_price >= current_vwap) and (close_price <= current_vwap * 1.0035)
-        if has_closed_above_pmh and current_vwap > pm_high and close_price > pm_high and is_near_vwap_long:
+        # New Long Entry Rules (per user request)
+        # 1. Price must be above both Pre‑Market High (PMH) and current VWAP.
+        # 2. A prior 5‑minute candle must have closed above PMH (breakout condition already tracked by has_closed_above_pmh).
+        # 3. Wait for a 5‑minute candle that **touches** VWAP (low <= VWAP <= high). Once touched, enter long.
+        # 4. Stop‑loss and take‑profit percentages are configured elsewhere (default 20%).
+        price_above_pmh = close_price > pm_high
+        price_above_vwap = close_price > current_vwap
+        if has_closed_above_pmh and price_above_pmh and price_above_vwap:
             for candle in candles_to_evaluate:
-                c_high = float(candle["High"])
                 c_low = float(candle["Low"])
-                c_open = float(candle["Open"])
-                c_close = float(candle["Close"])
-                c_vwap = float(vwap_series.loc[candle.name]) if candle.name in vwap_series.index else current_vwap
-                
-                # Pullback requirement: Candle pulled back from above VWAP to touch/test VWAP support
-                approached_from_above = (c_open >= c_vwap * 0.998) or (c_high > c_vwap)
-                touched_vwap = (c_low <= c_vwap) and (c_low >= c_vwap * 0.992)
-                held_above = (c_close >= c_vwap)
-                if approached_from_above and touched_vwap and held_above:
+                c_high = float(candle["High"])
+                # VWAP touch condition
+                if c_low <= current_vwap <= c_high:
                     is_long = True
-                    dual_test = abs(c_low - pm_high) / pm_high <= 0.003
-                    confluence_tag = "★ Dual VWAP + PMH Retest (Highest Conviction)" if dual_test else "VWAP Tap Retest"
+                    confluence_tag = "VWAP Touch Long"
                     break
 
         # 5. Short Entry Criteria (Sell Short / Put)
@@ -463,25 +459,21 @@ def evaluate_ticker_process(ticker, df):
         # - VWAP Alignment: The VWAP line is below PML
         # - Range Filter: Current price must be strictly below PML (Never trade inside PM range)
         # - Short Filter: Price is strictly below VWAP (Never short above VWAP)
-        # - VWAP Proximity: Price must currently be testing / hitting VWAP (within 0.35% of VWAP)
-        # - Pullback Signal: Price rallies up to test or touch the VWAP line
-        is_near_vwap_short = (close_price <= current_vwap) and (close_price >= current_vwap * 0.9965)
-        if has_closed_below_pml and current_vwap < pm_low and close_price < pm_low and is_near_vwap_short and not is_long:
+# New Short Entry Rules (per user request)
+        # 1. Price must be below both Pre‑Market Low (PML) and current VWAP.
+        # 2. A prior 5‑minute candle must have closed below PML (breakdown condition already tracked by has_closed_below_pml).
+        # 3. Wait for a 5‑minute candle that **touches** VWAP (low <= VWAP <= high). Once touched, enter short.
+        # 4. Stop‑loss and take‑profit percentages are configured elsewhere (default 20%).
+        price_below_pml = close_price < pm_low
+        price_below_vwap = close_price < current_vwap
+        if has_closed_below_pml and price_below_pml and price_below_vwap:
             for candle in candles_to_evaluate:
-                c_high = float(candle["High"])
                 c_low = float(candle["Low"])
-                c_open = float(candle["Open"])
-                c_close = float(candle["Close"])
-                c_vwap = float(vwap_series.loc[candle.name]) if candle.name in vwap_series.index else current_vwap
-                
-                # Pullback requirement: Candle bounced from below VWAP to touch/test VWAP resistance
-                approached_from_below = (c_open <= c_vwap * 1.002) or (c_low < c_vwap)
-                touched_vwap = (c_high >= c_vwap) and (c_high <= c_vwap * 1.008)
-                held_below = (c_close <= c_vwap)
-                if approached_from_below and touched_vwap and held_below:
+                c_high = float(candle["High"])
+                # VWAP touch condition
+                if c_low <= current_vwap <= c_high:
                     is_short = True
-                    dual_test = abs(c_high - pm_low) / pm_low <= 0.003
-                    confluence_tag = "★ Dual VWAP + PML Retest (Highest Conviction)" if dual_test else "VWAP Tap Retest"
+                    confluence_tag = "VWAP Touch Short"
                     break
                     
         if not (is_long or is_short):
