@@ -444,33 +444,26 @@ def evaluate_ticker_process(ticker, df):
         # 4. Stop‑loss and take‑profit percentages are configured elsewhere (default 20%).
         price_above_pmh = close_price > pm_high
         price_above_vwap = close_price > current_vwap
-        if has_closed_above_pmh and price_above_pmh and price_above_vwap:
+        if price_above_pmh and price_above_vwap:
             for candle in candles_to_evaluate:
                 c_low = float(candle["Low"])
                 c_high = float(candle["High"])
-                # VWAP touch condition
+                # VWAP touch condition (candle physically touches VWAP)
                 if c_low <= current_vwap <= c_high:
                     is_long = True
                     confluence_tag = "VWAP Touch Long"
                     break
 
         # 5. Short Entry Criteria (Sell Short / Put)
-        # - Breakdown Condition: A 5-minute candle closed below PML
-        # - VWAP Alignment: The VWAP line is below PML
-        # - Range Filter: Current price must be strictly below PML (Never trade inside PM range)
-        # - Short Filter: Price is strictly below VWAP (Never short above VWAP)
-# New Short Entry Rules (per user request)
         # 1. Price must be below both Pre‑Market Low (PML) and current VWAP.
-        # 2. A prior 5‑minute candle must have closed below PML (breakdown condition already tracked by has_closed_below_pml).
-        # 3. Wait for a 5‑minute candle that **touches** VWAP (low <= VWAP <= high). Once touched, enter short.
-        # 4. Stop‑loss and take‑profit percentages are configured elsewhere (default 20%).
+        # 2. Wait for a 5‑minute candle that **touches** VWAP (low <= VWAP <= high). Once touched, enter short.
         price_below_pml = close_price < pm_low
         price_below_vwap = close_price < current_vwap
-        if has_closed_below_pml and price_below_pml and price_below_vwap:
+        if price_below_pml and price_below_vwap and not is_long:
             for candle in candles_to_evaluate:
                 c_low = float(candle["Low"])
                 c_high = float(candle["High"])
-                # VWAP touch condition
+                # VWAP touch condition (candle physically touches VWAP)
                 if c_low <= current_vwap <= c_high:
                     is_short = True
                     confluence_tag = "VWAP Touch Short"
