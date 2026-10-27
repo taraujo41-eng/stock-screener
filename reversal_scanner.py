@@ -1177,17 +1177,28 @@ def find_best_option(ticker, signal_type, last_price):
     """
     try:
         max_spread_pct = float(os.getenv("OPTIONS_MAX_SPREAD_PCT", "6.0"))
-        min_dte = int(os.getenv("OPTIONS_MIN_DTE", "7"))
-        max_dte = int(os.getenv("OPTIONS_MAX_DTE", "28"))
+        min_dte = int(os.getenv("OPTIONS_MIN_DTE", "0"))
+        max_dte = int(os.getenv("OPTIONS_MAX_DTE", "14"))
         chain_meta = fetch_options_chain(ticker)
         valid_exps = []
-        now = time.time()
+        
+        try:
+            from zoneinfo import ZoneInfo
+            ny_tz = ZoneInfo("America/New_York")
+        except Exception:
+            import pytz
+            ny_tz = pytz.timezone("America/New_York")
+        today_date = datetime.now(ny_tz).date()
         
         if chain_meta and chain_meta.get("expirations"):
             for exp in chain_meta.get("expirations", []):
-                dte = (exp - now) / 86400
+                try:
+                    exp_date = datetime.fromtimestamp(exp, tz=ny_tz).date()
+                except Exception:
+                    exp_date = datetime.fromtimestamp(exp).date()
+                dte = (exp_date - today_date).days
                 if min_dte <= dte <= max_dte:
-                    valid_exps.append(exp)
+                    valid_exps.append((exp, dte))
         
         if not valid_exps:
             return None
@@ -1195,9 +1206,8 @@ def find_best_option(ticker, signal_type, last_price):
         best_contract = None
         best_score = -1
         
-        # Scan valid expirations (prioritizing 7-28 DTE sweet spot for intraday day trades)
-        for exp_ts in valid_exps[:6]:
-            dte_days = max(1, int((exp_ts - now) / 86400))
+        # Scan valid expirations (prioritizing 0-14 DTE for intraday day trades)
+        for exp_ts, dte_days in valid_exps[:6]:
             chain = fetch_options_for_expiration(ticker, exp_ts)
             if not chain:
                 continue
