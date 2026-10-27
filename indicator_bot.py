@@ -161,37 +161,61 @@ def send_sms_notification(message):
     except Exception as e:
         logger.error(f"Failed to send SMS notification: {e}")
 
-def send_telegram_notification(message):
-    """Sends a notification to Telegram with plain text fallback if HTML formatting fails."""
+def send_telegram_notification(message, max_retries=3):
+    """Sends a notification to Telegram with automatic retries and plain text fallback."""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
-        return
+        return False
         
-    try:
-        import requests, re
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        payload = {
-            "chat_id": chat_id,
-            "text": message,
-            "parse_mode": "HTML"
-        }
-        resp = requests.post(url, json=payload, timeout=10)
-        if resp.status_code != 200:
-            logger.error(f"Telegram API error: {resp.text}. Retrying with plain text fallback...")
-            # Fallback: Strip HTML tags and send as plain text so the alert is NEVER dropped
-            plain_text = re.sub(r'<[^>]+>', '', message)
-            fb_payload = {
-                "chat_id": chat_id,
-                "text": plain_text
-            }
-            fb_resp = requests.post(url, json=fb_payload, timeout=10)
+    import requests, re
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "HTML"
+    }
+    
+    # 1. Try sending with HTML formatting (retrying on timeouts/network drops)
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = requests.post(url, json=payload, timeout=(5, 25))
+            if resp.status_code == 200:
+                logger.info(f"Telegram alert delivered successfully (attempt {attempt}).")
+                return True
+            else:
+                logger.warning(f"Telegram API non-200 (attempt {attempt}): {resp.status_code} {resp.text}")
+                # If Telegram rejected HTML markup (e.g. parse error), break early to plain text
+                break
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as net_err:
+            logger.warning(f"Telegram timeout/network error (attempt {attempt}/{max_retries}): {net_err}")
+            if attempt < max_retries:
+                time.sleep(2)
+        except Exception as e:
+            logger.error(f"Telegram error on attempt {attempt}: {e}")
+            if attempt < max_retries:
+                time.sleep(2)
+
+    # 2. Plain text fallback if HTML or network had issues
+    plain_text = re.sub(r'<[^>]+>', '', message)
+    fb_payload = {
+        "chat_id": chat_id,
+        "text": plain_text
+    }
+    for attempt in range(1, max_retries + 1):
+        try:
+            fb_resp = requests.post(url, json=fb_payload, timeout=(5, 25))
             if fb_resp.status_code == 200:
                 logger.info("Telegram alert delivered successfully via plain text fallback.")
+                return True
             else:
-                logger.error(f"Telegram fallback failed: {fb_resp.text}")
-    except Exception as e:
-        logger.error(f"Failed to send Telegram notification: {e}")
+                logger.error(f"Telegram fallback failed (attempt {attempt}): {fb_resp.text}")
+        except Exception as fb_err:
+            logger.error(f"Telegram fallback error (attempt {attempt}/{max_retries}): {fb_err}")
+            if attempt < max_retries:
+                time.sleep(2)
+                
+    return False
 
 def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=None, reason=None, score=None, grade=None, rvol=None, zone_summary=None, in_zone=False, sentiment_align=None, market_sentiment_summary=None, tech_trend=None, hod=None, lod=None, pm_high=None, pm_low=None, ema8=None, confluence=None):
     bb_mult = os.getenv("BB_MULT", "2.5")
