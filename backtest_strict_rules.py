@@ -159,19 +159,20 @@ def run_backtest(target_date_str="2026-10-23", tickers=None):
                         active_trade = None
                         continue
 
-                # Scan for new signals
-                if not in_position:
+                    # Check prior breakout/breakdown conditions
+                    prior_bars = rth_bars.iloc[:i]
+                    has_closed_above_pmh = bool((prior_bars["Close"] > pm_high).any()) if len(prior_bars) > 0 else False
+                    has_closed_below_pml = bool((prior_bars["Close"] > pm_low).any()) if len(prior_bars) > 0 else False
+
                     # 1. Chop Zone Filter: Never trade inside Premarket range
                     if pm_low <= c_close <= pm_high:
                         continue
                         
-                    # 2. VWAP Touch Condition: Candle low <= VWAP <= high
-                    touched_vwap = (c_low <= c_vwap <= c_high)
-                    if not touched_vwap:
-                        continue
-                        
-                    # 3. Long Condition: Price > PMH and Price > VWAP
-                    if c_close > pm_high and c_close > c_vwap:
+                    # 2. Strict VWAP Touch & Proximity Condition:
+                    # Long: Prior close above PMH + Price > PMH + VWAP >= PMH * 0.998 + Price within 0.25% of VWAP + Low <= VWAP
+                    is_near_vwap_long = (c_close >= c_vwap) and (c_close <= c_vwap * 1.0025)
+                    touched_vwap_long = (c_low <= c_vwap)
+                    if has_closed_above_pmh and c_close > pm_high and c_vwap >= pm_high * 0.998 and is_near_vwap_long and touched_vwap_long:
                         in_position = True
                         est_opt = round(c_close * 0.035, 2)
                         active_trade = {
@@ -189,8 +190,11 @@ def run_backtest(target_date_str="2026-10-23", tickers=None):
                             "pnl_pct": None,
                             "outcome": None
                         }
-                    # 4. Short Condition: Price < PML and Price < VWAP
-                    elif c_close < pm_low and c_close < c_vwap:
+                    # Short: Prior close below PML + Price < PML + VWAP <= PML * 1.002 + Price within 0.25% of VWAP + High >= VWAP
+                    is_near_vwap_short = (c_close <= c_vwap) and (c_close >= c_vwap * 0.9975)
+                    touched_vwap_short = (c_high >= c_vwap)
+                    has_closed_below_pml = bool((prior_bars["Close"] < pm_low).any()) if len(prior_bars) > 0 else False
+                    if has_closed_below_pml and c_close < pm_low and c_vwap <= pm_low * 1.002 and is_near_vwap_short and touched_vwap_short:
                         in_position = True
                         est_opt = round(c_close * 0.035, 2)
                         active_trade = {
