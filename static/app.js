@@ -1827,22 +1827,30 @@ function switchMainTab(tab) {
   currentMainTab = tab;
   const scannerView = document.getElementById("scannerView");
   const paperView = document.getElementById("paperTraderView");
+  const premarketView = document.getElementById("premarketMoversView");
   const moversView = document.getElementById("dailyMoversView");
   const scannerBtn = document.getElementById("tabScannerBtn");
   const paperBtn = document.getElementById("tabPaperBtn");
+  const premarketBtn = document.getElementById("tabPremarketBtn");
   const moversBtn = document.getElementById("tabMoversBtn");
 
   if (scannerView) scannerView.classList.add("hidden");
   if (paperView) paperView.classList.add("hidden");
+  if (premarketView) premarketView.classList.add("hidden");
   if (moversView) moversView.classList.add("hidden");
   if (scannerBtn) scannerBtn.classList.remove("main-tab--active");
   if (paperBtn) paperBtn.classList.remove("main-tab--active");
+  if (premarketBtn) premarketBtn.classList.remove("main-tab--active");
   if (moversBtn) moversBtn.classList.remove("main-tab--active");
 
   if (tab === "paper") {
     if (paperView) paperView.classList.remove("hidden");
     if (paperBtn) paperBtn.classList.add("main-tab--active");
     fetchPaperData();
+  } else if (tab === "premarket") {
+    if (premarketView) premarketView.classList.remove("hidden");
+    if (premarketBtn) premarketBtn.classList.add("main-tab--active");
+    loadPremarketMovers();
   } else if (tab === "movers") {
     if (moversView) moversView.classList.remove("hidden");
     if (moversBtn) moversBtn.classList.add("main-tab--active");
@@ -2707,6 +2715,459 @@ function pollMoversProgress() {
       console.error("Error polling movers progress:", e);
     }
   }, 1000);
+}
+
+// ── PREMARKET MOVERS (WATCHLIST + TOP 50) ─────────────────────────────
+let currentPremarketSubtab = "both";
+let allPremarketDataList = [];
+let premarketRefreshTimer = null;
+let premarketAutoPollTimer = null;
+let isPremarketAutoPollActive = false;
+
+async function loadPremarketMovers(forceRefresh = false) {
+  try {
+    const url = forceRefresh ? "/api/premarket?force=1" : "/api/premarket";
+    const res = await fetch(url);
+    const data = await res.json();
+
+    if (!data.ok) {
+      console.error("Failed to load premarket movers:", data.error);
+      return;
+    }
+
+    allPremarketDataList = data.all_movers || [];
+
+    // Subtitle & Session
+    const subtitleEl = document.getElementById("pmSubtitle");
+    if (subtitleEl && data.display_date) {
+      const modeLabel = data.is_live_premarket ? "Live Trading" : "Session Recap";
+      subtitleEl.textContent = `Watchlist + Top 50 Universe • ${data.display_date} (${modeLabel})`;
+    }
+
+    // Status Pill & Dot
+    const statusPill = document.getElementById("pmStatusPill");
+    const statusDot = document.getElementById("pmStatusDot");
+    const statusText = document.getElementById("pmStatusText");
+    if (statusText && data.status_text) {
+      statusText.textContent = data.status_text;
+    }
+    if (statusDot) {
+      if (data.is_live_premarket) {
+        statusDot.className = "status-dot green-dot pm-pulse-dot";
+      } else {
+        statusDot.className = "status-dot yellow-dot";
+      }
+    }
+
+    // Universe Text
+    const universeText = document.getElementById("pmUniverseText");
+    if (universeText && data.universe_info) {
+      universeText.textContent = `Universe: Watchlist + Top 50 (${data.universe_info.total_tickers} Stocks)`;
+    }
+
+    // Updated As Of
+    const asOfEl = document.getElementById("pmAsOfText");
+    if (asOfEl) {
+      if (data.updated_at_display) {
+        asOfEl.textContent = `Scanned: ${data.updated_at_display}`;
+      } else if (data.updated_at) {
+        try {
+          const d = new Date(data.updated_at);
+          asOfEl.textContent = `Scanned: ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })} ET`;
+        } catch (e) {
+          asOfEl.textContent = `Scanned: ${data.date}`;
+        }
+      }
+    }
+
+    // Update KPIs
+    updatePremarketKPIs(data.stats, data.top_gainers, data.top_losers, data.most_active);
+
+    // Render Lists
+    renderPremarketList("pmTopGainersList", data.top_gainers || [], "gainer");
+    renderPremarketList("pmTopLosersList", data.top_losers || [], "loser");
+    renderPremarketList("pmMostActiveList", data.most_active || [], "active");
+
+    // Update Badges
+    const gRangeEl = document.getElementById("pmGainersRangeBadge");
+    if (gRangeEl && data.top_gainers && data.top_gainers.length > 0) {
+      const gFirst = data.top_gainers[0].change_pct;
+      const gLast = data.top_gainers[data.top_gainers.length - 1].change_pct;
+      gRangeEl.textContent = `+${gLast.toFixed(2)}% to +${gFirst.toFixed(2)}%`;
+    }
+
+    const lRangeEl = document.getElementById("pmLosersRangeBadge");
+    if (lRangeEl && data.top_losers && data.top_losers.length > 0) {
+      const lFirst = data.top_losers[0].change_pct;
+      const lLast = data.top_losers[data.top_losers.length - 1].change_pct;
+      lRangeEl.textContent = `${lFirst.toFixed(2)}% to ${lLast.toFixed(2)}%`;
+    }
+
+    // Render Full Universe Table
+    renderAllPremarketTable(allPremarketDataList);
+
+  } catch (err) {
+    console.error("Error fetching premarket movers:", err);
+  }
+}
+
+function updatePremarketKPIs(stats, gainers, losers, mostActive) {
+  if (!stats) return;
+
+  const totalEl = document.getElementById("pmKpiTotal");
+  if (totalEl) totalEl.textContent = stats.total_scanned || 0;
+
+  const breadthEl = document.getElementById("pmKpiBreadth");
+  if (breadthEl) {
+    const unch = stats.unchanged_count || 0;
+    breadthEl.textContent = `${stats.gainers_count || 0}🟢 / ${stats.losers_count || 0}🔴` + (unch > 0 ? ` / ${unch}⚪` : '');
+  }
+
+  const avgEl = document.getElementById("pmKpiAvg");
+  if (avgEl) {
+    const avg = stats.avg_change_pct || 0;
+    avgEl.textContent = (avg >= 0 ? `+${avg.toFixed(2)}%` : `${avg.toFixed(2)}%`);
+    avgEl.className = "movers-kpi__val " + (avg >= 0 ? "movers-kpi__val--green" : "movers-kpi__val--red");
+  }
+
+  const topGainerEl = document.getElementById("pmKpiTopGainer");
+  const topGainerSub = document.getElementById("pmKpiTopGainerSub");
+  if (topGainerEl && stats.top_gainer) {
+    topGainerEl.textContent = `${stats.top_gainer.ticker} +${(stats.top_gainer.change_pct || 0).toFixed(2)}%`;
+    if (topGainerSub) topGainerSub.textContent = `$${(stats.top_gainer.price || 0).toFixed(2)} • ${stats.top_gainer.name || ''}`;
+  } else if (topGainerEl && gainers && gainers.length > 0) {
+    topGainerEl.textContent = `${gainers[0].ticker} +${gainers[0].change_pct.toFixed(2)}%`;
+    if (topGainerSub) topGainerSub.textContent = `$${gainers[0].price.toFixed(2)} • ${gainers[0].name || ''}`;
+  }
+
+  const topLoserEl = document.getElementById("pmKpiTopLoser");
+  const topLoserSub = document.getElementById("pmKpiTopLoserSub");
+  if (topLoserEl && stats.top_loser) {
+    topLoserEl.textContent = `${stats.top_loser.ticker} ${(stats.top_loser.change_pct || 0).toFixed(2)}%`;
+    if (topLoserSub) topLoserSub.textContent = `$${(stats.top_loser.price || 0).toFixed(2)} • ${stats.top_loser.name || ''}`;
+  } else if (topLoserEl && losers && losers.length > 0) {
+    topLoserEl.textContent = `${losers[0].ticker} ${losers[0].change_pct.toFixed(2)}%`;
+    if (topLoserSub) topLoserSub.textContent = `$${losers[0].price.toFixed(2)} • ${losers[0].name || ''}`;
+  }
+
+  const activeEl = document.getElementById("pmKpiMostActive");
+  const activeSub = document.getElementById("pmKpiMostActiveSub");
+  if (activeEl && stats.most_active) {
+    activeEl.textContent = `${stats.most_active.ticker} ${formatCompactVolume(stats.most_active.volume)}`;
+    if (activeSub) {
+      const sign = (stats.most_active.change_pct || 0) >= 0 ? "+" : "";
+      activeSub.textContent = `${sign}${(stats.most_active.change_pct || 0).toFixed(2)}% Premarket`;
+    }
+  } else if (activeEl && mostActive && mostActive.length > 0) {
+    activeEl.textContent = `${mostActive[0].ticker} ${formatCompactVolume(mostActive[0].volume)}`;
+    if (activeSub) {
+      const sign = (mostActive[0].change_pct || 0) >= 0 ? "+" : "";
+      activeSub.textContent = `${sign}${(mostActive[0].change_pct || 0).toFixed(2)}% Premarket`;
+    }
+  }
+}
+
+function renderPremarketList(containerId, list, type) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  if (!list || list.length === 0) {
+    container.innerHTML = `
+      <div style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 0.85rem;">
+        No stocks recorded for this category.
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = list.map(item => {
+    const isUp = item.change >= 0;
+    const sign = isUp ? "+" : "";
+    const pctBadgeClass = isUp ? "mover-pct-badge--up" : "mover-pct-badge--down";
+    const rankClass = item.rank <= 3 ? `mover-rank--${item.rank}` : "";
+
+    // Tags rendering
+    const tagsHtml = (item.tags || []).map(t => {
+      if (t.startsWith("Top 50")) {
+        return `<span class="pm-tag pm-tag--top50">${t}</span>`;
+      }
+      return `<span class="pm-tag pm-tag--watchlist">WL</span>`;
+    }).join("");
+
+    // Range bar position clamped between 0 and 100%
+    const rangePos = Math.max(0, Math.min(100, item.range_pos !== undefined ? item.range_pos : 50));
+
+    return `
+      <div class="mover-card pm-mover-card">
+        <div class="mover-card-top">
+          <div class="mover-card-left">
+            <span class="mover-rank ${rankClass}">#${item.rank}</span>
+            <div class="mover-ticker-info">
+              <div class="pm-sym-row">
+                <span class="mover-ticker-sym" onclick="openChartModal('${item.ticker}')" title="Click to view chart">${item.ticker}</span>
+                ${tagsHtml}
+              </div>
+              <span class="mover-ticker-name" title="${item.name || item.ticker}">${item.name || item.ticker}</span>
+            </div>
+          </div>
+          <div class="mover-card-right">
+            <div class="mover-price-wrap">
+              <span class="mover-price">$${item.price.toFixed(2)}</span>
+              <span class="mover-diff">${sign}$${item.change.toFixed(2)}</span>
+            </div>
+            <span class="mover-pct-badge ${pctBadgeClass}">${sign}${item.change_pct.toFixed(2)}%</span>
+          </div>
+        </div>
+
+        <div class="mover-card-bottom">
+          <div class="mover-range-wrap">
+            <div class="mover-range-labels">
+              <span>PM L: $${item.low.toFixed(2)}</span>
+              <span>PM H: $${item.high.toFixed(2)}</span>
+            </div>
+            <div class="mover-range-bar" title="Current price at ${rangePos}% of premarket range">
+              <div class="mover-range-pointer" style="left: ${rangePos}%;"></div>
+            </div>
+          </div>
+
+          <div class="mover-meta-wrap">
+            <span class="mover-vol-badge" title="Premarket volume traded">${formatCompactVolume(item.volume)} PM Vol</span>
+            <button class="mover-chart-btn" onclick="openChartModal('${item.ticker}')" title="View Chart">📈 Chart</button>
+            <button class="mover-chart-btn pm-news-btn" onclick="openNewsModal('${item.ticker}')" title="View News">📰 News</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function setPremarketSubtab(tab) {
+  currentPremarketSubtab = tab;
+
+  // Toggle active button
+  const btns = ["pmSubtabBoth", "pmSubtabGainers", "pmSubtabLosers", "pmSubtabActive", "pmSubtabAll"];
+  btns.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove("movers-subtab--active");
+  });
+
+  const activeBtnId = tab === "both" ? "pmSubtabBoth" :
+                      tab === "gainers" ? "pmSubtabGainers" :
+                      tab === "losers" ? "pmSubtabLosers" :
+                      tab === "active" ? "pmSubtabActive" : "pmSubtabAll";
+  const activeBtn = document.getElementById(activeBtnId);
+  if (activeBtn) activeBtn.classList.add("movers-subtab--active");
+
+  const colsContainer = document.getElementById("pmColumns");
+  const colGainers = document.getElementById("pmColGainers");
+  const colLosers = document.getElementById("pmColLosers");
+  const activeWrap = document.getElementById("pmActiveWrap");
+  const allWrap = document.getElementById("pmAllWrap");
+
+  if (tab === "all") {
+    if (colsContainer) colsContainer.classList.add("hidden");
+    if (activeWrap) activeWrap.classList.add("hidden");
+    if (allWrap) allWrap.classList.remove("hidden");
+  } else if (tab === "active") {
+    if (colsContainer) colsContainer.classList.add("hidden");
+    if (allWrap) allWrap.classList.add("hidden");
+    if (activeWrap) activeWrap.classList.remove("hidden");
+  } else {
+    if (allWrap) allWrap.classList.add("hidden");
+    if (activeWrap) activeWrap.classList.add("hidden");
+    if (colsContainer) colsContainer.classList.remove("hidden");
+
+    if (tab === "gainers") {
+      if (colGainers) colGainers.classList.remove("hidden");
+      if (colLosers) colLosers.classList.add("hidden");
+    } else if (tab === "losers") {
+      if (colGainers) colGainers.classList.add("hidden");
+      if (colLosers) colLosers.classList.remove("hidden");
+    } else {
+      if (colGainers) colGainers.classList.remove("hidden");
+      if (colLosers) colLosers.classList.remove("hidden");
+    }
+  }
+}
+
+function renderAllPremarketTable(list) {
+  const tbody = document.getElementById("pmAllTableBody");
+  if (!tbody) return;
+
+  if (!list || list.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="10" style="text-align: center; padding: 20px;">No stocks found.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = list.map((item, idx) => {
+    const isUp = item.change >= 0;
+    const sign = isUp ? "+" : "";
+    const colorClass = isUp ? "td-green" : "td-red";
+
+    const tagsHtml = (item.tags || []).map(t => {
+      if (t.startsWith("Top 50")) {
+        return `<span class="pm-tag pm-tag--top50">${t}</span>`;
+      }
+      return `<span class="pm-tag pm-tag--watchlist">WL</span>`;
+    }).join(" ");
+
+    const gapBadgeClass = item.gap_type === "GAP UP" ? "pm-gap-badge--up" :
+                          item.gap_type === "GAP DOWN" ? "pm-gap-badge--down" : "pm-gap-badge--flat";
+
+    return `
+      <tr>
+        <td class="td-mono">${idx + 1}</td>
+        <td>
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <strong style="color: #38bdf8; cursor: pointer; font-size: 0.95rem;" onclick="openChartModal('${item.ticker}')">${item.ticker}</strong>
+            ${tagsHtml}
+          </div>
+          <div style="font-size: 0.72rem; color: var(--text-muted);">${item.name || ''}</div>
+        </td>
+        <td class="td-mono">$${item.price.toFixed(2)}</td>
+        <td class="td-mono" style="color: var(--text-muted);">$${item.prev_close.toFixed(2)}</td>
+        <td class="td-mono ${colorClass}">${sign}$${item.change.toFixed(2)}</td>
+        <td class="td-mono ${colorClass}">${sign}${item.change_pct.toFixed(2)}%</td>
+        <td class="td-mono" style="font-size: 0.75rem;">$${item.low.toFixed(2)} – $${item.high.toFixed(2)}</td>
+        <td class="td-mono">${formatCompactVolume(item.volume)}</td>
+        <td><span class="pm-gap-badge ${gapBadgeClass}">${item.gap_type || 'FLAT'}</span></td>
+        <td>
+          <div style="display: flex; gap: 4px;">
+            <button class="mover-chart-btn" onclick="openChartModal('${item.ticker}')" title="Chart">📈</button>
+            <button class="mover-chart-btn pm-news-btn" onclick="openNewsModal('${item.ticker}')" title="News">📰</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function filterAllPremarket() {
+  const searchInput = document.getElementById("pmSearchInput");
+  const filterSelect = document.getElementById("pmUniverseFilterSelect");
+
+  const q = (searchInput ? searchInput.value : "").trim().toUpperCase();
+  const filter = filterSelect ? filterSelect.value : "all";
+
+  let filtered = allPremarketDataList;
+
+  // Universe filter
+  if (filter === "watchlist") {
+    filtered = filtered.filter(item => item.in_watchlist);
+  } else if (filter === "top50") {
+    filtered = filtered.filter(item => item.in_top50);
+  } else if (filter === "gainers") {
+    filtered = filtered.filter(item => item.change_pct > 0);
+  } else if (filter === "losers") {
+    filtered = filtered.filter(item => item.change_pct < 0);
+  }
+
+  // Text search
+  if (q) {
+    filtered = filtered.filter(item => {
+      return item.ticker.toUpperCase().includes(q) ||
+             (item.name && item.name.toUpperCase().includes(q));
+    });
+  }
+
+  renderAllPremarketTable(filtered);
+}
+
+async function triggerPremarketRefresh() {
+  const spinner = document.getElementById("pmSpinner");
+  const btnText = document.getElementById("pmRefreshText");
+  const progressWrap = document.getElementById("pmProgressWrap");
+
+  if (spinner) spinner.classList.remove("hidden");
+  if (btnText) btnText.textContent = "Scanning...";
+  if (progressWrap) progressWrap.classList.remove("hidden");
+
+  try {
+    const res = await fetch("/api/premarket/refresh", { method: "POST" });
+    const data = await res.json();
+    if (data.ok) {
+      pollPremarketProgress();
+    } else {
+      alert(`Could not start premarket scan: ${data.message || 'Busy'}`);
+      if (spinner) spinner.classList.add("hidden");
+      if (btnText) btnText.textContent = "🔄 Refresh Premarket";
+      if (progressWrap) progressWrap.classList.add("hidden");
+    }
+  } catch (e) {
+    console.error("Error triggering premarket refresh:", e);
+    if (spinner) spinner.classList.add("hidden");
+    if (btnText) btnText.textContent = "🔄 Refresh Premarket";
+    if (progressWrap) progressWrap.classList.add("hidden");
+  }
+}
+
+function pollPremarketProgress() {
+  if (premarketRefreshTimer) clearInterval(premarketRefreshTimer);
+
+  premarketRefreshTimer = setInterval(async () => {
+    try {
+      const res = await fetch("/api/premarket/progress");
+      const prog = await res.json();
+
+      const phaseEl = document.getElementById("pmProgressPhase");
+      const pctEl = document.getElementById("pmProgressPct");
+      const fillEl = document.getElementById("pmProgressFill");
+
+      if (phaseEl && prog.message) phaseEl.textContent = prog.message;
+      if (pctEl) pctEl.textContent = `${prog.pct || 0}%`;
+      if (fillEl) fillEl.style.width = `${prog.pct || 0}%`;
+
+      if (prog.status === "complete" || prog.status === "error" || (prog.pct >= 100)) {
+        clearInterval(premarketRefreshTimer);
+        premarketRefreshTimer = null;
+
+        setTimeout(() => {
+          const spinner = document.getElementById("pmSpinner");
+          const btnText = document.getElementById("pmRefreshText");
+          const progressWrap = document.getElementById("pmProgressWrap");
+
+          if (spinner) spinner.classList.add("hidden");
+          if (btnText) btnText.textContent = "🔄 Refresh Premarket";
+          if (progressWrap) progressWrap.classList.add("hidden");
+
+          loadPremarketMovers();
+        }, 800);
+      }
+    } catch (e) {
+      console.error("Error polling premarket progress:", e);
+    }
+  }, 1000);
+}
+
+function togglePremarketAutoPoll() {
+  const btn = document.getElementById("pmAutoPollBtn");
+  const indicator = document.getElementById("pmPollIndicator");
+  const text = document.getElementById("pmAutoPollText");
+
+  isPremarketAutoPollActive = !isPremarketAutoPollActive;
+
+  if (isPremarketAutoPollActive) {
+    if (btn) btn.classList.add("pm-poll-toggle-btn--active");
+    if (indicator) indicator.classList.add("poll-indicator--active");
+    if (text) text.textContent = "⚡ Live Poll: ON (45s)";
+
+    // Run poll every 45 seconds
+    if (premarketAutoPollTimer) clearInterval(premarketAutoPollTimer);
+    premarketAutoPollTimer = setInterval(() => {
+      if (currentMainTab === "premarket") {
+        loadPremarketMovers();
+      }
+    }, 45000);
+  } else {
+    if (btn) btn.classList.remove("pm-poll-toggle-btn--active");
+    if (indicator) indicator.classList.remove("poll-indicator--active");
+    if (text) text.textContent = "⚡ Live Poll: OFF";
+
+    if (premarketAutoPollTimer) {
+      clearInterval(premarketAutoPollTimer);
+      premarketAutoPollTimer = null;
+    }
+  }
 }
 
 

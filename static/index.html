@@ -37,6 +37,9 @@
       <button class="main-tab" id="tabPaperBtn" onclick="switchMainTab('paper')">
         🤖 3-Sigma Auto Trader <span class="tab-badge" id="paperBadge">0</span>
       </button>
+      <button class="main-tab" id="tabPremarketBtn" onclick="switchMainTab('premarket')">
+        🌅 Premarket Movers
+      </button>
       <button class="main-tab" id="tabMoversBtn" onclick="switchMainTab('movers')">
         📊 Daily Movers
       </button>
@@ -276,6 +279,197 @@
             <div class="empty-state__title">No Trade History Yet</div>
             <div class="empty-state__text">Completed paper trades with entry/exit prices and realized P&L will log here.</div>
           </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- PREMARKET MOVERS (WATCHLIST + TOP 50) VIEW -->
+    <div id="premarketMoversView" class="hidden">
+
+      <!-- View Header & Controls -->
+      <div class="movers-header-card premarket-header-card">
+        <div class="movers-header-top">
+          <div class="movers-title-wrap">
+            <span class="movers-icon pm-icon">🌅</span>
+            <div>
+              <h2 class="movers-title">Premarket Movers Scanner</h2>
+              <p class="movers-subtitle" id="pmSubtitle">Scanning Watchlist &amp; Top 50 Universe • Real-Time Premarket Action</p>
+            </div>
+          </div>
+          <div class="pm-header-actions">
+            <button class="pm-poll-toggle-btn" id="pmAutoPollBtn" onclick="togglePremarketAutoPoll()" title="Toggle auto-refresh every 45s during active pre-market">
+              <span class="poll-indicator" id="pmPollIndicator"></span>
+              <span id="pmAutoPollText">⚡ Live Poll: OFF</span>
+            </button>
+            <button class="movers-refresh-btn pm-refresh-btn" id="premarketRefreshBtn" onclick="triggerPremarketRefresh()" title="Rescan premarket data for all Watchlist + Top 50 stocks">
+              <span class="refresh-spinner hidden" id="pmSpinner"></span>
+              <span id="pmRefreshText">🔄 Refresh Premarket</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Session Status & Universe Pill -->
+        <div class="movers-status-bar">
+          <div class="movers-status-pill pm-status-pill" id="pmStatusPill">
+            <span class="status-dot green-dot" id="pmStatusDot"></span>
+            <span id="pmStatusText">Session: Live Pre-Market</span>
+          </div>
+          <div class="pm-universe-pill" id="pmUniverseBadge">
+            <span class="pm-universe-dot"></span>
+            <span id="pmUniverseText">Universe: Watchlist + Top 50 (165 Stocks)</span>
+          </div>
+          <span class="movers-asof" id="pmAsOfText">Updated: —</span>
+        </div>
+      </div>
+
+      <!-- Scan Progress (when refreshing) -->
+      <div class="progress-wrap hidden" id="pmProgressWrap" style="margin-bottom: 16px;">
+        <div class="progress-header">
+          <span class="progress-phase" id="pmProgressPhase">Analyzing premarket data...</span>
+          <span class="progress-pct" id="pmProgressPct">0%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-bar__fill" id="pmProgressFill" style="width: 0%"></div>
+        </div>
+      </div>
+
+      <!-- Summary KPI Grid -->
+      <div class="movers-kpi-grid pm-kpi-grid">
+        <div class="movers-kpi">
+          <span class="movers-kpi__label">Universe Scanned</span>
+          <span class="movers-kpi__val" id="pmKpiTotal">0</span>
+          <span class="movers-kpi__sub" id="pmKpiBreadth">0🟢 / 0🔴</span>
+        </div>
+        <div class="movers-kpi">
+          <span class="movers-kpi__label">Avg Premarket Move</span>
+          <span class="movers-kpi__val" id="pmKpiAvg">0.00%</span>
+          <span class="movers-kpi__sub">Equal-Weighted</span>
+        </div>
+        <div class="movers-kpi movers-kpi--bull">
+          <span class="movers-kpi__label">Top Premarket Gainer</span>
+          <span class="movers-kpi__val movers-kpi__val--green" id="pmKpiTopGainer">—</span>
+          <span class="movers-kpi__sub" id="pmKpiTopGainerSub">—</span>
+        </div>
+        <div class="movers-kpi movers-kpi--bear">
+          <span class="movers-kpi__label">Top Premarket Loser</span>
+          <span class="movers-kpi__val movers-kpi__val--red" id="pmKpiTopLoser">—</span>
+          <span class="movers-kpi__sub" id="pmKpiTopLoserSub">—</span>
+        </div>
+        <div class="movers-kpi pm-kpi--active">
+          <span class="movers-kpi__label">Most Active (Volume)</span>
+          <span class="movers-kpi__val" id="pmKpiMostActive">—</span>
+          <span class="movers-kpi__sub" id="pmKpiMostActiveSub">—</span>
+        </div>
+      </div>
+
+      <!-- Sub Filter Tabs within Premarket Movers -->
+      <div class="movers-subtabs pm-subtabs">
+        <button class="movers-subtab movers-subtab--active" id="pmSubtabBoth" onclick="setPremarketSubtab('both')">
+          ⚡ Top Gainers &amp; Losers
+        </button>
+        <button class="movers-subtab" id="pmSubtabGainers" onclick="setPremarketSubtab('gainers')">
+          🟢 Gainers (15)
+        </button>
+        <button class="movers-subtab" id="pmSubtabLosers" onclick="setPremarketSubtab('losers')">
+          🔴 Losers (15)
+        </button>
+        <button class="movers-subtab" id="pmSubtabActive" onclick="setPremarketSubtab('active')">
+          🔥 Most Active Vol (15)
+        </button>
+        <button class="movers-subtab" id="pmSubtabAll" onclick="setPremarketSubtab('all')">
+          📋 All Watchlist + Top 50
+        </button>
+      </div>
+
+      <!-- Dual Columns for Gainers & Losers -->
+      <div class="movers-columns" id="pmColumns">
+        
+        <!-- Column 1: Top Gainers -->
+        <div class="movers-col" id="pmColGainers">
+          <div class="movers-col-header movers-col-header--gainers">
+            <div class="movers-col-title">
+              <span class="col-dot green-dot"></span>
+              <span>TOP PREMARKET GAINERS</span>
+            </div>
+            <span class="movers-col-range" id="pmGainersRangeBadge">+0.00% to +0.00%</span>
+          </div>
+          <div class="movers-list" id="pmTopGainersList">
+            <!-- Dynamic Premarket Cards -->
+          </div>
+        </div>
+
+        <!-- Column 2: Top Losers -->
+        <div class="movers-col" id="pmColLosers">
+          <div class="movers-col-header movers-col-header--losers">
+            <div class="movers-col-title">
+              <span class="col-dot red-dot"></span>
+              <span>TOP PREMARKET LOSERS</span>
+            </div>
+            <span class="movers-col-range" id="pmLosersRangeBadge">-0.00% to -0.00%</span>
+          </div>
+          <div class="movers-list" id="pmTopLosersList">
+            <!-- Dynamic Premarket Cards -->
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Single Column for Most Active Volume (Shown when 'active' subtab selected) -->
+      <div class="movers-columns hidden" id="pmActiveWrap">
+        <div class="movers-col" style="grid-column: 1 / -1;">
+          <div class="movers-col-header" style="background: rgba(245, 158, 11, 0.08); border-bottom: 1px solid rgba(245, 158, 11, 0.2);">
+            <div class="movers-col-title" style="color: #fbbf24;">
+              <span class="col-dot" style="background: #fbbf24; box-shadow: 0 0 8px #f59e0b;"></span>
+              <span>MOST ACTIVE BY PREMARKET VOLUME (TOP 15)</span>
+            </div>
+            <span class="movers-col-range" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">
+              Ranked by Premarket Share Volume
+            </span>
+          </div>
+          <div class="movers-list" id="pmMostActiveList">
+            <!-- Rendered via JS -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Full Universe Table View (Hidden by default, shown when subtab 'all' selected) -->
+      <div class="movers-all-wrap hidden" id="pmAllWrap">
+        <div class="movers-all-header">
+          <div class="movers-all-title">📋 Full Watchlist + Top 50 Premarket Performance</div>
+          <div class="pm-filter-controls">
+            <select class="pm-universe-select" id="pmUniverseFilterSelect" onchange="filterAllPremarket()">
+              <option value="all">🌐 All Stocks (Watchlist + Top 50)</option>
+              <option value="watchlist">⭐ Watchlist Only</option>
+              <option value="top50">🔥 Top 50 Only</option>
+              <option value="gainers">🟢 Gainers Only</option>
+              <option value="losers">🔴 Losers Only</option>
+            </select>
+            <div class="movers-search-wrap">
+              <input type="text" class="movers-search-input" id="pmSearchInput" placeholder="Filter ticker or company name..." oninput="filterAllPremarket()">
+            </div>
+          </div>
+        </div>
+        <div class="movers-table-container">
+          <table class="movers-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Ticker &amp; Universe</th>
+                <th>PM Price</th>
+                <th>Prev Close</th>
+                <th>Change</th>
+                <th>% Change</th>
+                <th>PM Range (L–H)</th>
+                <th>PM Volume</th>
+                <th>Gap</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="pmAllTableBody">
+              <!-- Rendered via JS -->
+            </tbody>
+          </table>
         </div>
       </div>
 

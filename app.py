@@ -70,6 +70,12 @@ try:
 except Exception as e:
     print(f"Error starting daily movers background watcher: {e}")
 
+try:
+    from premarket_movers import start_premarket_background_watcher
+    start_premarket_background_watcher()
+except Exception as e:
+    print(f"Error starting premarket movers background watcher: {e}")
+
 # ── Scan Persistence ───────────────────────────────────────────────────
 # Use SCAN_DATA_DIR env var for Docker volume persistence; falls back to app directory for local dev
 SCAN_DATA_DIR = os.environ.get("SCAN_DATA_DIR", os.path.dirname(__file__))
@@ -1037,6 +1043,41 @@ def daily_movers_progress():
     try:
         from daily_movers import get_refresh_progress
         return jsonify(get_refresh_progress())
+    except Exception as e:
+        return jsonify({"status": "idle", "error": str(e)}), 500
+
+# ── API: Premarket Movers (Watchlist + Top 50 Universe) ────────────────
+
+@app.route("/api/premarket", methods=["GET"])
+def get_premarket_movers():
+    """Return premarket gainers, losers, and movers for Watchlist + Top 50."""
+    force = request.args.get("force", "").lower() in ("1", "true", "yes")
+    try:
+        from premarket_movers import get_premarket_movers_data
+        data = get_premarket_movers_data(force_refresh=force)
+        if not data:
+            return jsonify({"ok": False, "error": "Unable to calculate premarket data."}), 500
+        return jsonify(data)
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/premarket/refresh", methods=["POST"])
+def refresh_premarket_movers():
+    """Trigger background refresh of premarket movers."""
+    try:
+        from premarket_movers import refresh_premarket_async
+        res = refresh_premarket_async()
+        return jsonify(res)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.route("/api/premarket/progress", methods=["GET"])
+def premarket_movers_progress():
+    """Return progress of ongoing premarket scan."""
+    try:
+        from premarket_movers import get_premarket_refresh_progress
+        return jsonify(get_premarket_refresh_progress())
     except Exception as e:
         return jsonify({"status": "idle", "error": str(e)}), 500
 
