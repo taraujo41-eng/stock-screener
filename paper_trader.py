@@ -141,6 +141,7 @@ class PaperTrader:
         self.breakeven_stop_pct = _cfg("PAPER_BREAKEVEN_STOP_PCT", "0.0", float)
         self.max_hold_minutes = _cfg("PAPER_MAX_HOLD_MINUTES", "0", int)
         self.earliest_trade_mins = _cfg("EARLIEST_TRADE_TIME_MINS", "570", int)
+        self.latest_trade_mins = _cfg("LATEST_TRADE_TIME_MINS", "660", int)
         self.close_before_eod = _cfg("PAPER_CLOSE_BEFORE_MARKET_CLOSE", "true", bool)
 
     # ── Authentication ──────────────────────────────────────────────
@@ -580,16 +581,31 @@ class PaperTrader:
                 logger.error("[PaperTrader] Cannot place order — not logged in")
                 return None
 
-        # Guard: Opening bell buffer (avoid noisy first 20 minutes: 9:30 - 9:50 AM ET)
-        if self.earliest_trade_mins > 0:
+        # Guard: Trading window check (allow trades only from 9:30 AM to 11:00 AM ET)
+        if self.earliest_trade_mins > 0 or self.latest_trade_mins > 0:
             ny_tz = get_ny_timezone()
             now = datetime.now(ny_tz)
             current_mins = now.hour * 60 + now.minute
-            if current_mins < self.earliest_trade_mins:
+            if self.earliest_trade_mins > 0 and current_mins < self.earliest_trade_mins:
                 open_hr = self.earliest_trade_mins // 60
                 open_mn = self.earliest_trade_mins % 60
+                suffix = "AM" if open_hr < 12 else "PM"
+                disp_hr = open_hr if open_hr <= 12 else open_hr - 12
+                if disp_hr == 0:
+                    disp_hr = 12
                 logger.info(
-                    f"[PaperTrader] ⏳ Opening bell buffer active (trading begins at {open_hr}:{open_mn:02d} AM ET) — skipping {ticker}"
+                    f"[PaperTrader] ⏳ Outside trading window (trading begins at {disp_hr}:{open_mn:02d} {suffix} ET) — skipping {ticker}"
+                )
+                return None
+            if self.latest_trade_mins > 0 and current_mins > self.latest_trade_mins:
+                close_hr = self.latest_trade_mins // 60
+                close_mn = self.latest_trade_mins % 60
+                suffix = "AM" if close_hr < 12 else "PM"
+                disp_hr = close_hr if close_hr <= 12 else close_hr - 12
+                if disp_hr == 0:
+                    disp_hr = 12
+                logger.info(
+                    f"[PaperTrader] ⏳ Outside trading window (trading allowed until {disp_hr}:{close_mn:02d} {suffix} ET) — skipping {ticker}"
                 )
                 return None
 
@@ -1260,6 +1276,8 @@ class PaperTrader:
                 "trailing_stop_callback_pct": self.trailing_stop_callback_pct,
                 "max_hold_minutes": self.max_hold_minutes,
                 "min_entry_interval_secs": self.min_entry_interval_secs,
+                "earliest_trade_mins": self.earliest_trade_mins,
+                "latest_trade_mins": self.latest_trade_mins,
             }
         }
 

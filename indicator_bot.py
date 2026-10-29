@@ -398,7 +398,7 @@ def evaluate_ticker_process(ticker, df):
         if len(pm_bars) == 0 or len(rth_bars) < 2:
             return None
 
-        # 2. Execution Window: Open market hours (09:30 to 15:55 ET, no morning cutoff)
+        # 2. Execution Window: Only trigger new entries between 09:30 AM and 11:00 AM ET
         last_dt = rth_bars.index[-1]
         ny_tz = get_ny_timezone()
         if hasattr(last_dt, "tzinfo") and last_dt.tzinfo is not None:
@@ -406,8 +406,9 @@ def evaluate_ticker_process(ticker, df):
         else:
             dt_ny = last_dt
         mins_from_midnight = dt_ny.hour * 60 + dt_ny.minute
-        latest_mins = int(os.getenv("LATEST_TRADE_TIME_MINS", "955"))
-        if mins_from_midnight < 570 or mins_from_midnight > latest_mins:
+        earliest_mins = int(os.getenv("EARLIEST_TRADE_TIME_MINS", "570"))
+        latest_mins = int(os.getenv("LATEST_TRADE_TIME_MINS", "660"))
+        if mins_from_midnight < earliest_mins or mins_from_midnight > latest_mins:
             return None
             
         # 3. Key Levels to Calculate Daily
@@ -704,7 +705,7 @@ def bot_loop():
                 time.sleep(300)
                 continue
 
-            # Opening bell buffer (wait for initial 20 minutes of market open to stabilize)
+            # Opening bell check (trading begins at 9:30 AM ET market open)
             ny_tz = get_ny_timezone()
             now = datetime.now(ny_tz)
             current_mins = now.hour * 60 + now.minute
@@ -712,7 +713,11 @@ def bot_loop():
             if current_mins < earliest_trade_mins:
                 open_hr = earliest_trade_mins // 60
                 open_mn = earliest_trade_mins % 60
-                logger.info(f"Opening bell buffer active (market settling until {open_hr}:{open_mn:02d} AM EST). Bot sleeping for 30s...")
+                suffix = "AM" if open_hr < 12 else "PM"
+                disp_hr = open_hr if open_hr <= 12 else open_hr - 12
+                if disp_hr == 0:
+                    disp_hr = 12
+                logger.info(f"Outside trading window (trading begins at {disp_hr}:{open_mn:02d} {suffix} ET). Bot sleeping for 30s...")
                 time.sleep(30)
                 continue
 
@@ -727,9 +732,15 @@ def bot_loop():
             except Exception:
                 pass
 
-            latest_trade_mins = int(os.getenv("LATEST_TRADE_TIME_MINS", "955"))  # 3:55 PM ET EOD cutoff (no morning cutoff)
+            latest_trade_mins = int(os.getenv("LATEST_TRADE_TIME_MINS", "660"))  # 11:00 AM ET morning cutoff
             if current_mins > latest_trade_mins:
-                logger.info(f"Market session closing soon (after {latest_trade_mins // 60}:{latest_trade_mins % 60:02d} PM EST). Monitoring open positions only. Sleeping 60s...")
+                close_hr = latest_trade_mins // 60
+                close_mn = latest_trade_mins % 60
+                suffix = "AM" if close_hr < 12 else "PM"
+                disp_hr = close_hr if close_hr <= 12 else close_hr - 12
+                if disp_hr == 0:
+                    disp_hr = 12
+                logger.info(f"Trading window closed for new entries (trades permitted 9:30 AM - {disp_hr}:{close_mn:02d} {suffix} ET). Monitoring open positions only. Sleeping 60s...")
                 time.sleep(60)
                 continue
 

@@ -1,7 +1,7 @@
 """
 Backtest Suite: Strict VWAP-Touch & PM Breakout Strategy
 Rules Evaluated:
-  1. Session: After 9:30 AM market open.
+  1. Session Window: Between 9:30 AM and 11:00 AM ET.
   2. Chop Zone Filter: Price strictly outside Premarket High and Low (pm_low <= close <= pm_high blocked).
   3. Long Entry: Price > PMH and Price > VWAP, triggered on candle touching VWAP (Low <= VWAP <= High).
   4. Short Entry: Price < PML and Price < VWAP, triggered on candle touching VWAP (Low <= VWAP <= High).
@@ -157,6 +157,10 @@ def run_backtest(target_date_str="2026-10-23", tickers=None):
                         trades.append(active_trade)
                         in_position = False
                         active_trade = None
+                elif not in_position:
+                    # Session Window: Only enter trades between 9:30 AM and 11:00 AM ET
+                    bar_mins = bar_time.hour * 60 + bar_time.minute
+                    if bar_mins < 570 or bar_mins > 660:
                         continue
 
                     # Check prior breakout/breakdown conditions
