@@ -478,7 +478,8 @@ def evaluate_ticker_process(ticker, df):
                 approached_from_above = (c_open >= current_vwap * 0.998) or (c_high > current_vwap)
                 if touched_vwap and approached_from_above:
                     is_long = True
-                    dual_test = (abs(close_price - pm_high) / pm_high <= 0.003) or (abs(c_low - pm_high) / pm_high <= 0.003)
+                    # Dual test requires price to physically retest PMH support level
+                    dual_test = (c_low <= pm_high * 1.001) and (c_high >= pm_high * 0.998)
                     confluence_tag = "★ Dual VWAP + PMH Retest (Highest Conviction)" if dual_test else "VWAP Tap Retest"
                     break
 
@@ -506,7 +507,8 @@ def evaluate_ticker_process(ticker, df):
                 approached_from_below = (c_open <= current_vwap * 1.002) or (c_low < current_vwap)
                 if touched_vwap and approached_from_below:
                     is_short = True
-                    dual_test = (abs(close_price - pm_low) / pm_low <= 0.003) or (abs(c_high - pm_low) / pm_low <= 0.003)
+                    # Dual test requires price to physically retest PML resistance level
+                    dual_test = (c_high >= pm_low * 0.999) and (c_low <= pm_low * 1.002)
                     confluence_tag = "★ Dual VWAP + PML Retest (Highest Conviction)" if dual_test else "VWAP Tap Retest"
                     break
                     
