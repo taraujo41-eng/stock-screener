@@ -24,7 +24,7 @@ import uuid
 import logging
 import threading
 import pytz
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 # Load credentials from .env
@@ -1027,6 +1027,10 @@ class PaperTrader:
                                 sig = trade.get("signal_type", "bullish")
 
                                 # Guard: Ensure last_closed candle completed AFTER the position was opened
+                                # A 5-minute candle timestamp in Webull marks the start of the bar.
+                                # The trade was entered during entry_dt. The candle that was forming at entry_dt
+                                # is the entry candle. We MUST NOT evaluate any candle from before entry or the entry candle itself!
+                                # The first candle to evaluate is the NEXT completed 5-minute candle (candle_dt > entry_dt).
                                 entry_time_str = trade.get("entry_time")
                                 if entry_time_str:
                                     try:
@@ -1036,13 +1040,14 @@ class PaperTrader:
                                             candle_dt = candle_ts.tz_convert(ny_tz)
                                         else:
                                             candle_dt = candle_ts.replace(tzinfo=ny_tz) if hasattr(candle_ts, "replace") else candle_ts
-                                        # 5m candle completes 5 minutes after start timestamp
-                                        candle_close_dt = candle_dt + timedelta(minutes=5)
-                                        if candle_close_dt <= entry_dt:
-                                            # Candle closed before position was opened; wait for next completed candle
+                                        
+                                        # If candle started at or before the entry timestamp, it is NOT the next candle!
+                                        # Only evaluate completed candles that started strictly AFTER entry.
+                                        if candle_dt <= entry_dt:
                                             continue
                                     except Exception as ex:
-                                        logger.debug(f"[PaperTrader] Candle timing check error: {ex}")
+                                        logger.warning(f"[PaperTrader] Candle timing check error: {ex} — skipping exit check for safety")
+                                        continue
 
                                 # Rule 6: Stop Loss (5-minute candle close past VWAP)
                                 # Price wicking slightly past VWAP without a full 5m candle close does NOT trigger SL
@@ -1090,24 +1095,23 @@ class PaperTrader:
                                             continue
 
                                 # Rule 8: 8 EMA Exit (Trailing Trend Exit)
-                                # On a Long trade: Exit when 5-minute candle closes below 8 EMA
-                                # On a Short trade: Exit when 5-minute candle closes above 8 EMA
-                                if sig == "bullish" and c_close < c_ema8:
-                                    exit_reason_label = "runner_exit_8ema" if trade.get("runner_active") else "exit_8ema"
-                                    logger.info(
-                                        f"[PaperTrader] 🏃 8 EMA EXIT on {trade['ticker']} | "
-                                        f"5m candle closed below 8 EMA (${c_close:.2f} < ${c_ema8:.2f})"
-                                    )
-                                    positions_to_close.append((trade, exit_reason_label))
-                                    continue
-                                elif sig == "bearish" and c_close > c_ema8:
-                                    exit_reason_label = "runner_exit_8ema" if trade.get("runner_active") else "exit_8ema"
-                                    logger.info(
-                                        f"[PaperTrader] 🏃 8 EMA EXIT on {trade['ticker']} | "
-                                        f"5m candle closed above 8 EMA (${c_close:.2f} > ${c_ema8:.2f})"
-                                    )
-                                    positions_to_close.append((trade, exit_reason_label))
-                                    continue
+                                # Per strategy rules: 8 EMA trail ONLY applies to the runner AFTER TP1 (HOD/LOD) is hit.
+                                # Prior to TP1, the active stop loss is Rule 6 (5m candle close past VWAP).
+                                if trade.get("runner_active"):
+                                    if sig == "bullish" and c_close < c_ema8:
+                                        logger.info(
+                                            f"[PaperTrader] 🏃 8 EMA RUNNER EXIT on {trade['ticker']} | "
+                                            f"5m candle closed below 8 EMA (${c_close:.2f} < ${c_ema8:.2f})"
+                                        )
+                                        positions_to_close.append((trade, "runner_exit_8ema"))
+                                        continue
+                                    elif sig == "bearish" and c_close > c_ema8:
+                                        logger.info(
+                                            f"[PaperTrader] 🏃 8 EMA RUNNER EXIT on {trade['ticker']} | "
+                                            f"5m candle closed above 8 EMA (${c_close:.2f} > ${c_ema8:.2f})"
+                                        )
+                                        positions_to_close.append((trade, "runner_exit_8ema"))
+                                        continue
                     except Exception as ex:
                         logger.debug(f"[PaperTrader] 5m strategy exit check error for {trade['ticker']}: {ex}")
 

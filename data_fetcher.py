@@ -510,13 +510,15 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webu
             if _webull_openapi_failures >= _WEBULL_MAX_FAILURES:
                 print(f"[Circuit Breaker] Webull OpenAPI failed {_WEBULL_MAX_FAILURES}x consecutively — skipping for rest of scan")
 
-    # 3. Fallback to Yahoo Finance public chart API (100% reliable cloud fallback)
-    try:
-        df = _fetch_yahoo_fallback_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
-        if df is not None and len(df) >= 20:
-            return df
-    except Exception as e:
-        print(f"[Yahoo Fallback] Error fetching {ticker}: {e}")
+    # 3. Fallback to Yahoo Finance public chart API (disabled by default per instructions)
+    disable_yahoo = os.getenv("DISABLE_YAHOO", "true").lower() in ("true", "1", "yes")
+    if not disable_yahoo:
+        try:
+            df = _fetch_yahoo_fallback_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
+            if df is not None and len(df) >= 20:
+                return df
+        except Exception as e:
+            print(f"[Yahoo Fallback] Error fetching {ticker}: {e}")
 
     return None
 
