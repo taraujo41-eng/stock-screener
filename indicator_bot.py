@@ -254,10 +254,8 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
     
     send_reversal_alert = os.getenv("SEND_REVERSAL_ALERTS", "false").lower() in ("true", "1", "yes")
 
-    tp1_target = hod if signal_type == "bullish" else lod
-    tp1_label = f"HOD ${hod:.2f}" if signal_type == "bullish" and hod else (f"LOD ${lod:.2f}" if lod else "Target 1")
     sl_label = f"5m Candle Close Below VWAP (${vwap_target:.2f})" if signal_type == "bullish" else f"5m Candle Close Above VWAP (${vwap_target:.2f})"
-    runner_label = f"5m Candle Close Below 8 EMA (${ema8:.2f})" if (signal_type == "bullish" and ema8) else (f"5m Candle Close Above 8 EMA (${ema8:.2f})" if ema8 else "8 EMA Close")
+    exit_8ema_label = f"5m Candle Close Below 8 EMA (${ema8:.2f})" if (signal_type == "bullish" and ema8) else (f"5m Candle Close Above 8 EMA (${ema8:.2f})" if ema8 else "8 EMA Candle Close")
 
     # 1. Send SMS Notification (only if reversal alerts explicitly enabled)
     if send_reversal_alert and alert_method in ("SMS", "BOTH"):
@@ -268,8 +266,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             f"Setup: {reason or (action + ' Retest')}\n"
             f"Price: ${last_price:.2f} | VWAP: ${vwap_target:.2f}\n"
             f"8 EMA: ${ema8:.2f}\n"
-            f"TP1 (Partial): {tp1_label}\n"
-            f"Runner Exit: {runner_label}\n"
+            f"Exit Rule: {exit_8ema_label}\n"
             f"Stop Loss: {sl_label}\n"
             f"Suggested Option: {opt_str}"
         )
@@ -291,8 +288,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             f"<b>Price:</b> ${last_price:.2f}\n"
             f"<b>VWAP Retest Level:</b> ${vwap_target:.2f}\n"
             f"<b>8 EMA:</b> ${ema8:.2f}\n"
-            f"<b>TP1 (Majority Exit):</b> 🎯 {_esc(tp1_label)}\n"
-            f"<b>TP2 (Runner Trail):</b> 🏃 {_esc(runner_label)}\n"
+            f"<b>Exit Rule:</b> 🏃 {_esc(exit_8ema_label)}\n"
             f"<b>Stop Loss:</b> 🛑 {_esc(sl_label)}\n"
             f"<b>Suggested Option:</b> {_esc(opt_str)}"
         )
@@ -332,7 +328,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                     f"Price: ${result.get('entry_price', 0):.2f}\n"
                     f"Qty: {result.get('quantity', 1)} contract(s)\n"
                     f"Stock: ${last_price:.2f} | VWAP: ${vwap_target:.2f} | 8 EMA: ${ema8:.2f}\n"
-                    f"TP1: {tp1_label} | Runner: {runner_label}\n"
+                    f"Exit Rule: {exit_8ema_label}\n"
                     f"SL: {sl_label}\n"
                     f"Setup: {reason or action}\n"
                     f"Mode: {mode_str}"
@@ -348,8 +344,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                         f"<b>Entry Price:</b> ${result.get('entry_price', 0):.2f}\n"
                         f"<b>Qty:</b> {result.get('quantity', 1)} contract(s)\n"
                         f"<b>Stock Price:</b> ${last_price:.2f} | <b>VWAP:</b> ${vwap_target:.2f} | <b>8 EMA:</b> ${ema8:.2f}\n"
-                        f"<b>TP1 (Majority Exit):</b> 🎯 {_esc(tp1_label)}\n"
-                        f"<b>TP2 (Runner Trail):</b> 🏃 {_esc(runner_label)}\n"
+                        f"<b>Exit Rule:</b> 🏃 {_esc(exit_8ema_label)}\n"
                         f"<b>Stop Loss:</b> 🛑 {_esc(sl_label)}\n"
                         f"<b>Setup:</b> {_esc(reason or action)}\n"
                         f"<b>Mode:</b> {_esc(mode_str)}"
