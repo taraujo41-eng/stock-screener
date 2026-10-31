@@ -417,14 +417,14 @@ def evaluate_ticker_process(ticker, df):
         hod = float(rth_bars["High"].max())
         lod = float(rth_bars["Low"].min())
         
-        # Indicator 1: Single-line RTH VWAP
-        typical_price = (rth_bars["High"] + rth_bars["Low"] + rth_bars["Close"]) / 3.0
-        cum_vol = rth_bars["Volume"].cumsum()
-        cum_vol = cum_vol.replace(0, 1)
-        vwap_series = (typical_price * rth_bars["Volume"]).cumsum() / cum_vol
-        current_vwap = float(vwap_series.iloc[-1])
+        # Indicator 1: Full-Session VWAP (Calculated across full session including pre-market)
+        # Matches charting platforms with extended hours enabled (the true yellow VWAP line)
+        typical_price_all = (today_df["High"] + today_df["Low"] + today_df["Close"]) / 3.0
+        cum_vol_all = today_df["Volume"].cumsum().replace(0, 1)
+        vwap_series = (typical_price_all * today_df["Volume"]).cumsum() / cum_vol_all
+        current_vwap = float(vwap_series.loc[rth_bars.index[-1]])
         
-        # Indicator 2: 8 EMA on 5-minute candles
+        # Indicator 2: 8 EMA on 5-minute regular hours candles
         ema8_series = rth_bars["Close"].ewm(span=8, adjust=False).mean()
         current_ema8 = float(ema8_series.iloc[-1])
         
@@ -451,21 +451,17 @@ def evaluate_ticker_process(ticker, df):
         is_short = False
         confluence_tag = ""
         
-        # Strict VWAP Proximity threshold (default 0.25% - ensures live price is actively touching/at VWAP)
-        vwap_proximity = float(os.getenv("VWAP_PROXIMITY_PCT", "0.0025"))
-        
         # 4. Long Entry Criteria (Buy / Call):
         # 1. Breakout: A completed 5-minute candle has closed above PMH.
         # 2. Outside Chop: Live price is strictly above PMH.
         # 3. VWAP Alignment: The VWAP line is above or holding PMH (VWAP >= PMH * 0.998).
-        # 4. Long Filter: Live price is strictly above/at VWAP (Never buy below VWAP).
-        # 5. Live VWAP Proximity: Live price is within tight proximity of VWAP (close_price <= VWAP * (1 + vwap_proximity)).
-        # 6. Physical VWAP Touch: The current candle or completed candle physically reached down to VWAP support.
-        is_near_vwap_long = (close_price >= current_vwap) and (close_price <= current_vwap * (1.0 + vwap_proximity))
+        # 4. Long Filter: Live price is above or at VWAP.
+        # 5. ACTUAL PHYSICAL VWAP RETEST: The candle wick MUST physically reach down and touch the VWAP line (c_low <= current_vwap <= c_high).
+        #    Price must NOT be drifting high above VWAP or closing way below it.
         vwap_aligned_long = current_vwap >= (pm_high * 0.998)
         price_above_pmh = close_price > pm_high
         
-        if has_closed_above_pmh and vwap_aligned_long and price_above_pmh and is_near_vwap_long:
+        if has_closed_above_pmh and vwap_aligned_long and price_above_pmh:
             candles_to_check = [rth_bars.iloc[-1]]
             if len(rth_bars) >= 2:
                 candles_to_check.append(rth_bars.iloc[-2])
@@ -473,10 +469,15 @@ def evaluate_ticker_process(ticker, df):
                 c_low = float(candle["Low"])
                 c_high = float(candle["High"])
                 c_open = float(candle["Open"])
-                # Must physically reach down to touch VWAP support from above
-                touched_vwap = (c_low <= current_vwap) and (c_high >= current_vwap)
-                approached_from_above = (c_open >= current_vwap * 0.998) or (c_high > current_vwap)
-                if touched_vwap and approached_from_above:
+                c_close = float(candle["Close"])
+                
+                # ACTUAL physical VWAP touch: candle physically spans across or touches the VWAP line
+                actual_vwap_touch = (c_low <= current_vwap) and (c_high >= current_vwap)
+                
+                # Rejection confirmation: must not close dumped below VWAP, and must have approached from above
+                valid_rejection = (c_close >= current_vwap * 0.998) and (c_open >= current_vwap * 0.995 or c_high > current_vwap)
+                
+                if actual_vwap_touch and valid_rejection:
                     is_long = True
                     # Dual test requires price to physically retest PMH support level
                     dual_test = (c_low <= pm_high * 1.001) and (c_high >= pm_high * 0.998)
@@ -487,14 +488,13 @@ def evaluate_ticker_process(ticker, df):
         # 1. Breakdown: A completed 5-minute candle has closed below PML.
         # 2. Outside Chop: Live price is strictly below PML.
         # 3. VWAP Alignment: The VWAP line is below or holding PML (VWAP <= PML * 1.002).
-        # 4. Short Filter: Live price is strictly below/at VWAP (Never short above VWAP).
-        # 5. Live VWAP Proximity: Live price is within tight proximity of VWAP (close_price >= VWAP * (1 - vwap_proximity)).
-        # 6. Physical VWAP Touch: The current candle or completed candle physically reached up to VWAP resistance.
-        is_near_vwap_short = (close_price <= current_vwap) and (close_price >= current_vwap * (1.0 - vwap_proximity))
+        # 4. Short Filter: Live price is below or at VWAP.
+        # 5. ACTUAL PHYSICAL VWAP RETEST: The candle wick MUST physically reach up and touch the VWAP line (c_low <= current_vwap <= c_high).
+        #    Price must NOT be drifting far below VWAP or closing way above it.
         vwap_aligned_short = current_vwap <= (pm_low * 1.002)
         price_below_pml = close_price < pm_low
         
-        if has_closed_below_pml and vwap_aligned_short and price_below_pml and is_near_vwap_short and not is_long:
+        if has_closed_below_pml and vwap_aligned_short and price_below_pml and not is_long:
             candles_to_check = [rth_bars.iloc[-1]]
             if len(rth_bars) >= 2:
                 candles_to_check.append(rth_bars.iloc[-2])
@@ -502,10 +502,15 @@ def evaluate_ticker_process(ticker, df):
                 c_low = float(candle["Low"])
                 c_high = float(candle["High"])
                 c_open = float(candle["Open"])
-                # Must physically reach up to touch VWAP resistance from below
-                touched_vwap = (c_high >= current_vwap) and (c_low <= current_vwap)
-                approached_from_below = (c_open <= current_vwap * 1.002) or (c_low < current_vwap)
-                if touched_vwap and approached_from_below:
+                c_close = float(candle["Close"])
+                
+                # ACTUAL physical VWAP touch: candle physically spans across or touches the VWAP line
+                actual_vwap_touch = (c_high >= current_vwap) and (c_low <= current_vwap)
+                
+                # Rejection confirmation: must not close blown through VWAP to the upside, and approached from below
+                valid_rejection = (c_close <= current_vwap * 1.002) and (c_open <= current_vwap * 1.005 or c_low < current_vwap)
+                
+                if actual_vwap_touch and valid_rejection:
                     is_short = True
                     # Dual test requires price to physically retest PML resistance level
                     dual_test = (c_high >= pm_low * 0.999) and (c_low <= pm_low * 1.002)
