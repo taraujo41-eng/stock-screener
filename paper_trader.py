@@ -1050,22 +1050,20 @@ class PaperTrader:
                                         logger.warning(f"[PaperTrader] Candle timing check error: {ex} — skipping exit check for safety")
                                         continue
 
-                                # Strategy Exit: Full 5-Minute Candle Body Over 8 EMA
-                                # A candle that merely crosses/straddles the 8 EMA line (or wicks/closes near VWAP while still on the trending side of 8 EMA) does NOT exit the trade.
-                                # Both Open AND Close of the completed 5-minute candle (after entry) must be past the 8 EMA:
-                                # - Long trade: Exit when both Open < 8 EMA and Close < 8 EMA
-                                # - Short trade: Exit when both Open > 8 EMA and Close > 8 EMA
-                                if sig == "bullish" and c_open < c_ema8 and c_close < c_ema8:
+                                # Strategy Exit: Completed 5-Minute Candle Close Across 8 EMA
+                                # - Long trade: Exit when completed 5m candle closes below 8 EMA (c_close < c_ema8)
+                                # - Short trade: Exit when completed 5m candle closes above 8 EMA (c_close > c_ema8)
+                                if sig == "bullish" and c_close < c_ema8:
                                     logger.info(
                                         f"[PaperTrader] 🏃 8 EMA EXIT on {trade['ticker']} | "
-                                        f"Full 5m candle body closed below 8 EMA (Open=${c_open:.2f}, Close=${c_close:.2f} < 8EMA=${c_ema8:.2f})"
+                                        f"5m candle closed below 8 EMA (Close=${c_close:.2f} < 8EMA=${c_ema8:.2f})"
                                     )
                                     positions_to_close.append((trade, "exit_8ema"))
                                     continue
-                                elif sig == "bearish" and c_open > c_ema8 and c_close > c_ema8:
+                                elif sig == "bearish" and c_close > c_ema8:
                                     logger.info(
                                         f"[PaperTrader] 🏃 8 EMA EXIT on {trade['ticker']} | "
-                                        f"Full 5m candle body closed above 8 EMA (Open=${c_open:.2f}, Close=${c_close:.2f} > 8EMA=${c_ema8:.2f})"
+                                        f"5m candle closed above 8 EMA (Close=${c_close:.2f} > 8EMA=${c_ema8:.2f})"
                                     )
                                     positions_to_close.append((trade, "exit_8ema"))
                                     continue
