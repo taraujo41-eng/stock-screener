@@ -431,25 +431,22 @@ def evaluate_ticker_process(ticker, df):
         if pm_low <= close_price <= pm_high:
             return None
 
-        # Check breakout conditions during RTH (At least one completed 5-minute candle closed past PMH / PML and established side of VWAP)
-        completed_rth = rth_bars.iloc[:-1] if len(rth_bars) >= 2 else rth_bars
-        completed_vwap = vwap_series.loc[completed_rth.index]
-        has_closed_above_pmh = bool((completed_rth["Close"] > pm_high).any())
-        has_closed_below_pml = bool((completed_rth["Close"] < pm_low).any())
-        has_closed_above_vwap = bool((completed_rth["Close"] > completed_vwap).any())
-        has_closed_below_vwap = bool((completed_rth["Close"] < completed_vwap).any())
+        # Check breakout conditions during RTH (Either an earlier candle broke out, OR the current candle itself broke out)
+        has_closed_above_pmh = bool((rth_bars["Close"] > pm_high).any())
+        has_closed_below_pml = bool((rth_bars["Close"] < pm_low).any())
+        has_closed_above_vwap = bool((rth_bars["Close"] > vwap_series).any())
+        has_closed_below_vwap = bool((rth_bars["Close"] < vwap_series).any())
         
         is_long = False
         is_short = False
         confluence_tag = ""
         
         # 4. Long Entry Criteria (Buy / Call):
-        # 1. Breakout: A completed 5-minute candle has closed above PMH and above VWAP.
+        # 1. Breakout: Candle closes above PMH and above VWAP.
         # 2. Outside Chop: Live price is strictly above PMH.
         # 3. VWAP Alignment: The VWAP line is above or holding PMH (VWAP >= PMH * 0.998).
         # 4. Long Filter: Live price is above or at VWAP.
-        # 5. ACTUAL PHYSICAL VWAP RETEST: Price pulls back from above VWAP, the candle wick physically touches VWAP (c_low <= c_vwap <= c_high),
-        #    and price holds/rejects at or above VWAP (c_close >= c_vwap).
+        # 5. ACTUAL PHYSICAL VWAP RETEST / TAG: Candle physically tags VWAP (c_low <= c_vwap <= c_high) and closes above VWAP (c_close >= c_vwap).
         vwap_aligned_long = current_vwap >= (pm_high * 0.998)
         price_above_pmh = close_price > pm_high
         
@@ -464,11 +461,11 @@ def evaluate_ticker_process(ticker, df):
                 c_close = float(candle["Close"])
                 c_vwap = float(vwap_series.loc[candle.name]) if candle.name in vwap_series.index else current_vwap
                 
-                # ACTUAL physical VWAP touch: candle physically spans across or touches the VWAP line
+                # ACTUAL physical VWAP touch/tag: candle physically spans across or touches the VWAP line
                 actual_vwap_touch = (c_low <= c_vwap) and (c_high >= c_vwap)
                 
-                # True pullback from above: opened above/at VWAP and held at/above VWAP (not an initial breakout bar from below)
-                valid_rejection = (c_close >= c_vwap) and (c_open >= c_vwap * 0.999)
+                # Valid rejection/hold: candle closes at or above VWAP
+                valid_rejection = (c_close >= c_vwap)
                 
                 if actual_vwap_touch and valid_rejection:
                     is_long = True
@@ -478,12 +475,11 @@ def evaluate_ticker_process(ticker, df):
                     break
 
         # 5. Short Entry Criteria (Sell Short / Put):
-        # 1. Breakdown: A completed 5-minute candle has closed below PML and below VWAP.
+        # 1. Breakdown: Candle closes below PML and below VWAP.
         # 2. Outside Chop: Live price is strictly below PML.
         # 3. VWAP Alignment: The VWAP line is below or holding PML (VWAP <= PML * 1.002).
         # 4. Short Filter: Live price is below or at VWAP.
-        # 5. ACTUAL PHYSICAL VWAP RETEST: Price bounces up from below VWAP, the candle wick physically touches VWAP (c_low <= c_vwap <= c_high),
-        #    and price rejects at or below VWAP (c_close <= c_vwap).
+        # 5. ACTUAL PHYSICAL VWAP RETEST / TAG: Candle physically tags VWAP (c_low <= c_vwap <= c_high) and closes below VWAP (c_close <= c_vwap).
         vwap_aligned_short = current_vwap <= (pm_low * 1.002)
         price_below_pml = close_price < pm_low
         
@@ -498,11 +494,11 @@ def evaluate_ticker_process(ticker, df):
                 c_close = float(candle["Close"])
                 c_vwap = float(vwap_series.loc[candle.name]) if candle.name in vwap_series.index else current_vwap
                 
-                # ACTUAL physical VWAP touch: candle physically spans across or touches the VWAP line
+                # ACTUAL physical VWAP touch/tag: candle physically spans across or touches the VWAP line
                 actual_vwap_touch = (c_high >= c_vwap) and (c_low <= c_vwap)
                 
-                # True bounce/retest from below: opened below/at VWAP and rejected at/below VWAP (not an initial breakdown bar from above)
-                valid_rejection = (c_close <= c_vwap) and (c_open <= c_vwap * 1.001)
+                # Valid rejection: candle closes at or below VWAP
+                valid_rejection = (c_close <= c_vwap)
                 
                 if actual_vwap_touch and valid_rejection:
                     is_short = True
