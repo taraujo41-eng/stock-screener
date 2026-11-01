@@ -407,14 +407,13 @@ def evaluate_ticker_process(ticker, df):
         hod = float(rth_bars["High"].max())
         lod = float(rth_bars["Low"].min())
         
-        # Indicator 1: Full-Session VWAP (Calculated across full session including pre-market)
-        # Matches charting platforms with extended hours enabled (the true yellow VWAP line)
-        typical_price_all = (today_df["High"] + today_df["Low"] + today_df["Close"]) / 3.0
-        cum_vol_all = today_df["Volume"].cumsum().replace(0, 1)
-        vwap_series = (typical_price_all * today_df["Volume"]).cumsum() / cum_vol_all
+        # Indicator 1: RTH Market Hours VWAP (Calculated strictly from 09:30 AM market open)
+        typical_price_rth = (rth_bars["High"] + rth_bars["Low"] + rth_bars["Close"]) / 3.0
+        cum_vol_rth = rth_bars["Volume"].cumsum().replace(0, 1)
+        vwap_series = (typical_price_rth * rth_bars["Volume"]).cumsum() / cum_vol_rth
         current_vwap = float(vwap_series.loc[rth_bars.index[-1]])
         
-        # Indicator 2: 8 EMA on 5-minute regular hours candles
+        # Indicator 2: 8 EMA on 5-minute regular market hours candles (starting 09:30 AM)
         ema8_series = rth_bars["Close"].ewm(span=8, adjust=False).mean()
         current_ema8 = float(ema8_series.iloc[-1])
         

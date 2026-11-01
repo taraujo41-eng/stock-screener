@@ -1013,10 +1013,10 @@ class PaperTrader:
                             today_df = df_bars[df_bars.index.date == today_date]
                             rth_bars = today_df.between_time("09:30", "16:00")
                             if len(rth_bars) >= 2:
-                                # Full-Session VWAP (includes premarket volume to match chart yellow line)
-                                typical_price = (today_df["High"] + today_df["Low"] + today_df["Close"]) / 3.0
-                                cum_vol = today_df["Volume"].cumsum().replace(0, 1)
-                                vwap_s = (typical_price * today_df["Volume"]).cumsum() / cum_vol
+                                # Market Hours VWAP (starts at 09:30 AM market open) & 8 EMA
+                                typical_price = (rth_bars["High"] + rth_bars["Low"] + rth_bars["Close"]) / 3.0
+                                cum_vol = rth_bars["Volume"].cumsum().replace(0, 1)
+                                vwap_s = (typical_price * rth_bars["Volume"]).cumsum() / cum_vol
                                 ema8_s = rth_bars["Close"].ewm(span=8, adjust=False).mean()
 
                                 # Last closed 5m candle
