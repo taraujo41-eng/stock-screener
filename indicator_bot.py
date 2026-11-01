@@ -497,13 +497,13 @@ def evaluate_ticker_process(ticker, df):
         )
 
         if is_long_trend:
-            pullback_tested = (low_price <= current_ema8 * 1.0015) and (low_price >= current_vwap * 0.998)
+            pullback_tested = (low_price <= current_ema8 * 1.001) and (low_price >= current_vwap * 0.998)
             lower_wick = min(open_price, close_price) - low_price
-            is_hammer = (lower_wick >= 0.35 * bar_range) or ((close_price - low_price) >= 0.55 * bar_range)
-            bullish_close = (close_price > current_ema8) and (close_price >= open_price)
-            vol_expanding = (vol >= prev_vol * 0.85)
+            is_hammer = (lower_wick >= 0.40 * bar_range)
+            is_bullish_engulf = (close_price > open_price) and ((close_price - low_price) >= 0.70 * bar_range) and (close_price > current_ema8)
+            vol_expanding = (vol >= prev_vol * 0.95)
 
-            if pullback_tested and (is_hammer or bullish_close) and vol_expanding:
+            if pullback_tested and (is_hammer or is_bullish_engulf) and vol_expanding:
                 is_long = True
                 confluence_tag = "★ 8 EMA Hammer Rejection" if is_hammer else "8 EMA Bullish Pullback Close"
                 if low_price <= (current_vwap * 1.001):
@@ -518,20 +518,20 @@ def evaluate_ticker_process(ticker, df):
         # 4. Trigger: Rejection tail (topping tail or close back below 8 EMA) on expanding volume
         is_short_trend = (
             (close_price < current_vwap) and
-            (current_ema8 < current_vwap * 0.9997) and
+            (current_ema8 < current_vwap * 0.9995) and
             (current_ema8 <= prev_ema8) and
             (ema8_slice < vwap_slice).all() and
             short_15m_confirmed
         )
 
         if is_short_trend and not is_long:
-            pullback_tested = (high_price >= current_ema8 * 0.9985) and (high_price <= current_vwap * 1.002)
+            pullback_tested = (high_price >= current_ema8 * 0.999) and (high_price <= current_vwap * 1.002)
             upper_wick = high_price - max(open_price, close_price)
-            is_topping_tail = (upper_wick >= 0.35 * bar_range) or ((high_price - close_price) >= 0.55 * bar_range)
-            bearish_close = (close_price < current_ema8) and (close_price <= open_price)
-            vol_expanding = (vol >= prev_vol * 0.85)
+            is_topping_tail = (upper_wick >= 0.40 * bar_range)
+            is_bearish_engulf = (close_price < open_price) and ((high_price - close_price) >= 0.70 * bar_range) and (close_price < current_ema8)
+            vol_expanding = (vol >= prev_vol * 0.95)
 
-            if pullback_tested and (is_topping_tail or bearish_close) and vol_expanding:
+            if pullback_tested and (is_topping_tail or bearish_engulf) and vol_expanding:
                 is_short = True
                 confluence_tag = "★ 8 EMA Topping Tail Rejection" if is_topping_tail else "8 EMA Bearish Pullback Close"
                 if high_price >= (current_vwap * 0.999):
@@ -575,9 +575,10 @@ def evaluate_ticker_process(ticker, df):
         m_sentiment = sentiment_data.get('sentiment', 'Neutral')
         m_summary = sentiment_data.get('summary', '')
         
-        sentiment_align = "Market Aligned 🎯" if (
+        is_market_aligned = (
             (is_long and m_sentiment == "Bullish") or (is_short and m_sentiment == "Bearish")
-        ) else "Counter-Trend 🔄"
+        )
+        sentiment_align = "Market Aligned 🎯" if is_market_aligned else "Counter-Trend 🔄"
         
         setup_reason = (
             f"VWAP Trend Pullback | Above VWAP (${current_vwap:.2f}) + 8EMA Rising (${current_ema8:.2f}) | {confluence_tag} 🚀"
@@ -585,15 +586,30 @@ def evaluate_ticker_process(ticker, df):
             f"VWAP Trend Pullback | Below VWAP (${current_vwap:.2f}) + 8EMA Falling (${current_ema8:.2f}) | {confluence_tag} 🩸"
         )
         
-        score = 16
-        if "★" in confluence_tag:
+        # Rigorous A+ Scoring Formula
+        score = 10
+        if (is_long and (ema8_slice > vwap_slice).all()) or (is_short and (ema8_slice < vwap_slice).all()):
             score += 3
-        if sentiment_align.startswith("Market Aligned"):
+        if (is_long and long_15m_confirmed) or (is_short and short_15m_confirmed):
+            score += 2
+        if "★" in confluence_tag:
+            score += 2
+        if is_market_aligned:
+            score += 3
+        if vol >= prev_vol * 1.0:
             score += 2
         if rvol > 1.2:
             score += 1
             
-        grade = "A+"
+        # Only assign A+ if score >= 17 AND market is aligned AND volume expanded
+        if score >= 17 and is_market_aligned and (vol >= prev_vol * 0.95):
+            grade = "A+"
+        elif score >= 14:
+            grade = "A"
+        elif score >= 11:
+            grade = "B"
+        else:
+            grade = "C"
         
         logger.info(
             f"[{ticker}] 🎯 {grade} {action} SIGNAL! Price: ${close_price:.2f} | "
@@ -850,7 +866,7 @@ def bot_loop():
                         # Strictly enforce ONLY A+ setups
                         grade = res.get('grade')
                         score = res.get('score', 0)
-                        if grade != "A+" and score < 12:
+                        if grade != "A+":
                             logger.info(f"[{ticker}] ⚠️ Skipping non-A+ setup (Grade: {grade}, Score: {score})")
                             continue
 
