@@ -800,7 +800,9 @@ function renderResults() {
       filtered = scanData.filter(d => d.Direction === "Bearish");
     }
   } else {
-    if (currentFilter === "bullish") {
+    if (currentFilter === "aplus") {
+      filtered = scanData.filter(d => (d.Grade === "A+" || (d.Score && d.Score >= 19)));
+    } else if (currentFilter === "bullish") {
       filtered = scanData.filter(d =>
         d["Bullish Signals"] && d["Bullish Signals"] !== "—");
     } else if (currentFilter === "bearish") {
@@ -1876,7 +1878,7 @@ function showTradeToast(trade) {
   toast.innerHTML = `
     <div class="trade-toast__icon">🚀</div>
     <div class="trade-toast__content">
-      <div class="trade-toast__title">New 3-Sigma Trade Placed</div>
+      <div class="trade-toast__title">New A+ VWAP Trade Placed</div>
       <div class="trade-toast__desc">
         ${actionEmoji} <strong>${trade.ticker}</strong> ${trade.type} $${trade.strike} @ $${(trade.entry_price || 0).toFixed(2)}<br>
         <span style="color: #94a3b8; font-size: 0.75rem;">VWAP Retest (Entry): $${(trade.vwap_entry || trade.vwap_target) ? (trade.vwap_entry || trade.vwap_target).toFixed(2) : '—'} | Target: +20% | SL: -20%</span>
@@ -2071,7 +2073,7 @@ function renderPaperOpenPositions(positions) {
       <div class="empty-state">
         <div class="empty-state__icon">💼</div>
         <div class="empty-state__title">No Open Positions</div>
-        <div class="empty-state__text">When 3-Sigma A+ reversal signals fire during market hours, paper trades will automatically appear here!</div>
+        <div class="empty-state__text">When A+ VWAP pullback signals fire during market hours, paper trades will automatically appear here!</div>
       </div>
     `;
     return;

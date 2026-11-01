@@ -26,16 +26,16 @@
     <header class="header">
       <span class="header__icon">📋</span>
       <h1 class="header__title">Watchlist Scanner</h1>
-      <p class="header__subtitle" id="headerSubtitle">Technicals & Market Sentiment Reversal Scanner</p>
+      <p class="header__subtitle" id="headerSubtitle">VWAP Trend Pullback &amp; Momentum Scanner</p>
     </header>
 
     <!-- Navigation Tabs (Scanner vs Paper Trader vs Daily Movers) -->
     <div class="main-tabs">
       <button class="main-tab main-tab--active" id="tabScannerBtn" onclick="switchMainTab('scanner')">
-        🔎 Reversal Scanner
+        🔎 VWAP Trend Scanner
       </button>
       <button class="main-tab" id="tabPaperBtn" onclick="switchMainTab('paper')">
-        🤖 3-Sigma Auto Trader <span class="tab-badge" id="paperBadge">0</span>
+        🤖 A+ Auto Trader <span class="tab-badge" id="paperBadge">0</span>
       </button>
       <button class="main-tab" id="tabPremarketBtn" onclick="switchMainTab('premarket')">
         🌅 Premarket Movers
@@ -49,7 +49,7 @@
     <div id="scannerView">
       <!-- Scanner description -->
       <div class="mode-info">
-        <p class="mode-desc" id="modeDesc">Scans tickers on 15m candles with extended hours during active market, or daily candles when closed.</p>
+        <p class="mode-desc" id="modeDesc">Scans tickers on 5m/15m candles for VWAP Trend Pullbacks, 8 EMA pocket retests, and high-conviction A+ setups.</p>
         <div class="mode-links">
           <button class="edit-link" id="editWatchlistBtn" onclick="openWatchlistModal()">⚙️ Edit Watchlist</button>
           <button class="edit-link edit-link--top50" id="viewTop50Btn" onclick="openTop50Modal()">🔥 View Top 50</button>
@@ -173,6 +173,7 @@
       <!-- Filter tabs -->
       <div class="filters hidden" id="filters">
         <button class="filter-btn filter-btn--active" data-filter="all" onclick="setFilter('all', this)">All</button>
+        <button class="filter-btn" data-filter="aplus" onclick="setFilter('aplus', this)">⭐️ A+ Only</button>
         <button class="filter-btn" data-filter="bullish" onclick="setFilter('bullish', this)">🟢 Bullish</button>
         <button class="filter-btn" data-filter="bearish" onclick="setFilter('bearish', this)">🔴 Bearish</button>
         <button class="filter-btn" data-filter="zone" onclick="setFilter('zone', this)">🧱 S/D Zone</button>
@@ -201,7 +202,7 @@
         <div class="empty-state" id="emptyState">
           <div class="empty-state__icon">🔎</div>
           <div class="empty-state__title">Ready to scan</div>
-          <div class="empty-state__text">Choose a mode above and tap scan<br>to find reversal setups</div>
+          <div class="empty-state__text">Choose a mode above and tap scan<br>to find VWAP Trend Pullback setups</div>
         </div>
       </div>
     </div>
@@ -212,7 +213,7 @@
       <!-- Live Status Banner -->
       <div class="paper-live-banner">
         <div class="paper-live-dot"></div>
-        <span class="paper-live-text">Live 3.0-Sigma A+ Auto-Trader Bot Active — Scanning <span id="paperWatchlistCount">165</span> Stocks</span>
+        <span class="paper-live-text">Live VWAP Trend Pullback A+ Auto-Trader Bot Active — Scanning Top 50 Universe</span>
       </div>
 
       <!-- Account Performance Summary Header -->
@@ -221,7 +222,7 @@
           <div class="paper-summary-title">
             <span class="paper-summary-icon">⚡</span>
             <div>
-              <h3>3-Sigma Auto Trader Simulator</h3>
+              <h3>VWAP Trend Pullback A+ Auto Trader</h3>
               <span class="paper-mode-badge" id="paperModeText">🛡️ 100% Safe Local Simulation Mode</span>
             </div>
           </div>
@@ -263,7 +264,7 @@
           <div class="empty-state">
             <div class="empty-state__icon">💼</div>
             <div class="empty-state__title">No Open Positions</div>
-            <div class="empty-state__text">When 3-Sigma A+ reversal signals fire during market hours, paper trades will automatically appear here!</div>
+            <div class="empty-state__text">When A+ VWAP pullback signals fire during market hours, paper trades will automatically appear here!</div>
           </div>
         </div>
       </div>

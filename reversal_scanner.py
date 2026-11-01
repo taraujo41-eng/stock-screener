@@ -3635,20 +3635,289 @@ def tight_spread_options_scan(tickers=None, extended_hours=False):
 
 
 # =====================================================================
-# Watchlist Scanners
+# Watchlist & Top 50 Scanners (VWAP Trend Pullback Strategy)
 # =====================================================================
 
+def _analyze_vwap_trend_pullback(ticker, df, is_market_bullish=None, live_only=False):
+    """
+    Evaluates ticker for VWAP Trend Pullback Strategy Blueprint:
+      1. Timeframe: 5m candles for entry, 15m macro trend confirmation.
+      2. Trend & Value Filter:
+         - Long: Price above VWAP, 8 EMA sloping upward and positioned above VWAP (with daylight).
+         - Short: Price below VWAP, 8 EMA sloping downward and positioned below VWAP (with daylight).
+      3. Pullback (Patience Phase): Retrace toward 8 EMA or pocket between 8 EMA and VWAP.
+      4. Trigger: Rejection tail (wick >= 50% or engulfing >= 75%) with expanding volume (>= 1.15x).
+      5. Risk Management:
+         - Stop-Loss: 1-2 ticks below rejection swing low / above rejection swing high, or just beyond VWAP ($0.05 buffer).
+         - Profit Target 1: Prior swing high / HOD (Long) or LOD (Short).
+      6. Scoring:
+         - Grade A+: Score >= 19, market sentiment aligned, volume expanded >= 1.15x.
+    """
+    if df is None or len(df) < 5:
+        return None
+
+    try:
+        today_date = df.index[-1].date()
+        today_df = df[df.index.date == today_date]
+        
+        pm_bars = today_df.between_time("04:00", "09:29:59")
+        rth_bars = today_df.between_time("09:30", "16:00").copy()
+        
+        if len(rth_bars) < 3:
+            return None
+
+        # Indicator 1: RTH Market Hours VWAP (Strictly from 09:30 AM open)
+        typical_price_rth = (rth_bars["High"] + rth_bars["Low"] + rth_bars["Close"]) / 3.0
+        cum_vol_rth = rth_bars["Volume"].cumsum().replace(0, 1)
+        rth_bars["vwap"] = (typical_price_rth * rth_bars["Volume"]).cumsum() / cum_vol_rth
+
+        # Indicator 2: 8 EMA on 5m candles
+        rth_bars["ema8"] = rth_bars["Close"].ewm(span=8, adjust=False).mean()
+
+        # Indicator 3: 14 ATR on 5m candles for Rubber Band filter
+        hl = rth_bars["High"] - rth_bars["Low"]
+        hc = (rth_bars["High"] - rth_bars["Close"].shift(1)).abs()
+        lc = (rth_bars["Low"] - rth_bars["Close"].shift(1)).abs()
+        tr = hl.combine(hc, max).combine(lc, max)
+        rth_bars["atr"] = tr.rolling(14, min_periods=1).mean()
+
+        # Indicator 4: 15-Minute Macro Confirmation (Resampled from 5m)
+        rth_15m = rth_bars.resample("15min").agg({
+            "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
+        }).dropna()
+        rth_15m["ema8"] = rth_15m["Close"].ewm(span=8, adjust=False).mean()
+        tp_15 = (rth_15m["High"] + rth_15m["Low"] + rth_15m["Close"]) / 3.0
+        cv_15 = rth_15m["Volume"].cumsum().replace(0, 1)
+        rth_15m["vwap"] = (tp_15 * rth_15m["Volume"]).cumsum() / cv_15
+
+        pm_high = float(pm_bars["High"].max()) if not pm_bars.empty else 0.0
+        pm_low = float(pm_bars["Low"].min()) if not pm_bars.empty else 0.0
+        hod = float(rth_bars["High"].max())
+        lod = float(rth_bars["Low"].min())
+
+        # Market Sentiment
+        sentiment_data = get_market_sentiment()
+        m_sentiment = sentiment_data.get('sentiment', 'Neutral')
+        m_summary = sentiment_data.get('summary', '')
+
+        # Determine which candle indices to evaluate
+        ny_tz = get_ny_timezone()
+        last_dt = rth_bars.index[-1]
+        dt_ny = last_dt.tz_convert(ny_tz) if hasattr(last_dt, "tzinfo") and last_dt.tzinfo is not None else last_dt
+        current_mins = dt_ny.hour * 60 + dt_ny.minute
+        is_live_morning = (585 <= current_mins <= 690)  # 09:45 AM - 11:30 AM ET
+
+        if live_only and not is_live_morning:
+            return None
+
+        if live_only or is_live_morning:
+            eval_indices = [len(rth_bars) - 1]
+        else:
+            # Check 09:45 - 11:30 AM execution window bars, or recent bars
+            eval_indices = []
+            for idx in range(3, len(rth_bars)):
+                b_dt = rth_bars.index[idx]
+                b_ny = b_dt.tz_convert(ny_tz) if hasattr(b_dt, "tzinfo") and b_dt.tzinfo is not None else b_dt
+                b_mins = b_ny.hour * 60 + b_ny.minute
+                if 585 <= b_mins <= 690:
+                    eval_indices.append(idx)
+            if not eval_indices:
+                eval_indices = list(range(max(3, len(rth_bars) - 15), len(rth_bars)))
+
+        best_setup = None
+        for i in reversed(eval_indices):
+            bar = rth_bars.iloc[i]
+            close_price = float(bar["Close"])
+            open_price = float(bar["Open"])
+            high_price = float(bar["High"])
+            low_price = float(bar["Low"])
+            vol = float(bar["Volume"])
+            prev_vol = float(rth_bars.iloc[i-1]["Volume"]) if i >= 1 else vol
+            current_vwap = float(bar["vwap"])
+            current_ema8 = float(bar["ema8"])
+            prev_ema8 = float(rth_bars["ema8"].iloc[i-1]) if i >= 1 else current_ema8
+            current_atr = float(bar["atr"])
+            bar_range = high_price - low_price
+            if bar_range <= 0:
+                continue
+
+            # Rule 3: Rubber Band Rule
+            if current_atr > 0 and abs(close_price - current_ema8) > (2.5 * current_atr):
+                continue
+
+            ema8_slice = rth_bars["ema8"].iloc[max(0, i-2):i+1]
+            vwap_slice = rth_bars["vwap"].iloc[max(0, i-2):i+1]
+
+            # 15m confirmation
+            t_15m = bar.name.floor("15min")
+            long_15m_confirmed = True
+            short_15m_confirmed = True
+            if t_15m in rth_15m.index:
+                row_15m = rth_15m.loc[t_15m]
+                last_15m_c = float(row_15m["Close"])
+                last_15m_vwap = float(row_15m["vwap"])
+                last_15m_ema8 = float(row_15m["ema8"])
+                long_15m_confirmed = (last_15m_c >= last_15m_vwap * 0.999) and (last_15m_ema8 >= last_15m_vwap * 0.998)
+                short_15m_confirmed = (last_15m_c <= last_15m_vwap * 1.001) and (last_15m_ema8 <= last_15m_vwap * 1.002)
+
+            is_long = False
+            is_short = False
+            confluence_tag = ""
+            stop_loss_px = 0.0
+            target_1_px = 0.0
+
+            # Long Setup
+            is_long_trend = (
+                (close_price > current_vwap) and
+                (current_ema8 > current_vwap * 1.0003) and
+                (current_ema8 >= prev_ema8) and
+                (ema8_slice > vwap_slice).all() and
+                long_15m_confirmed
+            )
+            if is_long_trend:
+                pullback_tested = (low_price <= current_ema8 * 1.001) and (low_price >= current_vwap * 0.998)
+                lower_wick = min(open_price, close_price) - low_price
+                is_hammer = (lower_wick >= 0.50 * bar_range)
+                is_bullish_engulf = (close_price > open_price) and ((close_price - low_price) >= 0.75 * bar_range) and (close_price > current_ema8)
+                vol_expanding = (vol >= prev_vol * 1.15)
+
+                if pullback_tested and (is_hammer or is_bullish_engulf) and vol_expanding:
+                    is_long = True
+                    confluence_tag = "★ 8 EMA Hammer Rejection" if is_hammer else "8 EMA Bullish Pullback Close"
+                    if low_price <= (current_vwap * 1.001):
+                        confluence_tag = "★ 8 EMA + VWAP Pocket Retest"
+                    stop_loss_px = min(low_price, current_vwap) - 0.05
+                    target_1_px = hod
+
+            # Short Setup
+            is_short_trend = (
+                (close_price < current_vwap) and
+                (current_ema8 < current_vwap * 0.9995) and
+                (current_ema8 <= prev_ema8) and
+                (ema8_slice < vwap_slice).all() and
+                short_15m_confirmed
+            )
+            if is_short_trend and not is_long:
+                pullback_tested = (high_price >= current_ema8 * 0.999) and (high_price <= current_vwap * 1.002)
+                upper_wick = high_price - max(open_price, close_price)
+                is_topping_tail = (upper_wick >= 0.50 * bar_range)
+                is_bearish_engulf = (close_price < open_price) and ((high_price - close_price) >= 0.75 * bar_range) and (close_price < current_ema8)
+                vol_expanding = (vol >= prev_vol * 1.15)
+
+                if pullback_tested and (is_topping_tail or is_bearish_engulf) and vol_expanding:
+                    is_short = True
+                    confluence_tag = "★ 8 EMA Topping Tail Rejection" if is_topping_tail else "8 EMA Bearish Pullback Close"
+                    if high_price >= (current_vwap * 0.999):
+                        confluence_tag = "★ 8 EMA + VWAP Pocket Retest"
+                    stop_loss_px = max(high_price, current_vwap) + 0.05
+                    target_1_px = lod
+
+            if not (is_long or is_short):
+                continue
+
+            action = "BUY" if is_long else "SELL"
+            signal_type = "bullish" if is_long else "bearish"
+            direction = "Bullish" if is_long else "Bearish"
+
+            # Check market alignment
+            is_market_aligned = (
+                (is_long and m_sentiment == "Bullish") or (is_short and m_sentiment == "Bearish")
+            )
+            sentiment_align = "Market Aligned 🎯" if is_market_aligned else "Counter-Trend 🔄"
+
+            setup_reason = (
+                f"VWAP Trend Pullback | Above VWAP (${current_vwap:.2f}) + 8EMA Rising (${current_ema8:.2f}) | {confluence_tag} 🚀"
+                if is_long else
+                f"VWAP Trend Pullback | Below VWAP (${current_vwap:.2f}) + 8EMA Falling (${current_ema8:.2f}) | {confluence_tag} 🩸"
+            )
+
+            # Score
+            score = 10
+            if (is_long and (ema8_slice > vwap_slice).all()) or (is_short and (ema8_slice < vwap_slice).all()):
+                score += 3
+            if (is_long and long_15m_confirmed) or (is_short and short_15m_confirmed):
+                score += 2
+            if "★" in confluence_tag:
+                score += 2
+            if is_market_aligned:
+                score += 3
+            if vol >= prev_vol * 1.15:
+                score += 2
+
+            rvol = compute_rvol(rth_bars.iloc[:i+1])
+            if rvol > 1.2:
+                score += 1
+
+            if score >= 19 and is_market_aligned and (vol >= prev_vol * 1.15):
+                grade = "A+"
+            elif score >= 15:
+                grade = "A"
+            elif score >= 11:
+                grade = "B"
+            else:
+                grade = "C"
+
+            # Options suggestion
+            best_opt = None
+            try:
+                best_opt = find_best_option(ticker, signal_type, close_price)
+            except Exception:
+                pass
+
+            # RSI
+            rsi_val = 50.0
+            try:
+                rsi_s = compute_rsi(rth_bars["Close"].iloc[:i+1], 14)
+                if len(rsi_s) > 0 and not np.isnan(rsi_s.iloc[-1]):
+                    rsi_val = float(rsi_s.iloc[-1])
+            except Exception:
+                pass
+
+            time_str = bar.name.strftime('%I:%M %p')
+
+            best_setup = {
+                "Ticker": ticker,
+                "Direction": direction,
+                "Last Price": round(close_price, 2),
+                "Volume": int(vol),
+                "RSI": round(rsi_val, 1),
+                "RVOL": round(rvol, 1),
+                "Score": score,
+                "Grade": grade,
+                "Bullish Signals": signal_type if is_long else "—",
+                "Bearish Signals": signal_type if is_short else "—",
+                "Patterns": setup_reason,
+                "Entry": round(close_price, 2),
+                "Stop Loss": round(stop_loss_px, 2),
+                "Profit Target": f"${round(target_1_px, 2)} ({'HOD' if is_long else 'LOD'})",
+                "VWAP Level": round(current_vwap, 2),
+                "Supply/Demand Zone": f"VWAP ${current_vwap:.2f} / 8EMA ${current_ema8:.2f}",
+                "In Zone": True,
+                "Zone Details": {
+                    "pm_high": round(pm_high, 2), "pm_low": round(pm_low, 2),
+                    "hod": round(hod, 2), "lod": round(lod, 2),
+                    "stop_loss": round(stop_loss_px, 2), "target_1": round(target_1_px, 2)
+                },
+                "Market Sentiment": m_sentiment,
+                "Market Sentiment Score": sentiment_data.get('sentiment_score', 50),
+                "Sentiment Alignment": sentiment_align,
+                "Technical Trend": "Bullish" if is_long else "Bearish",
+                "MACD": "Bullish" if is_long else "Bearish",
+                "Option Play": best_opt,
+                "Suggested Option": f"{best_opt['exp']} ${best_opt['strike']} {best_opt['type']} (@${best_opt['mid']:.2f})" if best_opt else None,
+                "Setup Time": time_str
+            }
+            break
+
+        return best_setup
+    except Exception as e:
+        print(f"Error analyzing {ticker} for VWAP trend pullback: {e}")
+        return None
+
 def watchlist_scan(tickers, extended_hours=False, mode="watchlist"):
-    """Enhanced watchlist scan — runs ALL analysis criteria on specified tickers.
-
-    Combines results from:
-      1. General reversal analysis (_analyze_stock)
-      2. 3-Sigma Bollinger Band analysis (_analyze_3sigma_setup, std=3.0)
-      3. 2-Sigma Bollinger Band analysis (_analyze_3sigma_setup, std=2.0)
-      4. Options directional exhaustion (_analyze_options_setup)
-
-    Results are merged per ticker so each ticker appears at most once with
-    all signals, patterns, and option plays aggregated.
+    """
+    VWAP Trend Pullback Scan — scans specified tickers on 5m/15m candles
+    for high-conviction 8 EMA / VWAP trend pullback setups.
     """
     _reset_progress(status="running", mode=mode)
     scan_progress["status"] = "running"
@@ -3656,309 +3925,52 @@ def watchlist_scan(tickers, extended_hours=False, mode="watchlist"):
     start_time = time.time()
 
     total = len(tickers)
-    # Dynamic timeframe: 15m when market is open / extended hours, 1d when market is closed
-    interval, days, inc_pre_post = determine_scan_candle_mode(force_extended=extended_hours)
-    _timeframe_label = "15-Minute" if interval == "15m" else "Daily"
     scan_title = "Top 50 Scan" if mode == "top50" else "Watchlist Scan"
-    print(f"  [{scan_title}] Mode: {_timeframe_label} (interval={interval}, days={days}, prepost={inc_pre_post})")
-
     prefix = "Top 50" if mode == "top50" else "Watchlist"
+    print(f"  [{scan_title}] Running VWAP Trend Pullback scan (5m candles, 15m macro confirmation)...")
 
     def _on_dl_progress(i, tot, sym):
-        pct = int((i / tot) * 30) if tot else 0
-        _update_progress("downloading", f"Downloading {prefix}: {sym} ({_timeframe_label})...", i, tot, ticker=sym, found=0, pct=pct)
+        pct = int((i / tot) * 35) if tot else 0
+        _update_progress("downloading", f"Downloading {prefix}: {sym} (5m candles)...", i, tot, ticker=sym, found=0, pct=pct)
 
-    daily_data = fetch_batch_concurrent(
-        tickers, days=days, max_workers=20,
-        on_progress=_on_dl_progress, delay=0.01, interval=interval, includePrePost=inc_pre_post
+    candle_data = fetch_batch_concurrent(
+        tickers, days=5, max_workers=20,
+        on_progress=_on_dl_progress, delay=0.01, interval="5m", includePrePost="true"
     )
 
     market_sentiment = get_market_sentiment()
-    is_bullish = market_sentiment.get("is_bullish", True)
-    iv_history = _load_iv_history()
-
-    # Collect results keyed by ticker for merging
-    stock_results = {}    # ticker -> dict  (from _analyze_stock)
-    sigma3_results = {}   # ticker -> dict  (from _analyze_3sigma_setup std=3)
-    options_results = {}  # ticker -> dict  (from _analyze_options_setup)
+    results = []
 
     for i, sym in enumerate(tickers):
-        found_cnt = len(set(stock_results) | set(sigma3_results))
-        pct = 30 + int((i / total) * 65) if total else 95
-        _update_progress("analyzing", f"Analyzing {prefix}: {sym} (all criteria)...", i, total, ticker=sym, found=found_cnt, pct=pct)
+        pct = 35 + int((i / total) * 60) if total else 95
+        _update_progress("analyzing", f"Analyzing {prefix}: {sym} (VWAP Trend Pullback)...", i, total, ticker=sym, found=len(results), pct=pct)
         try:
-            df = daily_data.get(sym)
-            if df is None or len(df) < 20:
+            df = candle_data.get(sym)
+            if df is None or len(df) < 5:
                 continue
-
-            # 1. General reversal analysis
-            try:
-                r = _analyze_stock(sym, df, is_market_bullish=is_bullish)
-                if r:
-                    stock_results[sym] = r
-            except Exception as e:
-                print(f"  [watchlist] _analyze_stock error for {sym}: {e}")
-
-            # 2. 3-Sigma Bollinger Band analysis
-            try:
-                r = _analyze_3sigma_setup(sym, None, df, is_market_bullish=is_bullish, std_dev_mult=3.0)
-                if r:
-                    sigma3_results[sym] = r
-            except Exception as e:
-                print(f"  [watchlist] 3-sigma error for {sym}: {e}")
-
-            # 3. Options setup analysis
-            try:
-                r = _analyze_options_setup(sym, df, iv_history)
-                if r:
-                    options_results[sym] = r
-            except Exception as e:
-                print(f"  [watchlist] options setup error for {sym}: {e}")
-
+            r = _analyze_vwap_trend_pullback(sym, df)
+            if r:
+                results.append(r)
         except Exception as e:
-            print(f"Error analyzing {sym} in watchlist scan: {e}")
+            print(f"Error analyzing {sym} in {scan_title}: {e}")
             continue
-
-    _save_iv_history(iv_history)
-
-    # ── Merge all results per ticker ────────────────────────────
-    all_tickers_with_signals = set(stock_results) | set(sigma3_results) | set(options_results)
-    merged = []
-
-    for sym in all_tickers_with_signals:
-        stock_r = stock_results.get(sym)
-        s3_r = sigma3_results.get(sym)
-        opts_r = options_results.get(sym)
-
-        # Use stock result as the base if available, otherwise use 3-sigma result
-        base = stock_r or s3_r
-        if base is None and opts_r is not None:
-            # Only options signal — still include it as a stock-style card
-            # Build a minimal base from the options result
-            base = {
-                "Ticker": sym,
-                "Last Price": opts_r.get("Last Price", 0),
-                "Volume": opts_r.get("Volume", 0),
-                "RSI": opts_r.get("RSI", 50) if "RSI" in opts_r else 50,
-                "Bullish Signals": "—",
-                "Bearish Signals": "—",
-                "Patterns": "—",
-                "Score": 0,
-                "Grade": "B",
-                "RVOL": opts_r.get("RVOL", 0),
-                "ADR": opts_r.get("ADR", 0),
-                "BB_Pct": opts_r.get("BB_Pct", 50),
-                "EMA20_Dist": opts_r.get("EMA20_Dist", 0),
-                "SMA200_Dist": opts_r.get("SMA200_Dist", 0),
-                "Squeeze": opts_r.get("Squeeze", False),
-            }
-
-        if base is None:
-            continue
-
-        # Helper to parse signal strings
-        def _parse_signals(s):
-            if not s or s == "—":
-                return []
-            if isinstance(s, list):
-                return [str(x).strip() for x in s if str(x).strip()]
-            inner = str(s).strip().lstrip("[").rstrip("]")
-            return [x.strip() for x in inner.split("|") if x.strip()]
-
-        def _merge_signal_str(existing, new_signals_str, prefix=""):
-            existing_list = _parse_signals(existing)
-            new_list = _parse_signals(new_signals_str)
-            if prefix:
-                new_list = [f"{prefix}: {s}" if not s.startswith(prefix) else s for s in new_list]
-            combined = existing_list[:]
-            for s in new_list:
-                if s not in combined:
-                    combined.append(s)
-            return " | ".join(combined) if combined else "—"
-
-        def _merge_patterns(existing, new_pat):
-            existing_list = _parse_signals(existing)
-            new_list = _parse_signals(new_pat)
-            combined = existing_list[:]
-            for p in new_list:
-                if p not in combined:
-                    combined.append(p)
-            return " | ".join(combined) if combined else "—"
-
-        # Merge 3-sigma signals into base
-        if s3_r and s3_r is not base:
-            base["Bullish Signals"] = _merge_signal_str(base.get("Bullish Signals", "—"), s3_r.get("Bullish Signals", "—"), "3σ")
-            base["Bearish Signals"] = _merge_signal_str(base.get("Bearish Signals", "—"), s3_r.get("Bearish Signals", "—"), "3σ")
-            base["Patterns"] = _merge_patterns(base.get("Patterns", "—"), s3_r.get("Patterns", "—"))
-            # Take the higher score
-            base["Score"] = max(base.get("Score", 0), s3_r.get("Score", 0))
-            # Merge trade levels if not already present
-            if not base.get("Stop Loss") and s3_r.get("Stop Loss"):
-                base["Stop Loss"] = s3_r["Stop Loss"]
-                base["Entry"] = s3_r.get("Entry")
-                base["Profit Target"] = s3_r.get("Profit Target")
-            # Merge Option Play if not already present
-            if not base.get("Option Play") and s3_r.get("Option Play"):
-                base["Option Play"] = s3_r["Option Play"]
-
-        # Merge options exhaustion signals
-        if opts_r:
-            # Add options info as signals
-            direction = opts_r.get("Direction", "")
-            catalyst_tags = opts_r.get("Catalyst Tags", "")
-            if direction == "Bullish" and catalyst_tags:
-                base["Bullish Signals"] = _merge_signal_str(base.get("Bullish Signals", "—"), catalyst_tags, "Opts")
-            elif direction == "Bearish" and catalyst_tags:
-                base["Bearish Signals"] = _merge_signal_str(base.get("Bearish Signals", "—"), catalyst_tags, "Opts")
-
-            # Attach the options contract as Option Play if not already set
-            if not base.get("Option Play"):
-                base["Option Play"] = {
-                    "symbol": opts_r.get("Symbol", ""),
-                    "strike": opts_r.get("Strike", 0),
-                    "type": opts_r.get("Type", "CALL"),
-                    "exp": opts_r.get("Exp", ""),
-                    "dte": opts_r.get("DTE", 0),
-                    "mid": opts_r.get("Mid", 0),
-                    "iv": opts_r.get("IV", 0),
-                }
-
-        # Ensure ticker card presents strictly ONE dominant scenario (Bullish or Bearish)
-        has_bull = base.get("Bullish Signals") and base["Bullish Signals"] != "—"
-        has_bear = base.get("Bearish Signals") and base["Bearish Signals"] != "—"
-
-        if has_bull and has_bear:
-            bull_cnt = len(str(base["Bullish Signals"]).split("|"))
-            bear_cnt = len(str(base["Bearish Signals"]).split("|"))
-            if bull_cnt >= bear_cnt:
-                base["Bearish Signals"] = "—"
-                base["Direction"] = "Bullish"
-            else:
-                base["Bullish Signals"] = "—"
-                base["Direction"] = "Bearish"
-        elif has_bull:
-            base["Direction"] = "Bullish"
-        elif has_bear:
-            base["Direction"] = "Bearish"
-        else:
-            base["Direction"] = "Bullish"
-
-        final_dir = base.get("Direction", "Bullish")
-        last_price = float(base.get("Last Price", 0))
-
-        # Recalculate Trade Levels (Entry, Stop Loss, Profit Target) matching the dominant direction
-        df_sym = daily_data.get(sym)
-        atr_val = 0.05 * last_price
-        if df_sym is not None and len(df_sym) > 0:
-            atr_series = compute_atr(df_sym, 14)
-            if len(atr_series) > 0 and not np.isnan(atr_series.iloc[-1]):
-                atr_val = float(atr_series.iloc[-1])
-
-        base["Entry"] = round(last_price, 2)
-        if final_dir == "Bullish":
-            base["Stop Loss"] = round(last_price - 2.0 * atr_val, 2)
-            base["Profit Target"] = round(last_price + 4.0 * atr_val, 2)
-            # Ensure Option Play is an authentic CALL contract
-            if not base.get("Option Play") or base["Option Play"].get("type") != "CALL":
-                opt_play = find_best_option(sym, "bullish", last_price)
-                if opt_play:
-                    base["Option Play"] = opt_play
-                    base["Suggested Option"] = f"{opt_play['exp']} ${opt_play['strike']} CALL (@${opt_play['mid']}, IV: {opt_play['iv']}%)"
-        else:
-            base["Stop Loss"] = round(last_price + 2.0 * atr_val, 2)
-            base["Profit Target"] = round(last_price - 4.0 * atr_val, 2)
-            # Ensure Option Play is an authentic PUT contract
-            if not base.get("Option Play") or base["Option Play"].get("type") != "PUT":
-                opt_play = find_best_option(sym, "bearish", last_price)
-                if opt_play:
-                    base["Option Play"] = opt_play
-                    base["Suggested Option"] = f"{opt_play['exp']} ${opt_play['strike']} PUT (@${opt_play['mid']}, IV: {opt_play['iv']}%)"
-
-        # Recalculate grade based on merged score
-        score = base.get("Score", 0)
-        if score >= 8:
-            base["Grade"] = "A+"
-        elif score >= 5:
-            base["Grade"] = "A"
-        else:
-            base["Grade"] = "B"
-
-        # Attach Market Sentiment & Alignment
-        base["Market Sentiment"] = market_sentiment.get("sentiment", "Bullish")
-        base["Market Sentiment Score"] = market_sentiment.get("score", 65)
-        final_dir = base.get("Direction", "Bullish")
-        if final_dir == market_sentiment.get("sentiment"):
-            base["Sentiment Alignment"] = f"{final_dir} Aligned"
-        else:
-            base["Sentiment Alignment"] = "Counter-Trend Reversal"
-
-        # Ensure Technical Trend is populated
-        if "Technical Trend" not in base or not base["Technical Trend"]:
-            if base.get("EMA20_Dist", 0) > 0 and base.get("SMA200_Dist", 0) > 0:
-                base["Technical Trend"] = "Bullish"
-            elif base.get("EMA20_Dist", 0) < 0 and base.get("SMA200_Dist", 0) < 0:
-                base["Technical Trend"] = "Bearish"
-            else:
-                base["Technical Trend"] = "Neutral"
-
-        # Ensure SMA50_Dist is populated
-        if "SMA50_Dist" not in base or base["SMA50_Dist"] is None:
-            if df_sym is not None and len(df_sym) >= 50:
-                s50 = float(compute_sma(df_sym["Close"], 50).iloc[-1])
-                base["SMA50_Dist"] = round(((last_price - s50) / s50) * 100, 2)
-            else:
-                base["SMA50_Dist"] = 0.0
-
-        # Ensure Supply/Demand Zone is attached
-        if not base.get("Supply/Demand Zone"):
-            if df_sym is not None and len(df_sym) >= 15:
-                in_d, in_s, d_zone, s_zone = detect_supply_demand_zones(df_sym)
-                if final_dir == "Bullish" and d_zone:
-                    base["Supply/Demand Zone"] = f"Demand: {d_zone['range_str']}"
-                    base["In Zone"] = in_d
-                    base["Zone Details"] = d_zone
-                elif final_dir == "Bearish" and s_zone:
-                    base["Supply/Demand Zone"] = f"Supply: {s_zone['range_str']}"
-                    base["In Zone"] = in_s
-                    base["Zone Details"] = s_zone
-                elif d_zone:
-                    base["Supply/Demand Zone"] = f"Demand: {d_zone['range_str']}"
-                    base["In Zone"] = in_d
-                    base["Zone Details"] = d_zone
-                elif s_zone:
-                    base["Supply/Demand Zone"] = f"Supply: {s_zone['range_str']}"
-                    base["In Zone"] = in_s
-                    base["Zone Details"] = s_zone
-                else:
-                    base["Supply/Demand Zone"] = None
-                    base["In Zone"] = False
-            else:
-                base["Supply/Demand Zone"] = None
-                base["In Zone"] = False
-
-        merged.append(base)
 
     total_time = time.time() - start_time
     scan_progress.update({
         "status": "done", "mode": mode, "phase": "complete",
-        "phase_label": f"Done — {len(merged)} signals found",
+        "phase_label": f"Done — {len(results)} setups found",
         "current": total, "total": total,
-        "found": len(merged), "pct": 100, "eta_seconds": 0,
+        "found": len(results), "pct": 100, "eta_seconds": 0,
         "market_sentiment": market_sentiment
     })
 
-    done_title = "Top 50" if mode == "top50" else "Watchlist"
-    print(f"[Done] {done_title} scan (all criteria): {len(merged)} signals in {total_time:.1f}s")
-    if not merged:
+    print(f"[Done] {scan_title}: {len(results)} setups found in {total_time:.1f}s")
+    if not results:
         return pd.DataFrame()
-    df = pd.DataFrame(merged).sort_values(by="Score", ascending=False)
-    best_df = df[df["Score"] >= 8]
-    if len(best_df) < 5:
-        best_df = df[df["Score"] >= 5]
-    if len(best_df) == 0:
-        best_df = df
-    best_df.attrs["market_sentiment"] = market_sentiment
-    return best_df.head(15)
+
+    df = pd.DataFrame(results).sort_values(by="Score", ascending=False)
+    df.attrs["market_sentiment"] = market_sentiment
+    return df
 
 
 def options_watchlist_scan(tickers, extended_hours=False):
