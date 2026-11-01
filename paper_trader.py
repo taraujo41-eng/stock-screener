@@ -1050,25 +1050,8 @@ class PaperTrader:
                                         logger.warning(f"[PaperTrader] Candle timing check error: {ex} — skipping exit check for safety")
                                         continue
 
-                                # Rule 1: Stop Loss (5-minute candle close past VWAP)
-                                # Price wicking slightly past VWAP without a full 5m candle close does NOT trigger SL
-                                if sig == "bullish" and c_close < c_vwap:
-                                    logger.warning(
-                                        f"[PaperTrader] 🛑 STRATEGY VWAP SL triggered on {trade['ticker']} | "
-                                        f"5m candle closed below VWAP (${c_close:.2f} < ${c_vwap:.2f})"
-                                    )
-                                    positions_to_close.append((trade, "stop_loss_vwap"))
-                                    continue
-                                elif sig == "bearish" and c_close > c_vwap:
-                                    logger.warning(
-                                        f"[PaperTrader] 🛑 STRATEGY VWAP SL triggered on {trade['ticker']} | "
-                                        f"5m candle closed above VWAP (${c_close:.2f} > ${c_vwap:.2f})"
-                                    )
-                                    positions_to_close.append((trade, "stop_loss_vwap"))
-                                    continue
-
-                                # Rule 2: 8 EMA Exit (Primary Strategy Exit — Full 5-Minute Candle Body Over 8 EMA)
-                                # A candle that merely crosses/straddles the 8 EMA line does NOT exit the trade.
+                                # Strategy Exit: Full 5-Minute Candle Body Over 8 EMA
+                                # A candle that merely crosses/straddles the 8 EMA line (or wicks/closes near VWAP while still on the trending side of 8 EMA) does NOT exit the trade.
                                 # Both Open AND Close of the completed 5-minute candle (after entry) must be past the 8 EMA:
                                 # - Long trade: Exit when both Open < 8 EMA and Close < 8 EMA
                                 # - Short trade: Exit when both Open > 8 EMA and Close > 8 EMA
