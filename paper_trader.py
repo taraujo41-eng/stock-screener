@@ -126,8 +126,8 @@ class PaperTrader:
         self.starting_balance = _cfg("PAPER_STARTING_BALANCE", "3000.0", float)
         self.max_contracts = _cfg("PAPER_MAX_CONTRACTS", "1", int)
         self.max_risk_per_trade = _cfg("PAPER_MAX_RISK_PER_TRADE", "0", float)  # 0 = disabled, bounded by available funds
-        self.max_open_positions = _cfg("PAPER_MAX_OPEN_POSITIONS", "10", int)
-        self.max_daily_trades = _cfg("PAPER_MAX_DAILY_TRADES", "50", int)
+        self.max_open_positions = _cfg("PAPER_MAX_OPEN_POSITIONS", "3", int)
+        self.max_daily_trades = _cfg("PAPER_MAX_DAILY_TRADES", "5", int)
         self.max_daily_loss = _cfg("PAPER_MAX_DAILY_LOSS", "150.0", float)
         self.min_entry_interval_secs = _cfg("PAPER_MIN_ENTRY_INTERVAL_SECS", "60", int)
         self.stop_loss_pct = _cfg("PAPER_STOP_LOSS_PCT", "20", float)

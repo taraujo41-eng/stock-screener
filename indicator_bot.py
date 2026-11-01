@@ -114,6 +114,12 @@ def _purge_old_alerts():
         _save_alerted_today()
         logger.info(f"Purged {len(stale)} stale alert entries from previous days.")
 
+def _daily_alert_count():
+    """Count how many alerts have fired today."""
+    ny_tz = get_ny_timezone()
+    today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
+    return sum(1 for info in _alerted_today.values() if isinstance(info, dict) and info.get("date") == today_str)
+
 def _already_alerted_today(ticker, direction):
     """Check if this ticker+direction already fired today. Direction flip is allowed."""
     ny_tz = get_ny_timezone()
@@ -499,9 +505,9 @@ def evaluate_ticker_process(ticker, df):
         if is_long_trend:
             pullback_tested = (low_price <= current_ema8 * 1.001) and (low_price >= current_vwap * 0.998)
             lower_wick = min(open_price, close_price) - low_price
-            is_hammer = (lower_wick >= 0.40 * bar_range)
-            is_bullish_engulf = (close_price > open_price) and ((close_price - low_price) >= 0.70 * bar_range) and (close_price > current_ema8)
-            vol_expanding = (vol >= prev_vol * 0.95)
+            is_hammer = (lower_wick >= 0.50 * bar_range)
+            is_bullish_engulf = (close_price > open_price) and ((close_price - low_price) >= 0.75 * bar_range) and (close_price > current_ema8)
+            vol_expanding = (vol >= prev_vol * 1.15)
 
             if pullback_tested and (is_hammer or is_bullish_engulf) and vol_expanding:
                 is_long = True
@@ -527,11 +533,11 @@ def evaluate_ticker_process(ticker, df):
         if is_short_trend and not is_long:
             pullback_tested = (high_price >= current_ema8 * 0.999) and (high_price <= current_vwap * 1.002)
             upper_wick = high_price - max(open_price, close_price)
-            is_topping_tail = (upper_wick >= 0.40 * bar_range)
-            is_bearish_engulf = (close_price < open_price) and ((high_price - close_price) >= 0.70 * bar_range) and (close_price < current_ema8)
-            vol_expanding = (vol >= prev_vol * 0.95)
+            is_topping_tail = (upper_wick >= 0.50 * bar_range)
+            is_bearish_engulf = (close_price < open_price) and ((high_price - close_price) >= 0.75 * bar_range) and (close_price < current_ema8)
+            vol_expanding = (vol >= prev_vol * 1.15)
 
-            if pullback_tested and (is_topping_tail or bearish_engulf) and vol_expanding:
+            if pullback_tested and (is_topping_tail or is_bearish_engulf) and vol_expanding:
                 is_short = True
                 confluence_tag = "★ 8 EMA Topping Tail Rejection" if is_topping_tail else "8 EMA Bearish Pullback Close"
                 if high_price >= (current_vwap * 0.999):
@@ -596,15 +602,15 @@ def evaluate_ticker_process(ticker, df):
             score += 2
         if is_market_aligned:
             score += 3
-        if vol >= prev_vol * 1.0:
+        if vol >= prev_vol * 1.15:
             score += 2
         if rvol > 1.2:
             score += 1
             
-        # Only assign A+ if score >= 17 AND market is aligned AND volume expanded
-        if score >= 17 and is_market_aligned and (vol >= prev_vol * 0.95):
+        # Only assign A+ if score >= 19 AND market is aligned AND volume expanded >= 15%
+        if score >= 19 and is_market_aligned and (vol >= prev_vol * 1.15):
             grade = "A+"
-        elif score >= 14:
+        elif score >= 15:
             grade = "A"
         elif score >= 11:
             grade = "B"
@@ -869,6 +875,12 @@ def bot_loop():
                         if grade != "A+":
                             logger.info(f"[{ticker}] ⚠️ Skipping non-A+ setup (Grade: {grade}, Score: {score})")
                             continue
+
+                        # Enforce daily trade limit (Ultra-Selective: Max 5 daily trades)
+                        max_daily_trades = int(os.getenv("MAX_DAILY_TRADES", "5"))
+                        if _daily_alert_count() >= max_daily_trades:
+                            logger.info(f"[{ticker}] ⚠️ Daily A+ trade limit reached ({_daily_alert_count()}/{max_daily_trades}). Skipping new trade entry.")
+                            break
 
                         direction = res['action']  # "BUY" or "SELL"
                         if _already_alerted_today(ticker, direction):
