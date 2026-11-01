@@ -778,27 +778,18 @@ def bot_loop():
             logger.info("--- Starting 3-Sigma A+ Reversal Bot Cycle ---")
 
             try:
-                # 1. Determine tickers to scan: Default to Top 50 Stocks
-                tickers_mode = os.getenv("TICKERS_3SIGMA", "TOP50").strip().upper()
+                # 1. Determine tickers to scan: Strictly Top 50 Stocks list
                 selected_tickers = []
                 try:
-                    if tickers_mode in ("TOP50", "TOP_50"):
-                        top50_file = os.path.join(_SCAN_DATA_DIR, "top50_stocks.json")
-                        if not os.path.exists(top50_file):
-                            top50_file = os.path.join(os.path.dirname(__file__), "top50_stocks.json")
-                        if os.path.exists(top50_file):
-                            with open(top50_file, "r") as f:
-                                data = json.load(f)
-                                selected_tickers = [item["ticker"] for item in data if isinstance(item, dict) and item.get("ticker")]
-                    else:
-                        watchlist_file = os.path.join(_SCAN_DATA_DIR, "watchlist.json")
-                        if not os.path.exists(watchlist_file):
-                            watchlist_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
-                        if os.path.exists(watchlist_file):
-                            with open(watchlist_file, "r") as f:
-                                selected_tickers = json.load(f)
+                    top50_file = os.path.join(_SCAN_DATA_DIR, "top50_stocks.json")
+                    if not os.path.exists(top50_file):
+                        top50_file = os.path.join(os.path.dirname(__file__), "top50_stocks.json")
+                    if os.path.exists(top50_file):
+                        with open(top50_file, "r") as f:
+                            data = json.load(f)
+                            selected_tickers = [item["ticker"] for item in data if isinstance(item, dict) and item.get("ticker")]
                 except Exception as e:
-                    logger.error(f"Failed to load tickers for {tickers_mode}: {e}")
+                    logger.error(f"Failed to load Top 50 tickers: {e}")
 
                 tickers = list(dict.fromkeys([t.strip().upper() for t in selected_tickers if t and isinstance(t, str)]))
                 if not tickers:

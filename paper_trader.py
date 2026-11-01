@@ -611,19 +611,20 @@ class PaperTrader:
                 )
                 return None
 
-        # Verify ticker is in approved watchlist (165 tickers)
+        # Verify ticker is in approved Top 50 list
         try:
-            wl_file = os.path.join(_SCAN_DATA_DIR, "watchlist.json")
-            if not os.path.exists(wl_file):
-                wl_file = os.path.join(os.path.dirname(__file__), "watchlist.json")
-            if os.path.exists(wl_file):
-                with open(wl_file, "r") as f:
-                    allowed = set(t.strip().upper() for t in json.load(f) if t)
+            top50_file = os.path.join(_SCAN_DATA_DIR, "top50_stocks.json")
+            if not os.path.exists(top50_file):
+                top50_file = os.path.join(os.path.dirname(__file__), "top50_stocks.json")
+            if os.path.exists(top50_file):
+                with open(top50_file, "r") as f:
+                    data = json.load(f)
+                    allowed = set(item["ticker"].strip().upper() for item in data if isinstance(item, dict) and item.get("ticker"))
                 if ticker.upper() not in allowed:
-                    logger.warning(f"[PaperTrader] Ticker {ticker} is not in approved watchlist — skipping order.")
+                    logger.warning(f"[PaperTrader] Ticker {ticker} is not in approved Top 50 list — skipping order.")
                     return None
         except Exception as e:
-            logger.debug(f"[PaperTrader] Watchlist validation warning: {e}")
+            logger.debug(f"[PaperTrader] Top 50 validation warning: {e}")
 
         # Guard: Check if an active open position already exists for this ticker
         open_positions = self.get_open_positions()
