@@ -217,7 +217,7 @@ def send_telegram_notification(message, max_retries=3):
                 
     return False
 
-def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=None, reason=None, score=None, grade=None, rvol=None, zone_summary=None, in_zone=False, sentiment_align=None, market_sentiment_summary=None, tech_trend=None, hod=None, lod=None, pm_high=None, pm_low=None, ema8=None, confluence=None):
+def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=None, reason=None, score=None, grade=None, rvol=None, zone_summary=None, in_zone=False, sentiment_align=None, market_sentiment_summary=None, tech_trend=None, hod=None, lod=None, pm_high=None, pm_low=None, ema8=None, confluence=None, stop_loss=None, target_1=None):
     bb_mult = os.getenv("BB_MULT", "2.5")
     grade_str = grade or ("A+" if (score and score >= 12) else "A")
     grade_icon = "⭐️" if grade_str == "A+" else "🔥"
@@ -228,7 +228,9 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
         logger.info(f"[{ticker}] ⚠️ Skipping trade execution: Grade {grade_str} is not A+.")
         return False
 
-    logger.info(f"🔔 {grade_str} SIGNAL TRIGGERED on {ticker}: {action} | Setup: {reason} | Price={last_price:.2f}, VWAP={vwap_target:.2f}, 8EMA={f'{ema8:.2f}' if ema8 else 'N/A'}")
+    sl_str = f"${stop_loss:.2f}" if stop_loss else "N/A"
+    tp1_str = f"${target_1:.2f}" if target_1 else "N/A"
+    logger.info(f"🔔 {grade_str} SIGNAL TRIGGERED on {ticker}: {action} | Setup: {reason} | Price=${last_price:.2f}, VWAP=${vwap_target:.2f}, 8EMA={f'${ema8:.2f}' if ema8 else 'N/A'} | SL={sl_str} | TP1={tp1_str}")
     
     alert_method = os.getenv("ALERT_METHOD", "TELEGRAM").upper()
     
@@ -254,7 +256,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
     
     send_reversal_alert = os.getenv("SEND_REVERSAL_ALERTS", "false").lower() in ("true", "1", "yes")
 
-    exit_8ema_label = f"Full 5m Candle Close Below 8 EMA (${ema8:.2f})" if (signal_type == "bullish" and ema8) else (f"Full 5m Candle Close Above 8 EMA (${ema8:.2f})" if ema8 else "Full 5m Candle Close Past 8 EMA")
+    exit_8ema_label = f"Completed 5m Candle Close Below 8 EMA (${ema8:.2f})" if (signal_type == "bullish" and ema8) else (f"Completed 5m Candle Close Above 8 EMA (${ema8:.2f})" if ema8 else "Completed 5m Candle Close Past 8 EMA")
 
     # 1. Send SMS Notification (only if reversal alerts explicitly enabled)
     if send_reversal_alert and alert_method in ("SMS", "BOTH"):
@@ -263,8 +265,8 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             f"{grade_icon} {grade_str} SETUP: {ticker}\n"
             f"Action: {action} ({signal_type.upper()})\n"
             f"Setup: {reason or (action + ' Retest')}\n"
-            f"Price: ${last_price:.2f} | VWAP: ${vwap_target:.2f}\n"
-            f"8 EMA: ${ema8:.2f}\n"
+            f"Price: ${last_price:.2f} | VWAP: ${vwap_target:.2f} | 8 EMA: ${ema8:.2f}\n"
+            f"SL: {sl_str} | TP1: {tp1_str}\n"
             f"Exit Rule: {exit_8ema_label}\n"
             f"Suggested Option: {opt_str}"
         )
@@ -284,8 +286,8 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             f"<b>Action:</b> {action} ({signal_type.upper()})\n"
             f"<b>Setup:</b> {_esc(reason or (action + ' Retest'))}\n"
             f"<b>Price:</b> ${last_price:.2f}\n"
-            f"<b>VWAP Retest Level:</b> ${vwap_target:.2f}\n"
-            f"<b>8 EMA:</b> ${ema8:.2f}\n"
+            f"<b>VWAP:</b> ${vwap_target:.2f} | <b>8 EMA:</b> ${ema8:.2f}\n"
+            f"<b>Stop Loss:</b> {_esc(sl_str)} | <b>TP1:</b> {_esc(tp1_str)}\n"
             f"<b>Exit Rule:</b> 🏃 {_esc(exit_8ema_label)}\n"
             f"<b>Suggested Option:</b> {_esc(opt_str)}"
         )
@@ -310,12 +312,14 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                 lod=lod,
                 pmh=pm_high,
                 pml=pm_low,
-                ema8=ema8
+                ema8=ema8,
+                stop_loss_price=stop_loss,
+                target_1_price=target_1
             )
             if result:
                 trade_executed = True
                 mode_str = result.get('mode', 'Simulation')
-                zone_title = f"{'DEMAND' if signal_type == 'bullish' else 'SUPPLY'} ZONE" if in_zone else "VWAP RETEST"
+                zone_title = "VWAP TREND PULLBACK"
                 logger.info(f"📈 {grade_str} {zone_title} Paper trade placed for {ticker}: {result.get('option_symbol', '')} @ ${result.get('entry_price', 0):.2f} ({mode_str})")
                 
                 # Send trade notification via same alert method
@@ -325,7 +329,8 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                     f"Price: ${result.get('entry_price', 0):.2f}\n"
                     f"Qty: {result.get('quantity', 1)} contract(s)\n"
                     f"Stock: ${last_price:.2f} | VWAP: ${vwap_target:.2f} | 8 EMA: ${ema8:.2f}\n"
-                    f"Exit Rule: {exit_8ema_label}\n"
+                    f"Stop Loss: {sl_str} | TP1: {tp1_str} (50% Scale-Out)\n"
+                    f"Runner Exit: Completed 5m candle close across 8 EMA\n"
                     f"Setup: {reason or action}\n"
                     f"Mode: {mode_str}"
                 )
@@ -340,7 +345,8 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                         f"<b>Entry Price:</b> ${result.get('entry_price', 0):.2f}\n"
                         f"<b>Qty:</b> {result.get('quantity', 1)} contract(s)\n"
                         f"<b>Stock Price:</b> ${last_price:.2f} | <b>VWAP:</b> ${vwap_target:.2f} | <b>8 EMA:</b> ${ema8:.2f}\n"
-                        f"<b>Exit Rule:</b> 🏃 {_esc(exit_8ema_label)}\n"
+                        f"<b>Stop Loss:</b> {_esc(sl_str)} | <b>TP1:</b> {_esc(tp1_str)} (50% Scale-Out)\n"
+                        f"<b>Runner Exit:</b> 🏃 5m candle close across 8 EMA\n"
                         f"<b>Setup:</b> {_esc(reason or action)}\n"
                         f"<b>Mode:</b> {_esc(mode_str)}"
                     )
@@ -356,39 +362,45 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
 
 def evaluate_ticker_process(ticker, df):
     """
-    Evaluates intraday 5-minute data for Premarket Breakout + VWAP Retest Strategy:
-    1. Chart Setup: 5-minute candles with Extended Hours enabled (04:00 - 09:29:59 ET pre-market).
-    2. Session & Trend Filters:
-       - Execution Window: Only trigger new entries during first 60 to 90 minutes (09:30 - 11:00 ET).
-       - Long Filter: Only take long/call trades if price is above VWAP. Never long below VWAP.
-       - Short Filter: Only take short/put trades if price is below VWAP. Never short above VWAP.
-    3. Key Daily Levels: Pre-Market High (PMH), Pre-Market Low (PML), Dynamic HOD and LOD.
-    4. Long Entry Criteria (Buy / Call):
-       - Breakout: A 5-minute candle closes above PMH.
-       - VWAP Alignment: The VWAP line is above PMH.
-       - Pullback: Price pulls back down to test or touch the VWAP line (Highest conviction when price tests both VWAP and PMH).
-       - Trigger: Enter Long on the tap/retest of VWAP during the pullback.
-    5. Short Entry Criteria (Sell Short / Put):
-       - Breakdown: A 5-minute candle closes below PML.
-       - VWAP Alignment: The VWAP line is below PML.
-       - Pullback: Price rallies up to test or touch the VWAP line (Highest conviction when price tests both VWAP and PML).
-       - Trigger: Enter Short on the tap/retest of VWAP during the bounce.
+    Strategy Blueprint: VWAP Trend Pullback
+    1. Core Timeframes: 5-minute chart for entries; 15-minute resampled chart for macro trend confirmation.
+    2. Ideal Window: 9:45 AM – 11:30 AM EST (allows morning VWAP to stabilize after the open).
+    3. Rule 1 (Daylight Filter): Never trade flat moving averages. 8 EMA must maintain position on trending
+       side of VWAP with daylight for at least 3 consecutive candles.
+    4. Rule 2: Respect 9:30–9:45 AM noise (first 15 minutes whipsaws blocked).
+    5. Rule 3 (Rubber Band Filter): Price not stretched > 2.5 ATRs away from 8 EMA.
+    6. Long Setup (Bullish Momentum):
+       - Price cleanly above VWAP (Close > VWAP).
+       - 8 EMA sloping upward and positioned above VWAP (EMA8 > VWAP).
+       - Macro 15m trend confirmation.
+       - Pullback: Retraces toward 8 EMA or pocket between 8 EMA and VWAP.
+       - Trigger: Rejection tail (hammer or close back above 8 EMA) on expanding volume.
+       - SL: 1-2 ticks below rejection swing low or just beneath VWAP.
+       - TP1: Prior swing high / HOD (50% scale-out). Runner: Trails 8 EMA.
+    7. Short Setup (Bearish Momentum):
+       - Price cleanly below VWAP (Close < VWAP).
+       - 8 EMA sloping downward and positioned below VWAP (EMA8 < VWAP).
+       - Macro 15m trend confirmation.
+       - Pullback: Rallies up to test underside of 8 EMA or pocket between 8 EMA and VWAP.
+       - Trigger: Topping tail / bearish close back below 8 EMA on expanding volume.
+       - SL: 1-2 ticks above rejection swing high or just above VWAP.
+       - TP1: Prior intraday low / LOD (50% scale-out). Runner: Trails 8 EMA.
     """
     if df is None or len(df) < 5:
         return None
 
     try:
-        # Filter today's session
+        # Filter today's regular market hours session
         today_date = df.index[-1].date()
         today_df = df[df.index.date == today_date]
         
         pm_bars = today_df.between_time("04:00", "09:29:59")
         rth_bars = today_df.between_time("09:30", "16:00")
         
-        if len(pm_bars) == 0 or len(rth_bars) < 2:
+        if len(rth_bars) < 3:
             return None
 
-        # 2. Execution Window: Only trigger new entries between 09:30 AM and 11:00 AM ET
+        # 2. Execution Window & Rule 2: Respect 9:30-9:45 AM noise. Only trigger between 09:45 AM and 11:30 AM EST
         last_dt = rth_bars.index[-1]
         ny_tz = get_ny_timezone()
         if hasattr(last_dt, "tzinfo") and last_dt.tzinfo is not None:
@@ -396,14 +408,14 @@ def evaluate_ticker_process(ticker, df):
         else:
             dt_ny = last_dt
         mins_from_midnight = dt_ny.hour * 60 + dt_ny.minute
-        earliest_mins = int(os.getenv("EARLIEST_TRADE_TIME_MINS", "570"))
-        latest_mins = int(os.getenv("LATEST_TRADE_TIME_MINS", "660"))
+        earliest_mins = int(os.getenv("EARLIEST_TRADE_TIME_MINS", "585"))  # 09:45 AM
+        latest_mins = int(os.getenv("LATEST_TRADE_TIME_MINS", "690"))    # 11:30 AM
         if mins_from_midnight < earliest_mins or mins_from_midnight > latest_mins:
             return None
             
         # 3. Key Levels to Calculate Daily
-        pm_high = float(pm_bars["High"].max())
-        pm_low = float(pm_bars["Low"].min())
+        pm_high = float(pm_bars["High"].max()) if not pm_bars.empty else 0.0
+        pm_low = float(pm_bars["Low"].min()) if not pm_bars.empty else 0.0
         hod = float(rth_bars["High"].max())
         lod = float(rth_bars["Low"].min())
         
@@ -411,95 +423,125 @@ def evaluate_ticker_process(ticker, df):
         typical_price_rth = (rth_bars["High"] + rth_bars["Low"] + rth_bars["Close"]) / 3.0
         cum_vol_rth = rth_bars["Volume"].cumsum().replace(0, 1)
         vwap_series = (typical_price_rth * rth_bars["Volume"]).cumsum() / cum_vol_rth
-        current_vwap = float(vwap_series.loc[rth_bars.index[-1]])
+        current_vwap = float(vwap_series.iloc[-1])
         
-        # Indicator 2: 8 EMA on 5-minute regular market hours candles (starting 09:30 AM)
+        # Indicator 2: 8 EMA on 5-minute regular market hours candles
         ema8_series = rth_bars["Close"].ewm(span=8, adjust=False).mean()
         current_ema8 = float(ema8_series.iloc[-1])
+        prev_ema8 = float(ema8_series.iloc[-2]) if len(ema8_series) >= 2 else current_ema8
         
+        # Indicator 3: 14 ATR on 5m candles for Rule 3 (Rubber Band Filter)
+        hl = rth_bars["High"] - rth_bars["Low"]
+        hc = (rth_bars["High"] - rth_bars["Close"].shift(1)).abs()
+        lc = (rth_bars["Low"] - rth_bars["Close"].shift(1)).abs()
+        tr = hl.combine(hc, max).combine(lc, max)
+        atr_series = tr.rolling(14, min_periods=1).mean()
+        current_atr = float(atr_series.iloc[-1]) if len(atr_series) > 0 else 1.0
+
+        # Indicator 4: 15-Minute Macro Confirmation (Resampled from 5m)
+        rth_15m = rth_bars.resample("15min").agg({
+            "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
+        }).dropna()
+        long_15m_confirmed = True
+        short_15m_confirmed = True
+        if len(rth_15m) >= 2:
+            tp_15 = (rth_15m["High"] + rth_15m["Low"] + rth_15m["Close"]) / 3.0
+            cv_15 = rth_15m["Volume"].cumsum().replace(0, 1)
+            vwap_15m_series = (tp_15 * rth_15m["Volume"]).cumsum() / cv_15
+            ema8_15m_series = rth_15m["Close"].ewm(span=8, adjust=False).mean()
+            last_15m_c = float(rth_15m["Close"].iloc[-1])
+            last_15m_vwap = float(vwap_15m_series.iloc[-1])
+            last_15m_ema8 = float(ema8_15m_series.iloc[-1])
+            long_15m_confirmed = (last_15m_c >= last_15m_vwap * 0.999) and (last_15m_ema8 >= last_15m_vwap * 0.998)
+            short_15m_confirmed = (last_15m_c <= last_15m_vwap * 1.001) and (last_15m_ema8 <= last_15m_vwap * 1.002)
+
         last_row = rth_bars.iloc[-1]
         close_price = float(last_row["Close"])
         open_price = float(last_row["Open"])
         high_price = float(last_row["High"])
         low_price = float(last_row["Low"])
-        
-        # Directional Bias Rules:
-        # Long Filter: Only take long/call trades if price is above VWAP. Never long below VWAP.
-        # Short Filter: Only take short/put trades if price is below VWAP. Never short above VWAP.
-        
-        # Strict Rule: Never take any trade if price is trapped between Premarket Low and Premarket High (Chop Zone)
-        if pm_low <= close_price <= pm_high:
+        vol = float(last_row["Volume"])
+        prev_vol = float(rth_bars.iloc[-2]["Volume"]) if len(rth_bars) >= 2 else vol
+
+        bar_range = high_price - low_price
+        if bar_range <= 0:
             return None
 
-        # Breakout History: Price has gone over PMH or under PML during RTH
-        has_broken_above_pmh = bool((rth_bars["High"] > pm_high).any())
-        has_broken_below_pml = bool((rth_bars["Low"] < pm_low).any())
-        
+        # Rule 3: The "Rubber Band" Rule
+        # If price is stretched more than 2.5 ATRs away from the 8 EMA, never initiate a new trend position
+        if current_atr > 0 and abs(close_price - current_ema8) > (2.5 * current_atr):
+            return None
+
+        # Rule 1: Never trade flat moving averages
+        # Check last 3 candles: 8 EMA must maintain position on trending side of VWAP with daylight
+        ema8_slice = ema8_series.iloc[-3:] if len(ema8_series) >= 3 else ema8_series
+        vwap_slice = vwap_series.iloc[-3:] if len(vwap_series) >= 3 else vwap_series
+
         is_long = False
         is_short = False
         confluence_tag = ""
-        
-        # 4. Long Entry Criteria (Buy / Call):
-        # 1. Breakout: Price has gone over Premarket High (PMH).
-        # 2. Outside Chop: Price is strictly above PMH.
-        # 3. VWAP is UNDER the candle: c_close > c_vwap and c_open >= c_vwap * 0.999.
-        # 4. 5-Minute Candle Retest & Hold: The candle physically tags/retests PMH (c_low <= pm_high <= c_high) OR VWAP (c_low <= c_vwap <= c_high),
-        #    and the candle closes bullishly / holds above the level.
-        if has_broken_above_pmh and (close_price > pm_high):
-            candles_to_check = [rth_bars.iloc[-1]]
-            if len(rth_bars) >= 2:
-                candles_to_check.append(rth_bars.iloc[-2])
-            for candle in candles_to_check:
-                c_low = float(candle["Low"])
-                c_high = float(candle["High"])
-                c_open = float(candle["Open"])
-                c_close = float(candle["Close"])
-                c_vwap = float(vwap_series.loc[candle.name]) if candle.name in vwap_series.index else current_vwap
-                
-                # VWAP must be UNDER the candle
-                vwap_under_candle = (c_close > c_vwap) and (c_open >= c_vwap * 0.999)
-                
-                # Retest of PMH or Retest of VWAP
-                retest_pmh = (c_low <= pm_high * 1.002) and (c_high >= pm_high * 0.998) and (c_close >= pm_high)
-                retest_vwap = (c_low <= c_vwap * 1.002) and (c_high >= c_vwap * 0.998) and (c_close >= c_vwap)
-                
-                if vwap_under_candle and (retest_pmh or retest_vwap):
-                    is_long = True
-                    confluence_tag = "★ Dual PMH + VWAP Retest" if (retest_pmh and retest_vwap) else ("PMH Retest" if retest_pmh else "VWAP Retest")
-                    break
+        stop_loss_px = 0.0
+        target_1_px = 0.0
 
-        # 5. Short Entry Criteria (Sell Short / Put):
-        # 1. Breakdown: Price has gone under Premarket Low (PML).
-        # 2. Outside Chop: Price is strictly below PML.
-        # 3. VWAP is OVER the candle: c_close < c_vwap and c_open <= c_vwap * 1.001.
-        # 4. 5-Minute Candle Retest & Hold: The candle physically tags/retests PML (c_low <= pm_low <= c_high) OR VWAP (c_low <= c_vwap <= c_high),
-        #    and the candle closes bearishly / rejects below the level.
-        if has_broken_below_pml and (close_price < pm_low) and not is_long:
-            candles_to_check = [rth_bars.iloc[-1]]
-            if len(rth_bars) >= 2:
-                candles_to_check.append(rth_bars.iloc[-2])
-            for candle in candles_to_check:
-                c_low = float(candle["Low"])
-                c_high = float(candle["High"])
-                c_open = float(candle["Open"])
-                c_close = float(candle["Close"])
-                c_vwap = float(vwap_series.loc[candle.name]) if candle.name in vwap_series.index else current_vwap
-                
-                # VWAP must be OVER the candle
-                vwap_over_candle = (c_close < c_vwap) and (c_open <= c_vwap * 1.001)
-                
-                # Retest of PML or Retest of VWAP
-                retest_pml = (c_high >= pm_low * 0.998) and (c_low <= pm_low * 1.002) and (c_close <= pm_low)
-                retest_vwap = (c_high >= c_vwap * 0.998) and (c_low <= c_vwap * 1.002) and (c_close <= c_vwap)
-                
-                if vwap_over_candle and (retest_pml or retest_vwap):
-                    is_short = True
-                    confluence_tag = "★ Dual PML + VWAP Retest" if (retest_pml and retest_vwap) else ("PML Retest" if retest_pml else "VWAP Retest")
-                    break
-                    
+        # 4. Long Setup Rules (Bullish Momentum):
+        # 1. Trend & Value Filter: Price trading cleanly above VWAP, 8 EMA sloping upward and positioned above VWAP
+        # 2. Daylight: 8 EMA consistently above VWAP across recent bars
+        # 3. Pullback: Candle tests 8 EMA or pocket between 8 EMA and VWAP
+        # 4. Trigger: Rejection tail (hammer or close back above 8 EMA) on expanding volume
+        is_long_trend = (
+            (close_price > current_vwap) and
+            (current_ema8 > current_vwap * 1.0003) and
+            (current_ema8 >= prev_ema8) and
+            (ema8_slice > vwap_slice).all() and
+            long_15m_confirmed
+        )
+
+        if is_long_trend:
+            pullback_tested = (low_price <= current_ema8 * 1.0015) and (low_price >= current_vwap * 0.998)
+            lower_wick = min(open_price, close_price) - low_price
+            is_hammer = (lower_wick >= 0.35 * bar_range) or ((close_price - low_price) >= 0.55 * bar_range)
+            bullish_close = (close_price > current_ema8) and (close_price >= open_price)
+            vol_expanding = (vol >= prev_vol * 0.85)
+
+            if pullback_tested and (is_hammer or bullish_close) and vol_expanding:
+                is_long = True
+                confluence_tag = "★ 8 EMA Hammer Rejection" if is_hammer else "8 EMA Bullish Pullback Close"
+                if low_price <= (current_vwap * 1.001):
+                    confluence_tag = "★ 8 EMA + VWAP Pocket Retest"
+                stop_loss_px = min(low_price, current_vwap) - 0.05
+                target_1_px = hod
+
+        # 5. Short Setup Rules (Bearish Momentum):
+        # 1. Trend & Value Filter: Price trading cleanly below VWAP, 8 EMA sloping downward and positioned below VWAP
+        # 2. Daylight: 8 EMA consistently below VWAP across recent bars
+        # 3. Pullback: Candle tests underside of 8 EMA or pocket between 8 EMA and VWAP
+        # 4. Trigger: Rejection tail (topping tail or close back below 8 EMA) on expanding volume
+        is_short_trend = (
+            (close_price < current_vwap) and
+            (current_ema8 < current_vwap * 0.9997) and
+            (current_ema8 <= prev_ema8) and
+            (ema8_slice < vwap_slice).all() and
+            short_15m_confirmed
+        )
+
+        if is_short_trend and not is_long:
+            pullback_tested = (high_price >= current_ema8 * 0.9985) and (high_price <= current_vwap * 1.002)
+            upper_wick = high_price - max(open_price, close_price)
+            is_topping_tail = (upper_wick >= 0.35 * bar_range) or ((high_price - close_price) >= 0.55 * bar_range)
+            bearish_close = (close_price < current_ema8) and (close_price <= open_price)
+            vol_expanding = (vol >= prev_vol * 0.85)
+
+            if pullback_tested and (is_topping_tail or bearish_close) and vol_expanding:
+                is_short = True
+                confluence_tag = "★ 8 EMA Topping Tail Rejection" if is_topping_tail else "8 EMA Bearish Pullback Close"
+                if high_price >= (current_vwap * 0.999):
+                    confluence_tag = "★ 8 EMA + VWAP Pocket Retest"
+                stop_loss_px = max(high_price, current_vwap) + 0.05
+                target_1_px = lod
+
         if not (is_long or is_short):
             return None
-            
+
         action = "BUY" if is_long else "SELL"
         signal_type = "bullish" if is_long else "bearish"
         
@@ -538,13 +580,13 @@ def evaluate_ticker_process(ticker, df):
         ) else "Counter-Trend 🔄"
         
         setup_reason = (
-            f"Over PMH (${pm_high:.2f}) + VWAP > PMH (${current_vwap:.2f}) | {confluence_tag} 🚀"
+            f"VWAP Trend Pullback | Above VWAP (${current_vwap:.2f}) + 8EMA Rising (${current_ema8:.2f}) | {confluence_tag} 🚀"
             if is_long else
-            f"Under PML (${pm_low:.2f}) + VWAP < PML (${current_vwap:.2f}) | {confluence_tag} 🩸"
+            f"VWAP Trend Pullback | Below VWAP (${current_vwap:.2f}) + 8EMA Falling (${current_ema8:.2f}) | {confluence_tag} 🩸"
         )
         
         score = 16
-        if "Highest Conviction" in confluence_tag:
+        if "★" in confluence_tag:
             score += 3
         if sentiment_align.startswith("Market Aligned"):
             score += 2
@@ -555,7 +597,7 @@ def evaluate_ticker_process(ticker, df):
         
         logger.info(
             f"[{ticker}] 🎯 {grade} {action} SIGNAL! Price: ${close_price:.2f} | "
-            f"VWAP: ${current_vwap:.2f} | 8EMA: ${current_ema8:.2f} | PMH: ${pm_high:.2f} | PML: ${pm_low:.2f} | {setup_reason}"
+            f"VWAP: ${current_vwap:.2f} | 8EMA: ${current_ema8:.2f} | SL: ${stop_loss_px:.2f} | TP1: ${target_1_px:.2f} | {setup_reason}"
         )
         
         return {
@@ -564,6 +606,8 @@ def evaluate_ticker_process(ticker, df):
             'price': close_price,
             'vwap': round(current_vwap, 2),
             'ema8': round(current_ema8, 2),
+            'stop_loss': round(stop_loss_px, 2),
+            'target_1': round(target_1_px, 2),
             'pm_high': round(pm_high, 2),
             'pm_low': round(pm_low, 2),
             'hod': round(hod, 2),
@@ -575,9 +619,9 @@ def evaluate_ticker_process(ticker, df):
             'grade': grade,
             'reason': setup_reason,
             'time': rth_bars.index[-1],
-            'zone_summary': f"PMH ${pm_high:.2f} / PML ${pm_low:.2f}",
+            'zone_summary': f"VWAP ${current_vwap:.2f} / 8EMA ${current_ema8:.2f}",
             'in_zone': True,
-            'zone_details': {'pm_high': pm_high, 'pm_low': pm_low, 'hod': hod, 'lod': lod},
+            'zone_details': {'pm_high': pm_high, 'pm_low': pm_low, 'hod': hod, 'lod': lod, 'stop_loss': stop_loss_px, 'target_1': target_1_px},
             'sentiment_align': sentiment_align,
             'tech_trend': "Bullish" if is_long else "Bearish",
             'market_sentiment': m_sentiment,
@@ -845,7 +889,9 @@ def bot_loop():
                             pm_high=res.get('pm_high'),
                             pm_low=res.get('pm_low'),
                             ema8=res.get('ema8'),
-                            confluence=res.get('confluence')
+                            confluence=res.get('confluence'),
+                            stop_loss=res.get('stop_loss'),
+                            target_1=res.get('target_1')
                         )
                         if placed:
                             _record_alert(ticker, direction, res['price'])
