@@ -255,7 +255,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
     send_reversal_alert = os.getenv("SEND_REVERSAL_ALERTS", "false").lower() in ("true", "1", "yes")
 
     sl_label = f"5m Candle Close Below VWAP (${vwap_target:.2f})" if signal_type == "bullish" else f"5m Candle Close Above VWAP (${vwap_target:.2f})"
-    exit_8ema_label = f"5m Candle Close Below 8 EMA (${ema8:.2f})" if (signal_type == "bullish" and ema8) else (f"5m Candle Close Above 8 EMA (${ema8:.2f})" if ema8 else "8 EMA Candle Close")
+    exit_8ema_label = f"Full 5m Candle Close Below 8 EMA (${ema8:.2f})" if (signal_type == "bullish" and ema8) else (f"Full 5m Candle Close Above 8 EMA (${ema8:.2f})" if ema8 else "Full 5m Candle Close Past 8 EMA")
 
     # 1. Send SMS Notification (only if reversal alerts explicitly enabled)
     if send_reversal_alert and alert_method in ("SMS", "BOTH"):
