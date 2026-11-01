@@ -437,26 +437,29 @@ def evaluate_ticker_process(ticker, df):
         if pm_low <= close_price <= pm_high:
             return None
 
-        # Check breakout conditions during RTH (At least one completed 5-minute candle closed past PMH / PML)
+        # Check breakout conditions during RTH (At least one completed 5-minute candle closed past PMH / PML and established side of VWAP)
         completed_rth = rth_bars.iloc[:-1] if len(rth_bars) >= 2 else rth_bars
+        completed_vwap = vwap_series.loc[completed_rth.index]
         has_closed_above_pmh = bool((completed_rth["Close"] > pm_high).any())
         has_closed_below_pml = bool((completed_rth["Close"] < pm_low).any())
+        has_closed_above_vwap = bool((completed_rth["Close"] > completed_vwap).any())
+        has_closed_below_vwap = bool((completed_rth["Close"] < completed_vwap).any())
         
         is_long = False
         is_short = False
         confluence_tag = ""
         
         # 4. Long Entry Criteria (Buy / Call):
-        # 1. Breakout: A completed 5-minute candle has closed above PMH.
+        # 1. Breakout: A completed 5-minute candle has closed above PMH and above VWAP.
         # 2. Outside Chop: Live price is strictly above PMH.
         # 3. VWAP Alignment: The VWAP line is above or holding PMH (VWAP >= PMH * 0.998).
         # 4. Long Filter: Live price is above or at VWAP.
-        # 5. ACTUAL PHYSICAL VWAP RETEST: The candle wick MUST physically reach down and touch the VWAP line (c_low <= current_vwap <= c_high).
-        #    Price must NOT be drifting high above VWAP or closing way below it.
+        # 5. ACTUAL PHYSICAL VWAP RETEST: Price pulls back from above VWAP, the candle wick physically touches VWAP (c_low <= c_vwap <= c_high),
+        #    and price holds/rejects at or above VWAP (c_close >= c_vwap).
         vwap_aligned_long = current_vwap >= (pm_high * 0.998)
         price_above_pmh = close_price > pm_high
         
-        if has_closed_above_pmh and vwap_aligned_long and price_above_pmh:
+        if has_closed_above_pmh and has_closed_above_vwap and vwap_aligned_long and price_above_pmh:
             candles_to_check = [rth_bars.iloc[-1]]
             if len(rth_bars) >= 2:
                 candles_to_check.append(rth_bars.iloc[-2])
@@ -465,12 +468,13 @@ def evaluate_ticker_process(ticker, df):
                 c_high = float(candle["High"])
                 c_open = float(candle["Open"])
                 c_close = float(candle["Close"])
+                c_vwap = float(vwap_series.loc[candle.name]) if candle.name in vwap_series.index else current_vwap
                 
                 # ACTUAL physical VWAP touch: candle physically spans across or touches the VWAP line
-                actual_vwap_touch = (c_low <= current_vwap) and (c_high >= current_vwap)
+                actual_vwap_touch = (c_low <= c_vwap) and (c_high >= c_vwap)
                 
-                # Rejection confirmation: must not close dumped below VWAP, and must have approached from above
-                valid_rejection = (c_close >= current_vwap * 0.998) and (c_open >= current_vwap * 0.995 or c_high > current_vwap)
+                # True pullback from above: opened above/at VWAP and held at/above VWAP (not an initial breakout bar from below)
+                valid_rejection = (c_close >= c_vwap) and (c_open >= c_vwap * 0.999)
                 
                 if actual_vwap_touch and valid_rejection:
                     is_long = True
@@ -480,16 +484,16 @@ def evaluate_ticker_process(ticker, df):
                     break
 
         # 5. Short Entry Criteria (Sell Short / Put):
-        # 1. Breakdown: A completed 5-minute candle has closed below PML.
+        # 1. Breakdown: A completed 5-minute candle has closed below PML and below VWAP.
         # 2. Outside Chop: Live price is strictly below PML.
         # 3. VWAP Alignment: The VWAP line is below or holding PML (VWAP <= PML * 1.002).
         # 4. Short Filter: Live price is below or at VWAP.
-        # 5. ACTUAL PHYSICAL VWAP RETEST: The candle wick MUST physically reach up and touch the VWAP line (c_low <= current_vwap <= c_high).
-        #    Price must NOT be drifting far below VWAP or closing way above it.
+        # 5. ACTUAL PHYSICAL VWAP RETEST: Price bounces up from below VWAP, the candle wick physically touches VWAP (c_low <= c_vwap <= c_high),
+        #    and price rejects at or below VWAP (c_close <= c_vwap).
         vwap_aligned_short = current_vwap <= (pm_low * 1.002)
         price_below_pml = close_price < pm_low
         
-        if has_closed_below_pml and vwap_aligned_short and price_below_pml and not is_long:
+        if has_closed_below_pml and has_closed_below_vwap and vwap_aligned_short and price_below_pml and not is_long:
             candles_to_check = [rth_bars.iloc[-1]]
             if len(rth_bars) >= 2:
                 candles_to_check.append(rth_bars.iloc[-2])
@@ -498,12 +502,13 @@ def evaluate_ticker_process(ticker, df):
                 c_high = float(candle["High"])
                 c_open = float(candle["Open"])
                 c_close = float(candle["Close"])
+                c_vwap = float(vwap_series.loc[candle.name]) if candle.name in vwap_series.index else current_vwap
                 
                 # ACTUAL physical VWAP touch: candle physically spans across or touches the VWAP line
-                actual_vwap_touch = (c_high >= current_vwap) and (c_low <= current_vwap)
+                actual_vwap_touch = (c_high >= c_vwap) and (c_low <= c_vwap)
                 
-                # Rejection confirmation: must not close blown through VWAP to the upside, and approached from below
-                valid_rejection = (c_close <= current_vwap * 1.002) and (c_open <= current_vwap * 1.005 or c_low < current_vwap)
+                # True bounce/retest from below: opened below/at VWAP and rejected at/below VWAP (not an initial breakdown bar from above)
+                valid_rejection = (c_close <= c_vwap) and (c_open <= c_vwap * 1.001)
                 
                 if actual_vwap_touch and valid_rejection:
                     is_short = True
