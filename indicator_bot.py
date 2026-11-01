@@ -431,26 +431,21 @@ def evaluate_ticker_process(ticker, df):
         if pm_low <= close_price <= pm_high:
             return None
 
-        # Check breakout conditions during RTH (Either an earlier candle broke out, OR the current candle itself broke out)
-        has_closed_above_pmh = bool((rth_bars["Close"] > pm_high).any())
-        has_closed_below_pml = bool((rth_bars["Close"] < pm_low).any())
-        has_closed_above_vwap = bool((rth_bars["Close"] > vwap_series).any())
-        has_closed_below_vwap = bool((rth_bars["Close"] < vwap_series).any())
+        # Breakout History: Price has gone over PMH or under PML during RTH
+        has_broken_above_pmh = bool((rth_bars["High"] > pm_high).any())
+        has_broken_below_pml = bool((rth_bars["Low"] < pm_low).any())
         
         is_long = False
         is_short = False
         confluence_tag = ""
         
         # 4. Long Entry Criteria (Buy / Call):
-        # 1. Breakout: Candle closes above PMH and above VWAP.
-        # 2. Outside Chop: Live price is strictly above PMH.
-        # 3. VWAP Alignment: The VWAP line is above or holding PMH (VWAP >= PMH * 0.998).
-        # 4. Long Filter: Live price is above or at VWAP.
-        # 5. ACTUAL PHYSICAL VWAP RETEST / TAG: Candle physically tags VWAP (c_low <= c_vwap <= c_high) and closes above VWAP (c_close >= c_vwap).
-        vwap_aligned_long = current_vwap >= (pm_high * 0.998)
-        price_above_pmh = close_price > pm_high
-        
-        if has_closed_above_pmh and has_closed_above_vwap and vwap_aligned_long and price_above_pmh:
+        # 1. Breakout: Price has gone over Premarket High (PMH).
+        # 2. Outside Chop: Price is strictly above PMH.
+        # 3. VWAP is UNDER the candle: c_close > c_vwap and c_open >= c_vwap * 0.999.
+        # 4. 5-Minute Candle Retest & Hold: The candle physically tags/retests PMH (c_low <= pm_high <= c_high) OR VWAP (c_low <= c_vwap <= c_high),
+        #    and the candle closes bullishly / holds above the level.
+        if has_broken_above_pmh and (close_price > pm_high):
             candles_to_check = [rth_bars.iloc[-1]]
             if len(rth_bars) >= 2:
                 candles_to_check.append(rth_bars.iloc[-2])
@@ -461,29 +456,25 @@ def evaluate_ticker_process(ticker, df):
                 c_close = float(candle["Close"])
                 c_vwap = float(vwap_series.loc[candle.name]) if candle.name in vwap_series.index else current_vwap
                 
-                # ACTUAL physical VWAP touch/tag: candle physically spans across or touches the VWAP line
-                actual_vwap_touch = (c_low <= c_vwap) and (c_high >= c_vwap)
+                # VWAP must be UNDER the candle
+                vwap_under_candle = (c_close > c_vwap) and (c_open >= c_vwap * 0.999)
                 
-                # Valid rejection/hold: candle closes at or above VWAP
-                valid_rejection = (c_close >= c_vwap)
+                # Retest of PMH or Retest of VWAP
+                retest_pmh = (c_low <= pm_high * 1.002) and (c_high >= pm_high * 0.998) and (c_close >= pm_high)
+                retest_vwap = (c_low <= c_vwap * 1.002) and (c_high >= c_vwap * 0.998) and (c_close >= c_vwap)
                 
-                if actual_vwap_touch and valid_rejection:
+                if vwap_under_candle and (retest_pmh or retest_vwap):
                     is_long = True
-                    # Dual test requires price to physically retest PMH support level
-                    dual_test = (c_low <= pm_high * 1.001) and (c_high >= pm_high * 0.998)
-                    confluence_tag = "★ Dual VWAP + PMH Retest (Highest Conviction)" if dual_test else "VWAP Tap Retest"
+                    confluence_tag = "★ Dual PMH + VWAP Retest" if (retest_pmh and retest_vwap) else ("PMH Retest" if retest_pmh else "VWAP Retest")
                     break
 
         # 5. Short Entry Criteria (Sell Short / Put):
-        # 1. Breakdown: Candle closes below PML and below VWAP.
-        # 2. Outside Chop: Live price is strictly below PML.
-        # 3. VWAP Alignment: The VWAP line is below or holding PML (VWAP <= PML * 1.002).
-        # 4. Short Filter: Live price is below or at VWAP.
-        # 5. ACTUAL PHYSICAL VWAP RETEST / TAG: Candle physically tags VWAP (c_low <= c_vwap <= c_high) and closes below VWAP (c_close <= c_vwap).
-        vwap_aligned_short = current_vwap <= (pm_low * 1.002)
-        price_below_pml = close_price < pm_low
-        
-        if has_closed_below_pml and has_closed_below_vwap and vwap_aligned_short and price_below_pml and not is_long:
+        # 1. Breakdown: Price has gone under Premarket Low (PML).
+        # 2. Outside Chop: Price is strictly below PML.
+        # 3. VWAP is OVER the candle: c_close < c_vwap and c_open <= c_vwap * 1.001.
+        # 4. 5-Minute Candle Retest & Hold: The candle physically tags/retests PML (c_low <= pm_low <= c_high) OR VWAP (c_low <= c_vwap <= c_high),
+        #    and the candle closes bearishly / rejects below the level.
+        if has_broken_below_pml and (close_price < pm_low) and not is_long:
             candles_to_check = [rth_bars.iloc[-1]]
             if len(rth_bars) >= 2:
                 candles_to_check.append(rth_bars.iloc[-2])
@@ -494,17 +485,16 @@ def evaluate_ticker_process(ticker, df):
                 c_close = float(candle["Close"])
                 c_vwap = float(vwap_series.loc[candle.name]) if candle.name in vwap_series.index else current_vwap
                 
-                # ACTUAL physical VWAP touch/tag: candle physically spans across or touches the VWAP line
-                actual_vwap_touch = (c_high >= c_vwap) and (c_low <= c_vwap)
+                # VWAP must be OVER the candle
+                vwap_over_candle = (c_close < c_vwap) and (c_open <= c_vwap * 1.001)
                 
-                # Valid rejection: candle closes at or below VWAP
-                valid_rejection = (c_close <= c_vwap)
+                # Retest of PML or Retest of VWAP
+                retest_pml = (c_high >= pm_low * 0.998) and (c_low <= pm_low * 1.002) and (c_close <= pm_low)
+                retest_vwap = (c_high >= c_vwap * 0.998) and (c_low <= c_vwap * 1.002) and (c_close <= c_vwap)
                 
-                if actual_vwap_touch and valid_rejection:
+                if vwap_over_candle and (retest_pml or retest_vwap):
                     is_short = True
-                    # Dual test requires price to physically retest PML resistance level
-                    dual_test = (c_high >= pm_low * 0.999) and (c_low <= pm_low * 1.002)
-                    confluence_tag = "★ Dual VWAP + PML Retest (Highest Conviction)" if dual_test else "VWAP Tap Retest"
+                    confluence_tag = "★ Dual PML + VWAP Retest" if (retest_pml and retest_vwap) else ("PML Retest" if retest_pml else "VWAP Retest")
                     break
                     
         if not (is_long or is_short):
