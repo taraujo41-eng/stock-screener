@@ -3914,10 +3914,227 @@ def _analyze_vwap_trend_pullback(ticker, df, is_market_bullish=None, live_only=F
         print(f"Error analyzing {ticker} for VWAP trend pullback: {e}")
         return None
 
+
+def _analyze_pm_breakout(ticker, df):
+    """
+    Evaluates ticker for Premarket High (PMH) and Premarket Low (PML) Breakouts
+    after regular market open (09:30 AM RTH).
+    """
+    if df is None or len(df) < 5:
+        return None
+
+    try:
+        today_date = df.index[-1].date()
+        today_df = df[df.index.date == today_date]
+        
+        pm_bars = today_df.between_time("04:00", "09:29:59")
+        rth_bars = today_df.between_time("09:30", "16:00").copy()
+        
+        if pm_bars.empty or rth_bars.empty:
+            return None
+
+        pm_high = float(pm_bars["High"].max())
+        pm_low = float(pm_bars["Low"].min())
+        
+        if pm_high <= 0 or pm_low <= 0 or pm_high <= pm_low:
+            return None
+
+        hod = float(rth_bars["High"].max())
+        lod = float(rth_bars["Low"].min())
+        
+        broke_pmh = bool(hod > pm_high)
+        broke_pml = bool(lod < pm_low)
+        
+        # Must have broken either PM High or PM Low after market opens
+        if not (broke_pmh or broke_pml):
+            return None
+
+        # Indicator 1: RTH Market Hours VWAP (Strictly from 09:30 AM open)
+        typical_price_rth = (rth_bars["High"] + rth_bars["Low"] + rth_bars["Close"]) / 3.0
+        cum_vol_rth = rth_bars["Volume"].cumsum().replace(0, 1)
+        rth_bars["vwap"] = (typical_price_rth * rth_bars["Volume"]).cumsum() / cum_vol_rth
+        current_vwap = float(rth_bars["vwap"].iloc[-1])
+
+        # Indicator 2: 8 EMA on 5m regular market hours candles
+        rth_bars["ema8"] = rth_bars["Close"].ewm(span=8, adjust=False).mean()
+        current_ema8 = float(rth_bars["ema8"].iloc[-1])
+
+        last_bar = rth_bars.iloc[-1]
+        close_price = float(last_bar["Close"])
+        total_rth_vol = int(rth_bars["Volume"].sum())
+
+        # Determine when PM levels were first broken during RTH
+        pmh_break_bars = rth_bars[rth_bars["High"] > pm_high]
+        pml_break_bars = rth_bars[rth_bars["Low"] < pm_low]
+        
+        first_pmh_time = pmh_break_bars.index[0] if not pmh_break_bars.empty else None
+        first_pml_time = pml_break_bars.index[0] if not pml_break_bars.empty else None
+
+        # Market Sentiment
+        sentiment_data = get_market_sentiment()
+        m_sentiment = sentiment_data.get('sentiment', 'Neutral')
+        m_score = sentiment_data.get('score', 50)
+
+        # Breakout extension percentages
+        pmh_ext_pct = ((hod - pm_high) / pm_high) * 100 if broke_pmh else 0.0
+        pml_ext_pct = ((pm_low - lod) / pm_low) * 100 if broke_pml else 0.0
+
+        # Holding status at current price
+        is_holding_pmh = (close_price >= pm_high)
+        is_holding_pml = (close_price <= pm_low)
+
+        # Determine dominant direction
+        if broke_pmh and broke_pml:
+            if is_holding_pmh and not is_holding_pml:
+                is_long = True
+            elif is_holding_pml and not is_holding_pmh:
+                is_long = False
+            elif close_price >= current_vwap:
+                is_long = (pmh_ext_pct >= pml_ext_pct)
+            else:
+                is_long = not (pml_ext_pct >= pmh_ext_pct)
+            setup_tag = "⚡ Dual Range Break (PMH & PML Broken)"
+        elif broke_pmh:
+            is_long = True
+            setup_tag = "🚀 Premarket High Breakout"
+        else:
+            is_long = False
+            setup_tag = "🩸 Premarket Low Breakdown"
+
+        direction = "Bullish" if is_long else "Bearish"
+        signal_type = "bullish" if is_long else "bearish"
+
+        ny_tz = get_ny_timezone()
+        if is_long:
+            t_ny = first_pmh_time.tz_convert(ny_tz) if hasattr(first_pmh_time, "tzinfo") and first_pmh_time.tzinfo is not None else first_pmh_time
+            break_time_str = t_ny.strftime('%I:%M %p') if t_ny is not None else ""
+            status_desc = f"Broke PMH (${pm_high:.2f}) at {break_time_str} (+{pmh_ext_pct:.1f}% to HOD ${hod:.2f})"
+            if is_holding_pmh:
+                status_desc += " | Holding Above PMH 🟢"
+            else:
+                status_desc += f" | Retraced inside PM Range (Last: ${close_price:.2f})"
+            stop_loss_px = min(pm_high, current_vwap) - 0.05 if is_holding_pmh else lod
+            target_1_px = hod if close_price < hod else hod + (pm_high - pm_low) * 0.5
+            target_label = "HOD" if close_price < hod else "+0.5x PM Ext"
+        else:
+            t_ny = first_pml_time.tz_convert(ny_tz) if hasattr(first_pml_time, "tzinfo") and first_pml_time.tzinfo is not None else first_pml_time
+            break_time_str = t_ny.strftime('%I:%M %p') if t_ny is not None else ""
+            status_desc = f"Broke PML (${pm_low:.2f}) at {break_time_str} (-{pml_ext_pct:.1f}% to LOD ${lod:.2f})"
+            if is_holding_pml:
+                status_desc += " | Holding Below PML 🔴"
+            else:
+                status_desc += f" | Retraced inside PM Range (Last: ${close_price:.2f})"
+            stop_loss_px = max(pm_low, current_vwap) + 0.05 if is_holding_pml else hod
+            target_1_px = lod if close_price > lod else lod - (pm_high - pm_low) * 0.5
+            target_label = "LOD" if close_price > lod else "-0.5x PM Ext"
+
+        is_market_aligned = (
+            (is_long and m_sentiment == "Bullish") or (not is_long and m_sentiment == "Bearish")
+        )
+        sentiment_align = "Market Aligned 🎯" if is_market_aligned else "Counter-Trend 🔄"
+
+        # Confluence Scoring (Base 10)
+        score = 10
+        # +3 if actively holding outside premarket levels
+        if (is_long and is_holding_pmh) or (not is_long and is_holding_pml):
+            score += 3
+        # +3 if aligned with VWAP
+        if (is_long and close_price > current_vwap) or (not is_long and close_price < current_vwap):
+            score += 3
+        # +2 if 8 EMA trend confirms
+        if (is_long and current_ema8 > current_vwap) or (not is_long and current_ema8 < current_vwap):
+            score += 2
+        # +3 if aligned with broader market
+        if is_market_aligned:
+            score += 3
+        # +2 for strong breakout expansion (>= 1.0%)
+        ext_check = pmh_ext_pct if is_long else pml_ext_pct
+        if ext_check >= 1.0:
+            score += 2
+            
+        rvol = compute_rvol(rth_bars)
+        if rvol > 1.2:
+            score += 1
+
+        if score >= 19 and is_market_aligned and ((is_long and is_holding_pmh) or (not is_long and is_holding_pml)):
+            grade = "A+"
+        elif score >= 15:
+            grade = "A"
+        elif score >= 11:
+            grade = "B"
+        else:
+            grade = "C"
+
+        # Find option
+        best_opt = None
+        try:
+            best_opt = find_best_option(ticker, signal_type, close_price)
+        except Exception:
+            pass
+
+        # RSI
+        rsi_val = 50.0
+        try:
+            from indicator import compute_rsi
+            rsi_s = compute_rsi(rth_bars["Close"], 14)
+            if len(rsi_s) > 0 and not np.isnan(rsi_s.iloc[-1]):
+                rsi_val = float(rsi_s.iloc[-1])
+        except Exception:
+            pass
+
+        last_dt = last_bar.name
+        last_ny = last_dt.tz_convert(ny_tz) if hasattr(last_dt, "tzinfo") and last_dt.tzinfo is not None else last_dt
+        time_display = break_time_str or last_ny.strftime('%I:%M %p')
+
+        bull_signal = f"PMH Breakout (+{pmh_ext_pct:.1f}%)" if broke_pmh else "—"
+        bear_signal = f"PML Breakdown (-{pml_ext_pct:.1f}%)" if broke_pml else "—"
+
+        return {
+            "Ticker": ticker,
+            "Direction": direction,
+            "Last Price": round(close_price, 2),
+            "Volume": total_rth_vol,
+            "RSI": round(rsi_val, 1),
+            "RVOL": round(rvol, 1),
+            "Score": score,
+            "Grade": grade,
+            "Bullish Signals": bull_signal,
+            "Bearish Signals": bear_signal,
+            "Patterns": f"{setup_tag} | {status_desc} | VWAP ${current_vwap:.2f}",
+            "Entry": round(close_price, 2),
+            "Stop Loss": round(stop_loss_px, 2),
+            "Profit Target": f"${round(target_1_px, 2)} ({target_label})",
+            "VWAP Level": round(current_vwap, 2),
+            "Supply/Demand Zone": f"PM High ${pm_high:.2f} / Low ${pm_low:.2f}",
+            "In Zone": not (is_holding_pmh or is_holding_pml),
+            "Zone Details": {
+                "pm_high": round(pm_high, 2),
+                "pm_low": round(pm_low, 2),
+                "hod": round(hod, 2),
+                "lod": round(lod, 2),
+                "stop_loss": round(stop_loss_px, 2),
+                "target_1": round(target_1_px, 2),
+                "first_pmh_time": break_time_str if broke_pmh else None,
+                "first_pml_time": break_time_str if broke_pml else None
+            },
+            "Market Sentiment": m_sentiment,
+            "Market Sentiment Score": m_score,
+            "Sentiment Alignment": sentiment_align,
+            "Technical Trend": "Bullish" if is_long else "Bearish",
+            "MACD": "Bullish" if is_long else "Bearish",
+            "Option Play": best_opt,
+            "Suggested Option": f"{best_opt['exp']} ${best_opt['strike']} {best_opt['type']} (@${best_opt['mid']:.2f})" if best_opt else None,
+            "Setup Time": time_display
+        }
+    except Exception as e:
+        print(f"Error analyzing {ticker} for PM breakout: {e}")
+        return None
+
 def watchlist_scan(tickers, extended_hours=False, mode="watchlist"):
     """
-    VWAP Trend Pullback Scan — scans specified tickers on 5m/15m candles
-    for high-conviction 8 EMA / VWAP trend pullback setups.
+    Scans specified tickers on 5m candles:
+    - If mode == 'top50': Premarket High / Low Breakout Scan.
+    - If mode == 'watchlist': VWAP Trend Pullback Scan.
     """
     _reset_progress(status="running", mode=mode)
     scan_progress["status"] = "running"
@@ -3927,7 +4144,8 @@ def watchlist_scan(tickers, extended_hours=False, mode="watchlist"):
     total = len(tickers)
     scan_title = "Top 50 Scan" if mode == "top50" else "Watchlist Scan"
     prefix = "Top 50" if mode == "top50" else "Watchlist"
-    print(f"  [{scan_title}] Running VWAP Trend Pullback scan (5m candles, 15m macro confirmation)...")
+    scan_subtitle = "Premarket High/Low Breakouts (5m candles)" if mode == "top50" else "VWAP Trend Pullback scan (5m candles, 15m macro confirmation)"
+    print(f"  [{scan_title}] Running {scan_subtitle}...")
 
     def _on_dl_progress(i, tot, sym):
         pct = int((i / tot) * 35) if tot else 0
@@ -3943,12 +4161,16 @@ def watchlist_scan(tickers, extended_hours=False, mode="watchlist"):
 
     for i, sym in enumerate(tickers):
         pct = 35 + int((i / total) * 60) if total else 95
-        _update_progress("analyzing", f"Analyzing {prefix}: {sym} (VWAP Trend Pullback)...", i, total, ticker=sym, found=len(results), pct=pct)
+        desc = "Premarket Breakout" if mode == "top50" else "VWAP Trend Pullback"
+        _update_progress("analyzing", f"Analyzing {prefix}: {sym} ({desc})...", i, total, ticker=sym, found=len(results), pct=pct)
         try:
             df = candle_data.get(sym)
             if df is None or len(df) < 5:
                 continue
-            r = _analyze_vwap_trend_pullback(sym, df)
+            if mode == "top50":
+                r = _analyze_pm_breakout(sym, df)
+            else:
+                r = _analyze_vwap_trend_pullback(sym, df)
             if r:
                 results.append(r)
         except Exception as e:

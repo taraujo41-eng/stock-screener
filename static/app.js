@@ -917,7 +917,7 @@ function displayResults(data) {
     badge.textContent = `⚡ Unusual Options Sweeps — Watchlist (${data.count || 0} contracts)`;
     badge.classList.remove("hidden");
   } else if (data.mode === "top50") {
-    badge.textContent = `🔥 Top 50 Stocks Scan (${data.count || 0} setups)`;
+    badge.textContent = `🔥 Top 50 Stocks — PM Breakouts (${data.count || 0} setups)`;
     badge.classList.remove("hidden");
   } else if (data.mode === "rsidiv") {
     badge.textContent = `📊 RSI Divergence — Watchlist (${data.count || 0} setups)`;

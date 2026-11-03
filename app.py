@@ -715,7 +715,7 @@ def scan_top50():
         return _scan_conflict_response()
     scan_id = str(int(time.time() * 1000))
     _reset_progress(status="running", mode="top50", scan_id=scan_id)
-    scan_progress["phase_label"] = "Initiating Top 50 scan (all criteria)..."
+    scan_progress["phase_label"] = "Initiating Top 50 Premarket Breakout scan..."
 
     data = request.get_json() or {}
     extended_hours = data.get("extended_hours", False)
