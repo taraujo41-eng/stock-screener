@@ -920,7 +920,7 @@ function displayResults(data) {
     badge.textContent = `🔥 Top 50 Stocks — PM Breakouts (${data.count || 0} setups)`;
     badge.classList.remove("hidden");
   } else if (data.mode === "rsidiv") {
-    badge.textContent = `📊 RSI Divergence — Watchlist (${data.count || 0} setups)`;
+    badge.textContent = `📊 Daily RSI Divergence — Watchlist (${data.count || 0} setups)`;
     badge.classList.remove("hidden");
   } else if (data.mode === "watchlist") {
     badge.textContent = `Watchlist Scan (${data.count || 0} setups)`;

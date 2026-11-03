@@ -3038,10 +3038,12 @@ def rsi_divergence_full_market_scan(tickers=None, extended_hours=False):
 
     results = []
     total = len(tickers)
-    # Dynamic timeframe: 15m when market is open / extended hours, 1d when market is closed
-    interval, days, inc_pre_post = determine_scan_candle_mode(force_extended=extended_hours)
-    _timeframe_label = "15-Minute" if interval == "15m" else "Daily"
-    print(f"  [RSI Divergence Scan] Mode: {_timeframe_label} (interval={interval}, days={days}, prepost={inc_pre_post})")
+    # Strictly Daily timeframe: 1d candles, 280 days lookback (runs after market close)
+    interval = "1d"
+    days = 280
+    inc_pre_post = "false"
+    _timeframe_label = "Daily"
+    print(f"  [RSI Divergence Scan] Mode: Daily (interval={interval}, days={days})")
 
     def _on_daily_progress(i, tot, sym):
         pct = 5 + (int((i / tot) * 80) if tot else 0)

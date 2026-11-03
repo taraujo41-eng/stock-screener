@@ -524,13 +524,22 @@ def scan_52w_results():
 @app.route("/api/scan/rsidiv", methods=["POST"])
 def scan_rsidiv():
     """Start a full market RSI divergence scan in the background."""
+    req_data = request.get_json(silent=True) or {}
+    force = req_data.get("force", False)
+
+    from reversal_scanner import is_market_hours
+    if is_market_hours() and not force:
+        return jsonify({
+            "ok": False,
+            "error": "The RSI Divergence scan is configured to run only after market close (after 4:00 PM ET) using Daily candles."
+        }), 400
+
     if not _acquire_scan("RSIDiv-User"):
         return _scan_conflict_response()
     scan_id = str(int(time.time() * 1000))
     _reset_progress(status="running", mode="rsidiv", scan_id=scan_id)
-    scan_progress["phase_label"] = "Initiating scan..."
+    scan_progress["phase_label"] = "Initiating Daily RSI Divergence scan..."
 
-    req_data = request.get_json(silent=True) or {}
     extended_hours = req_data.get("extended_hours", False)
     use_watchlist = req_data.get("use_watchlist", False)
 
