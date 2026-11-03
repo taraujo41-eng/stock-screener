@@ -222,7 +222,7 @@ def _release_scan():
 # Reset scan state only on clean boot; do not overwrite a recently completed 'done' state
 try:
     current_p = scan_progress.read()
-    if current_p.get("status") not in ("done", "running"):
+    if current_p.get("status") != "done":
         _release_scan()
         _reset_progress("idle")
 except Exception:
@@ -581,7 +581,7 @@ def scan_watchlist():
     _reset_progress(status="running", mode="watchlist", scan_id=scan_id)
     scan_progress["phase_label"] = "Initiating watchlist scan (all criteria)..."
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     extended_hours = data.get("extended_hours", False)
 
     def _run():
@@ -717,7 +717,7 @@ def scan_top50():
     _reset_progress(status="running", mode="top50", scan_id=scan_id)
     scan_progress["phase_label"] = "Initiating Top 50 Premarket Breakout scan..."
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     extended_hours = data.get("extended_hours", False)
 
     def _run():
@@ -789,7 +789,7 @@ def scan_options_watchlist():
             return jsonify({"ok": False, "error": "A scan is already running"}), 409
         _scan_running = True
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     extended_hours = data.get("extended_hours", False)
 
     def _run():
@@ -892,7 +892,7 @@ def watchlist_get():
 def watchlist_replace():
     """Replace entire watchlist."""
     global user_watchlist
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     tickers = data.get("watchlist", [])
     cleaned = []
     for t in tickers:
@@ -908,7 +908,7 @@ def watchlist_replace():
 def watchlist_add():
     """Add a ticker to the watchlist."""
     global user_watchlist
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     ticker = data.get("ticker", "").strip().upper().replace(" ", "")
     if not ticker or not ticker.isalpha() or len(ticker) > 5:
         return jsonify({"ok": False, "error": "Invalid ticker symbol"}), 400
@@ -922,7 +922,7 @@ def watchlist_add():
 def watchlist_remove():
     """Remove a ticker from the watchlist."""
     global user_watchlist
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
     ticker = data.get("ticker", "").strip().upper().replace(" ", "")
     if ticker in user_watchlist:
         user_watchlist.remove(ticker)
