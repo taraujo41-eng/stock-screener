@@ -823,7 +823,7 @@ def bot_loop():
                 # 2. Pre-calculate daily bands
                 precalculate_daily_bands(tickers)
                 
-                logger.info(f"Scanning {len(tickers)} {tickers_mode} tickers in parallel ({candle_interval} candles, PM Breakout + VWAP Retest)...")
+                logger.info(f"Scanning {len(tickers)} Top 50 tickers in parallel ({candle_interval} candles, PM Breakout + VWAP Retest)...")
 
                 # 3. Download and compute in parallel
                 results = fetch_batch_concurrent(
