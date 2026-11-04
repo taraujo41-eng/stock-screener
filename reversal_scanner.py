@@ -1166,19 +1166,32 @@ def _get_target_friday_exp(valid_exps=None, target_dte=30):
     return friday, dte
 
 
-def find_best_option(ticker, signal_type, last_price):
+def find_best_option(ticker, signal_type, last_price, min_dte=None, max_dte=None, target_delta_min=None, target_delta_max=None, min_oi=None, max_spread_dollars=None, max_spread_pct=None):
     """
     Find the ideal live option contract from Webull:
-    - 20-65 DTE (standard expirations)
-    - Delta ~0.40-0.70 (ATM/slight ITM)
+    - Target 30-60 DTE (minimizes theta decay)
+    - Delta between 0.45 and 0.60 (ATM or slightly ITM)
+    - Open Interest >= 500 contracts
+    - Spread <= $0.05 or <= 2% of contract premium
     - Strict live quotes required: non-zero Bid and Ask
-    - Enforced tight spread (< 12% default or OPTIONS_MAX_SPREAD_PCT)
-    - Returns None if no liquid contract with valid quotes is found (no fake math)
+    - Returns None if no liquid contract with valid quotes is found
     """
     try:
-        max_spread_pct = float(os.getenv("OPTIONS_MAX_SPREAD_PCT", "6.0"))
-        min_dte = int(os.getenv("OPTIONS_MIN_DTE", "0"))
-        max_dte = int(os.getenv("OPTIONS_MAX_DTE", "14"))
+        if min_dte is None:
+            min_dte = int(os.getenv("OPTIONS_MIN_DTE", "30"))
+        if max_dte is None:
+            max_dte = int(os.getenv("OPTIONS_MAX_DTE", "60"))
+        if target_delta_min is None:
+            target_delta_min = float(os.getenv("OPTIONS_MIN_DELTA", "0.45"))
+        if target_delta_max is None:
+            target_delta_max = float(os.getenv("OPTIONS_MAX_DELTA", "0.60"))
+        if min_oi is None:
+            min_oi = int(os.getenv("OPTIONS_MIN_OI", "500"))
+        if max_spread_dollars is None:
+            max_spread_dollars = float(os.getenv("OPTIONS_MAX_SPREAD_DOLLARS", "0.05"))
+        if max_spread_pct is None:
+            max_spread_pct = float(os.getenv("OPTIONS_MAX_SPREAD_PCT", "2.0"))
+
         chain_meta = fetch_options_chain(ticker)
         valid_exps = []
         
@@ -1200,14 +1213,25 @@ def find_best_option(ticker, signal_type, last_price):
                 if min_dte <= dte <= max_dte:
                     valid_exps.append((exp, dte))
         
+        # If no expirations in primary window, fallback to closest available standard expiration
+        if not valid_exps and chain_meta and chain_meta.get("expirations"):
+            for exp in chain_meta.get("expirations", []):
+                try:
+                    exp_date = datetime.fromtimestamp(exp, tz=ny_tz).date()
+                except Exception:
+                    exp_date = datetime.fromtimestamp(exp).date()
+                dte = (exp_date - today_date).days
+                if 14 <= dte <= 90:
+                    valid_exps.append((exp, dte))
+
         if not valid_exps:
             return None
 
         best_contract = None
         best_score = -1
         
-        # Scan valid expirations (prioritizing 0-14 DTE for intraday day trades)
-        for exp_ts, dte_days in valid_exps[:6]:
+        # Scan valid expirations (prioritizing 30-60 DTE for PMB strategy)
+        for exp_ts, dte_days in valid_exps[:8]:
             chain = fetch_options_for_expiration(ticker, exp_ts)
             if not chain:
                 continue
@@ -1218,15 +1242,6 @@ def find_best_option(ticker, signal_type, last_price):
                 if strike is None:
                     continue
                 
-                # Strike proximity: ATM or slightly ITM for maximum directional velocity
-                dist_pct = (strike - last_price) / last_price
-                if signal_type == "bullish":
-                    if not (-0.06 <= dist_pct <= 0.03):
-                        continue
-                else:
-                    if not (-0.03 <= dist_pct <= 0.06):
-                        continue
-                
                 # 1. Strict live quote verification: non-zero Bid and Ask
                 bid = c.get("bid")
                 ask = c.get("ask")
@@ -1234,52 +1249,60 @@ def find_best_option(ticker, signal_type, last_price):
                     continue
                 
                 mid = round((bid + ask) / 2.0, 2)
-                # 2. Filter out penny lottery options with huge percentage drag
+                # Filter out penny lottery options
                 if mid < 0.40:
                     continue
                 
                 spread = round(ask - bid, 2)
                 spread_pct = round((spread / max(0.01, mid)) * 100, 1)
-                
-                # 3. Strict bid-ask spread filters (both percentage and dollar caps)
-                if spread_pct > max_spread_pct:
-                    continue
-                if mid < 2.0 and spread > 0.10:
-                    continue
-                elif mid < 5.0 and spread > 0.25:
-                    continue
-                
-                # 4. Liquidity gate: require active Open Interest or day volume
-                oi = c.get("openInterest") or 0
-                vol = c.get("volume") or 0
-                if oi < 20 and vol < 5:
-                    continue
-                
-                # 5. Delta filter: 0.35 to 0.70 Delta (targets sweet spot ATM 0.45 - 0.55)
+
                 delta = c.get("delta")
                 est_delta = abs(float(delta)) if delta else 0.50
-                if not (0.35 <= est_delta <= 0.70):
+
+                # Delta filter: between 0.45 and 0.60 (ATM or slightly ITM)
+                # Allow slight tolerance [0.40 - 0.65] for score ranking if exact sweet spot is sparse
+                if not (0.40 <= est_delta <= 0.68):
                     continue
                 
-                # 6. Anti-IV Crush filter: avoid buying into overinflated IV (> 115%)
+                # Strike proximity check
+                dist_pct = (strike - last_price) / max(0.01, last_price)
+                if signal_type == "bullish":
+                    if not (-0.15 <= dist_pct <= 0.08):
+                        continue
+                else:
+                    if not (-0.08 <= dist_pct <= 0.15):
+                        continue
+                
+                oi = c.get("openInterest") or 0
+                vol = c.get("volume") or 0
+
                 iv_val = (c.get("impliedVolatility") or 0.35)
                 iv_pct = iv_val * 100.0 if iv_val < 5.0 else iv_val
-                if iv_pct > 115.0:
+
+                # Spread filter: Bid-Ask Spread <= $0.05 OR <= 2% of contract premium (or max_spread_pct)
+                spread_ok = (spread <= max_spread_dollars) or (spread_pct <= max_spread_pct)
+                if not spread_ok and spread_pct > 8.0:
                     continue
+
+                # Tier-1 PMB Criteria Check
+                is_pmb_tier1 = (
+                    (target_delta_min <= est_delta <= target_delta_max) and
+                    (oi >= min_oi) and
+                    spread_ok and
+                    (min_dte <= dte_days <= max_dte)
+                )
+
+                # Scoring Formula
+                delta_fit = max(0.2, 1.0 - abs(est_delta - 0.52) * 2.5)
+                spread_fit = max(0.2, 1.0 - (spread_pct / max(1.0, max_spread_pct * 3)))
+                ideal_dte = 45.0
+                dte_fit = max(0.2, 1.0 - abs(dte_days - ideal_dte) / 30.0)
+                liq_base = min(10000, oi + (vol * 2))
                 
-                # 7. Comprehensive Scoring Formula:
-                # - Rewards ATM Delta (closest to 0.50)
-                # - Rewards the tightest percentage spread
-                # - Rewards the optimal 14-21 DTE window
-                # - Rewards high institutional liquidity (OI & Volume)
-                delta_fit = max(0.2, 1.0 - abs(est_delta - 0.50) * 2.0)
-                spread_fit = max(0.2, 1.0 - (spread_pct / max_spread_pct))
-                ideal_dte = (min_dte + max_dte) / 2.0
-                dte_fit = max(0.2, 1.0 - abs(dte_days - ideal_dte) / max(1.0, ideal_dte))
-                liq_score = min(5000, oi + (vol * 2))
-                
-                score = (liq_score ** 0.5) * 10.0 * spread_fit * delta_fit * dte_fit
-                
+                score = (liq_base ** 0.5) * 10.0 * spread_fit * delta_fit * dte_fit
+                if is_pmb_tier1:
+                    score += 5000.0  # Top tier priority
+
                 if score > best_score:
                     best_score = score
                     exp_dt = datetime.fromtimestamp(exp_ts)

@@ -76,7 +76,71 @@ def get_cached_market_sentiment():
         "is_bullish": False,
         "summary": "Market Sentiment: Neutral (50/100)"
     }
-# Daily alert cooldown: {ticker: {"direction": "BUY"|"SELL", "date": "YYYY-MM-DD", "price": float}}
+# Broad Market (SPY/QQQ) Session VWAP Alignment Cache
+_index_vwap_cache = None
+_index_vwap_last_time = 0
+
+def get_market_index_alignment(max_age_seconds=45):
+    """
+    Checks if broad market (SPY or QQQ) is trading above or below session VWAP.
+    Session VWAP is calculated strictly from 09:30 AM ET market open.
+    Caches results for 45s to avoid duplicate network calls in scan cycles.
+    """
+    global _index_vwap_cache, _index_vwap_last_time
+    now = time.time()
+    if _index_vwap_cache and (now - _index_vwap_last_time) < max_age_seconds:
+        return _index_vwap_cache
+
+    try:
+        from data_fetcher import fetch_one
+        spy_df = fetch_one("SPY", days=2, interval="5m", includePrePost="true")
+        qqq_df = fetch_one("QQQ", days=2, interval="5m", includePrePost="true")
+
+        def _check_vwap(df):
+            if df is None or len(df) < 2:
+                return None, 0.0, 0.0
+            today_date = df.index[-1].date()
+            today_df = df[df.index.date == today_date]
+            rth = today_df.between_time("09:30", "16:00")
+            if len(rth) < 1:
+                return None, 0.0, 0.0
+            tp = (rth["High"] + rth["Low"] + rth["Close"]) / 3.0
+            cum_vol = rth["Volume"].cumsum().replace(0, 1)
+            vwap = (tp * rth["Volume"]).cumsum() / cum_vol
+            last_c = float(rth["Close"].iloc[-1])
+            cur_vwap = float(vwap.iloc[-1])
+            return (last_c >= cur_vwap), last_c, cur_vwap
+
+        spy_above, spy_c, spy_vwap = _check_vwap(spy_df)
+        qqq_above, qqq_c, qqq_vwap = _check_vwap(qqq_df)
+
+        long_ok = (spy_above is True) or (qqq_above is True)
+        short_ok = (spy_above is False) or (qqq_above is False)
+
+        summary_parts = []
+        if spy_above is not None:
+            summary_parts.append(f"SPY {'Above' if spy_above else 'Below'} VWAP (${spy_c:.2f}/${spy_vwap:.2f})")
+        if qqq_above is not None:
+            summary_parts.append(f"QQQ {'Above' if qqq_above else 'Below'} VWAP (${qqq_c:.2f}/${qqq_vwap:.2f})")
+
+        _index_vwap_cache = {
+            "spy_above_vwap": spy_above,
+            "qqq_above_vwap": qqq_above,
+            "long_aligned": long_ok,
+            "short_aligned": short_ok,
+            "summary": " | ".join(summary_parts) if summary_parts else "Index VWAP: Neutral"
+        }
+        _index_vwap_last_time = now
+        return _index_vwap_cache
+    except Exception as e:
+        logger.warning(f"Error checking market index VWAP: {e}")
+        return {
+            "spy_above_vwap": None,
+            "qqq_above_vwap": None,
+            "long_aligned": True,
+            "short_aligned": True,
+            "summary": "Index VWAP: Neutral"
+        }
 _SCAN_DATA_DIR = os.environ.get("SCAN_DATA_DIR", os.path.dirname(__file__))
 _ALERTED_TODAY_FILE = os.path.join(_SCAN_DATA_DIR, "alerted_today.json")
 _alerted_today = {}
@@ -224,8 +288,7 @@ def send_telegram_notification(message, max_retries=3):
     return False
 
 def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=None, reason=None, score=None, grade=None, rvol=None, zone_summary=None, in_zone=False, sentiment_align=None, market_sentiment_summary=None, tech_trend=None, hod=None, lod=None, pm_high=None, pm_low=None, ema8=None, confluence=None, stop_loss=None, target_1=None):
-    bb_mult = os.getenv("BB_MULT", "2.5")
-    grade_str = grade or ("A+" if (score and score >= 12) else "A")
+    grade_str = grade or ("A+" if (score and score >= 19) else "A")
     grade_icon = "⭐️" if grade_str == "A+" else "🔥"
 
     # Strictly enforce: Only make trades that are A+ setups
@@ -236,45 +299,50 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
 
     sl_str = f"${stop_loss:.2f}" if stop_loss else "N/A"
     tp1_str = f"${target_1:.2f}" if target_1 else "N/A"
-    logger.info(f"🔔 {grade_str} SIGNAL TRIGGERED on {ticker}: {action} | Setup: {reason} | Price=${last_price:.2f}, VWAP=${vwap_target:.2f}, 8EMA={f'${ema8:.2f}' if ema8 else 'N/A'} | SL={sl_str} | TP1={tp1_str}")
+    pmh_str = f"${pm_high:.2f}" if pm_high else "N/A"
+    pml_str = f"${pm_low:.2f}" if pm_low else "N/A"
+    zone_title = "5-MIN PREMARKET BREAKOUT (PMB)"
+
+    logger.info(f"🔔 {grade_str} {zone_title} SIGNAL on {ticker}: {action} | Setup: {reason} | Price=${last_price:.2f}, VWAP=${vwap_target:.2f}, 8EMA={f'${ema8:.2f}' if ema8 else 'N/A'} | Hard SL={sl_str} | 2R Target={tp1_str}")
     
     alert_method = os.getenv("ALERT_METHOD", "TELEGRAM").upper()
     
-    # 0. Find best option contract suggestion
+    # 0. Find best option contract suggestion (PMB specs: 30-60 DTE, Delta 0.45-0.60, OI >= 500, Spread <= $0.05/2%)
     opt_str = "None"
     opt_info = None
     try:
         from reversal_scanner import find_best_option
-        opt_info = find_best_option(ticker, signal_type, last_price)
+        opt_info = find_best_option(
+            ticker,
+            signal_type,
+            last_price,
+            min_dte=30,
+            max_dte=60,
+            target_delta_min=0.45,
+            target_delta_max=0.60,
+            min_oi=500,
+            max_spread_dollars=0.05,
+            max_spread_pct=2.0
+        )
         if opt_info:
-            opt_str = f"{opt_info.get('exp', '')} ${opt_info.get('strike', '')} {opt_info.get('type', '')} (@${opt_info.get('mid', 0):.2f})"
+            opt_str = f"{opt_info.get('exp', '')} ${opt_info.get('strike', '')} {opt_info.get('type', '')} (@${opt_info.get('mid', 0):.2f}) [DTE:{opt_info.get('dte')} Δ:{opt_info.get('est_delta', '0.50')} OI:{opt_info.get('oi', 'N/A')}]"
     except Exception as e:
         logger.warning(f"Option lookup failed for {ticker}: {e}")
 
-    # Format Zone and Sentiment Badges
-    zone_str = f"🧱 {zone_summary}" if zone_summary and zone_summary != "None" else "None"
-    if in_zone and zone_summary and zone_summary != "None":
-        zone_str += " 🔥 <b>In Zone</b>"
-
-    align_badge = sentiment_align or "Neutral"
-    align_icon = "🎯" if "Aligned" in align_badge else ("🔄" if "Counter" in align_badge else "⚪")
-    tech_str = f"📊 {tech_trend}" if tech_trend else "📊 Neutral"
-    
     send_reversal_alert = os.getenv("SEND_REVERSAL_ALERTS", "false").lower() in ("true", "1", "yes")
 
-    exit_8ema_label = f"Completed 5m Candle Close Below 8 EMA (${ema8:.2f})" if (signal_type == "bullish" and ema8) else (f"Completed 5m Candle Close Above 8 EMA (${ema8:.2f})" if ema8 else "Completed 5m Candle Close Past 8 EMA")
+    struct_invalidation = f"5m candle close below PMH ({pmh_str})" if signal_type == "bullish" else f"5m candle close above PML ({pml_str})"
 
-    # 1. Send SMS Notification (only if reversal alerts explicitly enabled)
+    # 1. Send SMS Notification
     if send_reversal_alert and alert_method in ("SMS", "BOTH"):
-        zone_sms = f"Zone: {zone_summary}{' (In Zone)' if in_zone else ''}\n" if zone_summary and zone_summary != "None" else ""
         sms_msg = (
-            f"{grade_icon} {grade_str} SETUP: {ticker}\n"
+            f"{grade_icon} {grade_str} {zone_title}: {ticker}\n"
             f"Action: {action} ({signal_type.upper()})\n"
-            f"Setup: {reason or (action + ' Retest')}\n"
-            f"Price: ${last_price:.2f} | VWAP: ${vwap_target:.2f} | 8 EMA: ${ema8:.2f}\n"
-            f"SL: {sl_str} | TP1: {tp1_str}\n"
-            f"Exit Rule: {exit_8ema_label}\n"
-            f"Suggested Option: {opt_str}"
+            f"Price: ${last_price:.2f} | PMH: {pmh_str} | PML: {pml_str}\n"
+            f"VWAP: ${vwap_target:.2f} | 8 EMA: ${ema8:.2f}\n"
+            f"Hard SL: {sl_str} | 2R Target: {tp1_str}\n"
+            f"Early Invalidation: {struct_invalidation}\n"
+            f"Option: {opt_str}"
         )
         send_sms_notification(sms_msg)
         
@@ -283,18 +351,21 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
         if val is None: return ""
         return str(val).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    # 2. Send Telegram Reversal Notification (only if reversal alerts explicitly enabled)
+    # 2. Send Telegram Notification
     if send_reversal_alert and alert_method in ("TELEGRAM", "BOTH"):
-        rsi_formatted = f"{rsi:.1f}" if rsi is not None else "N/A"
         rvol_formatted = f"{rvol:.1f}x" if rvol is not None else "N/A"
         tg_msg = (
-            f"🚨 <b>{grade_icon} {grade_str} STRATEGY ALERT: {ticker}</b> 🚨\n\n"
+            f"🚨 <b>{grade_icon} {grade_str} {zone_title}: {ticker}</b> 🚨\n\n"
             f"<b>Action:</b> {action} ({signal_type.upper()})\n"
-            f"<b>Setup:</b> {_esc(reason or (action + ' Retest'))}\n"
+            f"<b>Setup:</b> {_esc(reason or action)}\n"
             f"<b>Price:</b> ${last_price:.2f}\n"
-            f"<b>VWAP:</b> ${vwap_target:.2f} | <b>8 EMA:</b> ${ema8:.2f}\n"
-            f"<b>Stop Loss:</b> {_esc(sl_str)} | <b>TP1:</b> {_esc(tp1_str)}\n"
-            f"<b>Exit Rule:</b> 🏃 {_esc(exit_8ema_label)}\n"
+            f"<b>Premarket Range:</b> PMH {pmh_str} | PML {pml_str}\n"
+            f"<b>Intraday Anchors:</b> VWAP ${vwap_target:.2f} | 8 EMA ${ema8:.2f}\n"
+            f"<b>Relative Volume (RVOL):</b> {rvol_formatted} (≥ 1.5x Volume SMA)\n"
+            f"<b>Hard Emergency Stop:</b> {_esc(sl_str)}\n"
+            f"<b>Profit Target (2R):</b> {_esc(tp1_str)} (2:1 Asymmetry)\n"
+            f"<b>Early Invalidation:</b> 🏃 {_esc(struct_invalidation)}\n"
+            f"<b>Market Filter:</b> {_esc(market_sentiment_summary or 'SPY/QQQ Confirmed 🎯')}\n"
             f"<b>Suggested Option:</b> {_esc(opt_str)}"
         )
         send_telegram_notification(tg_msg)
@@ -325,7 +396,6 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             if result:
                 trade_executed = True
                 mode_str = result.get('mode', 'Simulation')
-                zone_title = "VWAP TREND PULLBACK"
                 logger.info(f"📈 {grade_str} {zone_title} Paper trade placed for {ticker}: {result.get('option_symbol', '')} @ ${result.get('entry_price', 0):.2f} ({mode_str})")
                 
                 # Send trade notification via same alert method
@@ -334,16 +404,14 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                     f"Option: {result.get('type', '')} ${result.get('strike', '')} ({result.get('option_symbol', '')})\n"
                     f"Price: ${result.get('entry_price', 0):.2f}\n"
                     f"Qty: {result.get('quantity', 1)} contract(s)\n"
-                    f"Stock: ${last_price:.2f} | VWAP: ${vwap_target:.2f} | 8 EMA: ${ema8:.2f}\n"
-                    f"Stop Loss: {sl_str} | TP1: {tp1_str} (50% Scale-Out)\n"
-                    f"Runner Exit: Completed 5m candle close across 8 EMA\n"
-                    f"Setup: {reason or action}\n"
+                    f"Stock: ${last_price:.2f} | PMH: {pmh_str} | PML: {pml_str}\n"
+                    f"Hard SL: {sl_str} | 2R Target: {tp1_str}\n"
+                    f"Early Invalidation: {struct_invalidation}\n"
                     f"Mode: {mode_str}"
                 )
                 if alert_method in ("SMS", "BOTH"):
                     send_sms_notification(trade_msg)
                 if alert_method in ("TELEGRAM", "BOTH"):
-                    rsi_formatted = f"{rsi:.1f}" if rsi is not None else "N/A"
                     rvol_formatted = f"{rvol:.1f}x" if rvol is not None else "N/A"
                     tg_trade = (
                         f"📈 <b>{grade_icon} {grade_str} {zone_title} TRADE PLACED: {ticker}</b>\n\n"
@@ -351,8 +419,10 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                         f"<b>Entry Price:</b> ${result.get('entry_price', 0):.2f}\n"
                         f"<b>Qty:</b> {result.get('quantity', 1)} contract(s)\n"
                         f"<b>Stock Price:</b> ${last_price:.2f} | <b>VWAP:</b> ${vwap_target:.2f} | <b>8 EMA:</b> ${ema8:.2f}\n"
-                        f"<b>Stop Loss:</b> {_esc(sl_str)} | <b>TP1:</b> {_esc(tp1_str)} (50% Scale-Out)\n"
-                        f"<b>Runner Exit:</b> 🏃 5m candle close across 8 EMA\n"
+                        f"<b>PMH:</b> {pmh_str} | <b>PML:</b> {pml_str}\n"
+                        f"<b>Hard Emergency Stop:</b> {_esc(sl_str)}\n"
+                        f"<b>Profit Target (2R):</b> {_esc(tp1_str)} (2:1 Asymmetry)\n"
+                        f"<b>Early Invalidation:</b> 🏃 {_esc(struct_invalidation)}\n"
                         f"<b>Setup:</b> {_esc(reason or action)}\n"
                         f"<b>Mode:</b> {_esc(mode_str)}"
                     )
@@ -368,45 +438,74 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
 
 def evaluate_ticker_process(ticker, df):
     """
-    Strategy Blueprint: VWAP Trend Pullback
-    1. Core Timeframes: 5-minute chart for entries; 15-minute resampled chart for macro trend confirmation.
-    2. Ideal Window: 9:45 AM – 11:30 AM EST (allows morning VWAP to stabilize after the open).
-    3. Rule 1 (Daylight Filter): Never trade flat moving averages. 8 EMA must maintain position on trending
-       side of VWAP with daylight for at least 3 consecutive candles.
-    4. Rule 2: Respect 9:30–9:45 AM noise (first 15 minutes whipsaws blocked).
-    5. Rule 3 (Rubber Band Filter): Price not stretched > 2.5 ATRs away from 8 EMA.
-    6. Long Setup (Bullish Momentum):
-       - Price cleanly above VWAP (Close > VWAP).
-       - 8 EMA sloping upward and positioned above VWAP (EMA8 > VWAP).
-       - Macro 15m trend confirmation.
-       - Pullback: Retraces toward 8 EMA or pocket between 8 EMA and VWAP.
-       - Trigger: Rejection tail (hammer or close back above 8 EMA) on expanding volume.
-       - SL: 1-2 ticks below rejection swing low or just beneath VWAP.
-       - TP1: Prior swing high / HOD (50% scale-out). Runner: Trails 8 EMA.
-    7. Short Setup (Bearish Momentum):
-       - Price cleanly below VWAP (Close < VWAP).
-       - 8 EMA sloping downward and positioned below VWAP (EMA8 < VWAP).
-       - Macro 15m trend confirmation.
-       - Pullback: Rallies up to test underside of 8 EMA or pocket between 8 EMA and VWAP.
-       - Trigger: Topping tail / bearish close back below 8 EMA on expanding volume.
-       - SL: 1-2 ticks above rejection swing high or just above VWAP.
-       - TP1: Prior intraday low / LOD (50% scale-out). Runner: Trails 8 EMA.
+    TRADING STRATEGY SPECIFICATION: 5-MINUTE PREMARKET BREAKOUT (PMB)
+    
+    1. Overview:
+       - Asset Class: Large-Cap / High Liquidity Equities & Directional Options (Market Cap >= $10B)
+       - Execution Timeframe: 5-Minute Chart
+       - Session Reference Window: 04:00 - 09:30 ET (Premarket High / Low)
+       - Active Trading Window: 09:40 - 11:30 ET (Locks out initial 10-minute whipsaw)
+       - Edge: Opening expansion momentum outside established premarket balance area.
+    
+    2. Key Levels & Parameters:
+       - PMH: Highest price printed between 04:00 and 09:30 ET.
+       - PML: Lowest price printed between 04:00 and 09:30 ET.
+       - Intraday Anchors: VWAP (from 09:30 AM open) and 8 EMA.
+       - Relative Volume (RVOL): Breakout candle volume >= 1.5x 20-period Volume SMA.
+       - Market Filter: SPY or QQQ trend alignment (Must hold above VWAP for Longs, below for Shorts).
+    
+    3. Entry Rules:
+       - Long Setup:
+         1. Time: 09:40 - 11:30 ET.
+         2. Trigger: 5m candle closes strictly above PMH (Close > PMH).
+         3. Confirmations:
+            - Breakout volume >= 1.5x 20-period Volume SMA.
+            - Price trading above VWAP and above 8 EMA.
+            - Broad market (SPY/QQQ) trading above session VWAP.
+         4. Execution: Enter at close of confirming 5m candle.
+       - Short Setup:
+         1. Time: 09:40 - 11:30 ET.
+         2. Trigger: 5m candle closes strictly below PML (Close < PML).
+         3. Confirmations:
+            - Breakout volume >= 1.5x 20-period Volume SMA.
+            - Price trading below VWAP and below 8 EMA.
+            - Broad market (SPY/QQQ) trading below session VWAP.
+         4. Execution: Enter at close of confirming 5m candle.
+    
+    4. Risk Management & Exits:
+       - Structural Stop (Early Invalidation): Close < PMH (Long) / Close > PML (Short).
+       - Hard Emergency Stop (Max Loss Protection):
+         * Long: low of breakout candle OR Entry - (1.0 * ATR(14)), whichever is tighter (higher).
+         * Short: high of breakout candle OR Entry + (1.0 * ATR(14)), whichever is tighter (lower).
+       - Profit Target (2:1 Asymmetry / 2R):
+         * Long: Entry + (2.0 * R)
+         * Short: Entry - (2.0 * R)
     """
     if df is None or len(df) < 5:
         return None
 
     try:
-        # Filter today's regular market hours session
         today_date = df.index[-1].date()
         today_df = df[df.index.date == today_date]
-        
+
         pm_bars = today_df.between_time("04:00", "09:29:59")
         rth_bars = today_df.between_time("09:30", "16:00")
-        
-        if len(rth_bars) < 3:
+
+        if pm_bars.empty or len(rth_bars) < 2:
             return None
 
-        # 2. Execution Window & Rule 2: Respect 9:30-9:45 AM noise. Only trigger between 09:45 AM and 11:30 AM EST
+        pm_high = float(pm_bars["High"].max())
+        pm_low = float(pm_bars["Low"].min())
+
+        if pm_high <= 0 or pm_low <= 0 or pm_high <= pm_low:
+            return None
+
+        # Premarket range must be clearly established (filter flat/dead premarket sessions)
+        pm_range_pct = ((pm_high - pm_low) / pm_low) * 100.0
+        if pm_range_pct < 0.25:
+            return None
+
+        # 1. Active Trading Window: 09:40 - 11:30 ET
         last_dt = rth_bars.index[-1]
         ny_tz = get_ny_timezone()
         if hasattr(last_dt, "tzinfo") and last_dt.tzinfo is not None:
@@ -414,246 +513,182 @@ def evaluate_ticker_process(ticker, df):
         else:
             dt_ny = last_dt
         mins_from_midnight = dt_ny.hour * 60 + dt_ny.minute
-        earliest_mins = int(os.getenv("EARLIEST_TRADE_TIME_MINS", "585"))  # 09:45 AM
-        latest_mins = int(os.getenv("LATEST_TRADE_TIME_MINS", "690"))    # 11:30 AM
+        earliest_mins = int(os.getenv("EARLIEST_TRADE_TIME_MINS", "580"))  # 09:40 AM ET
+        latest_mins = int(os.getenv("LATEST_TRADE_TIME_MINS", "690"))      # 11:30 AM ET
         if mins_from_midnight < earliest_mins or mins_from_midnight > latest_mins:
             return None
-            
-        # 3. Key Levels to Calculate Daily
-        pm_high = float(pm_bars["High"].max()) if not pm_bars.empty else 0.0
-        pm_low = float(pm_bars["Low"].min()) if not pm_bars.empty else 0.0
-        hod = float(rth_bars["High"].max())
-        lod = float(rth_bars["Low"].min())
-        
-        # Indicator 1: RTH Market Hours VWAP (Calculated strictly from 09:30 AM market open)
+
+        # 2. Intraday Anchors
+        # VWAP calculated strictly from 09:30 AM open
         typical_price_rth = (rth_bars["High"] + rth_bars["Low"] + rth_bars["Close"]) / 3.0
         cum_vol_rth = rth_bars["Volume"].cumsum().replace(0, 1)
         vwap_series = (typical_price_rth * rth_bars["Volume"]).cumsum() / cum_vol_rth
         current_vwap = float(vwap_series.iloc[-1])
-        
-        # Indicator 2: 8 EMA on 5-minute regular market hours candles
+
+        # 8 EMA on 5m candles
         ema8_series = rth_bars["Close"].ewm(span=8, adjust=False).mean()
         current_ema8 = float(ema8_series.iloc[-1])
-        prev_ema8 = float(ema8_series.iloc[-2]) if len(ema8_series) >= 2 else current_ema8
-        
-        # Indicator 3: 14 ATR on 5m candles for Rule 3 (Rubber Band Filter)
-        hl = rth_bars["High"] - rth_bars["Low"]
-        hc = (rth_bars["High"] - rth_bars["Close"].shift(1)).abs()
-        lc = (rth_bars["Low"] - rth_bars["Close"].shift(1)).abs()
+
+        # 3. 20-Period Volume SMA on 5-Minute Candles
+        rth_all = df.between_time("09:30", "16:00")
+        vol_sma20_series = rth_all["Volume"].rolling(20, min_periods=5).mean()
+        vol_sma20 = float(vol_sma20_series.iloc[-1]) if len(vol_sma20_series) > 0 else 1.0
+
+        # 4. ATR(14) for Hard Emergency Stop
+        hl = df["High"] - df["Low"]
+        hc = (df["High"] - df["Close"].shift(1)).abs()
+        lc = (df["Low"] - df["Close"].shift(1)).abs()
         tr = hl.combine(hc, max).combine(lc, max)
-        atr_series = tr.rolling(14, min_periods=1).mean()
-        current_atr = float(atr_series.iloc[-1]) if len(atr_series) > 0 else 1.0
+        atr_series = tr.rolling(14, min_periods=5).mean()
+        current_atr = float(atr_series.iloc[-1]) if len(atr_series) > 0 else (rth_bars["High"].iloc[-1] - rth_bars["Low"].iloc[-1])
+        if current_atr <= 0:
+            current_atr = max(0.20, float(rth_bars["Close"].iloc[-1]) * 0.005)
 
-        # Indicator 4: 15-Minute Macro Confirmation (Resampled from 5m)
-        rth_15m = rth_bars.resample("15min").agg({
-            "Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"
-        }).dropna()
-        long_15m_confirmed = True
-        short_15m_confirmed = True
-        if len(rth_15m) >= 2:
-            tp_15 = (rth_15m["High"] + rth_15m["Low"] + rth_15m["Close"]) / 3.0
-            cv_15 = rth_15m["Volume"].cumsum().replace(0, 1)
-            vwap_15m_series = (tp_15 * rth_15m["Volume"]).cumsum() / cv_15
-            ema8_15m_series = rth_15m["Close"].ewm(span=8, adjust=False).mean()
-            last_15m_c = float(rth_15m["Close"].iloc[-1])
-            last_15m_vwap = float(vwap_15m_series.iloc[-1])
-            last_15m_ema8 = float(ema8_15m_series.iloc[-1])
-            long_15m_confirmed = (last_15m_c >= last_15m_vwap * 0.999) and (last_15m_ema8 >= last_15m_vwap * 0.998)
-            short_15m_confirmed = (last_15m_c <= last_15m_vwap * 1.001) and (last_15m_ema8 <= last_15m_vwap * 1.002)
+        last_bar = rth_bars.iloc[-1]
+        close_price = float(last_bar["Close"])
+        open_price = float(last_bar["Open"])
+        high_price = float(last_bar["High"])
+        low_price = float(last_bar["Low"])
+        vol = float(last_bar["Volume"])
+        rvol = vol / max(1.0, vol_sma20)
 
-        last_row = rth_bars.iloc[-1]
-        close_price = float(last_row["Close"])
-        open_price = float(last_row["Open"])
-        high_price = float(last_row["High"])
-        low_price = float(last_row["Low"])
-        vol = float(last_row["Volume"])
-        prev_vol = float(rth_bars.iloc[-2]["Volume"]) if len(rth_bars) >= 2 else vol
+        hod = float(rth_bars["High"].max())
+        lod = float(rth_bars["Low"].min())
 
-        bar_range = high_price - low_price
-        if bar_range <= 0:
-            return None
-
-        # Rule 3: The "Rubber Band" Rule
-        # If price is stretched more than 2.5 ATRs away from the 8 EMA, never initiate a new trend position
-        if current_atr > 0 and abs(close_price - current_ema8) > (2.5 * current_atr):
-            return None
-
-        # Rule 1: Never trade flat moving averages
-        # Check last 3 candles: 8 EMA must maintain position on trending side of VWAP with daylight
-        ema8_slice = ema8_series.iloc[-3:] if len(ema8_series) >= 3 else ema8_series
-        vwap_slice = vwap_series.iloc[-3:] if len(vwap_series) >= 3 else vwap_series
+        # 5. Market Filter: SPY or QQQ trend alignment
+        market_align = get_market_index_alignment()
+        long_market_ok = market_align.get("long_aligned", True)
+        short_market_ok = market_align.get("short_aligned", True)
 
         is_long = False
         is_short = False
-        confluence_tag = ""
-        stop_loss_px = 0.0
-        target_1_px = 0.0
+        hard_stop_px = 0.0
+        target_2r_px = 0.0
+        r_risk = 0.0
 
-        # 4. Long Setup Rules (Bullish Momentum):
-        # 1. Trend & Value Filter: Price trading cleanly above VWAP, 8 EMA sloping upward and positioned above VWAP
-        # 2. Daylight: 8 EMA consistently above VWAP across recent bars
-        # 3. Pullback: Candle tests 8 EMA or pocket between 8 EMA and VWAP
-        # 4. Trigger: Rejection tail (hammer or close back above 8 EMA) on expanding volume
-        is_long_trend = (
-            (close_price > current_vwap) and
-            (current_ema8 > current_vwap * 1.0003) and
-            (current_ema8 >= prev_ema8) and
-            (ema8_slice > vwap_slice).all() and
-            long_15m_confirmed
-        )
+        # Long Setup Evaluation
+        if (close_price > pm_high) and (rvol >= 1.5) and (close_price > current_vwap) and (close_price > current_ema8) and long_market_ok:
+            is_long = True
+            atr_stop = close_price - (1.0 * current_atr)
+            hard_stop_px = max(low_price, atr_stop)
+            if hard_stop_px >= close_price:
+                hard_stop_px = close_price - (0.5 * current_atr)
+            r_risk = max(0.05, close_price - hard_stop_px)
+            target_2r_px = close_price + (2.0 * r_risk)
 
-        if is_long_trend:
-            pullback_tested = (low_price <= current_ema8 * 1.001) and (low_price >= current_vwap * 0.998)
-            lower_wick = min(open_price, close_price) - low_price
-            is_hammer = (lower_wick >= 0.50 * bar_range)
-            is_bullish_engulf = (close_price > open_price) and ((close_price - low_price) >= 0.75 * bar_range) and (close_price > current_ema8)
-            vol_expanding = (vol >= prev_vol * 1.15)
-
-            if pullback_tested and (is_hammer or is_bullish_engulf) and vol_expanding:
-                is_long = True
-                confluence_tag = "★ 8 EMA Hammer Rejection" if is_hammer else "8 EMA Bullish Pullback Close"
-                if low_price <= (current_vwap * 1.001):
-                    confluence_tag = "★ 8 EMA + VWAP Pocket Retest"
-                stop_loss_px = min(low_price, current_vwap) - 0.05
-                target_1_px = hod
-
-        # 5. Short Setup Rules (Bearish Momentum):
-        # 1. Trend & Value Filter: Price trading cleanly below VWAP, 8 EMA sloping downward and positioned below VWAP
-        # 2. Daylight: 8 EMA consistently below VWAP across recent bars
-        # 3. Pullback: Candle tests underside of 8 EMA or pocket between 8 EMA and VWAP
-        # 4. Trigger: Rejection tail (topping tail or close back below 8 EMA) on expanding volume
-        is_short_trend = (
-            (close_price < current_vwap) and
-            (current_ema8 < current_vwap * 0.9995) and
-            (current_ema8 <= prev_ema8) and
-            (ema8_slice < vwap_slice).all() and
-            short_15m_confirmed
-        )
-
-        if is_short_trend and not is_long:
-            pullback_tested = (high_price >= current_ema8 * 0.999) and (high_price <= current_vwap * 1.002)
-            upper_wick = high_price - max(open_price, close_price)
-            is_topping_tail = (upper_wick >= 0.50 * bar_range)
-            is_bearish_engulf = (close_price < open_price) and ((high_price - close_price) >= 0.75 * bar_range) and (close_price < current_ema8)
-            vol_expanding = (vol >= prev_vol * 1.15)
-
-            if pullback_tested and (is_topping_tail or is_bearish_engulf) and vol_expanding:
-                is_short = True
-                confluence_tag = "★ 8 EMA Topping Tail Rejection" if is_topping_tail else "8 EMA Bearish Pullback Close"
-                if high_price >= (current_vwap * 0.999):
-                    confluence_tag = "★ 8 EMA + VWAP Pocket Retest"
-                stop_loss_px = max(high_price, current_vwap) + 0.05
-                target_1_px = lod
+        # Short Setup Evaluation
+        elif (close_price < pm_low) and (rvol >= 1.5) and (close_price < current_vwap) and (close_price < current_ema8) and short_market_ok:
+            is_short = True
+            atr_stop = close_price + (1.0 * current_atr)
+            hard_stop_px = min(high_price, atr_stop)
+            if hard_stop_px <= close_price:
+                hard_stop_px = close_price + (0.5 * current_atr)
+            r_risk = max(0.05, hard_stop_px - close_price)
+            target_2r_px = close_price - (2.0 * r_risk)
 
         if not (is_long or is_short):
             return None
 
-        action = "BUY" if is_long else "SELL"
+        action = "BUY"
         signal_type = "bullish" if is_long else "bearish"
-        
-        # Find liquid option contract
+
+        # 6. Derivative / Option Contract Lookup (PMB Specs: 30-60 DTE, Delta 0.45-0.60, OI >= 500, Spread <= $0.05/2%)
         best_opt = None
         try:
             from reversal_scanner import find_best_option
-            best_opt = find_best_option(ticker, signal_type, close_price)
+            best_opt = find_best_option(
+                ticker=ticker,
+                signal_type=signal_type,
+                last_price=close_price,
+                min_dte=30,
+                max_dte=60,
+                target_delta_min=0.45,
+                target_delta_max=0.60,
+                min_oi=500,
+                max_spread_dollars=0.05,
+                max_spread_pct=2.0
+            )
         except Exception as ex:
             logger.debug(f"Option search error for {ticker}: {ex}")
-            
+
         if not best_opt:
-            logger.info(f"[{ticker}] ⚠️ {action} Setup at VWAP (${current_vwap:.2f}), but no liquid option contract found.")
+            logger.info(f"[{ticker}] ⚠️ {signal_type.upper()} PMB Breakout detected @ ${close_price:.2f}, but no liquid 30-60 DTE option contract found.")
             return None
-            
-        # Compute technical confluences for scoring and display
-        rsi_val = None
-        rvol = 1.0
-        try:
-            from indicator import compute_rsi
-            from reversal_scanner import compute_rvol
-            rsi_s = compute_rsi(rth_bars["Close"], 14)
-            if len(rsi_s) > 0 and not np.isnan(rsi_s.iloc[-1]):
-                rsi_val = float(rsi_s.iloc[-1])
-            rvol = compute_rvol(rth_bars)
-        except Exception:
-            pass
-            
-        # Market Sentiment
-        sentiment_data = get_cached_market_sentiment()
-        m_sentiment = sentiment_data.get('sentiment', 'Neutral')
-        m_summary = sentiment_data.get('summary', '')
-        
-        is_market_aligned = (
-            (is_long and m_sentiment == "Bullish") or (is_short and m_sentiment == "Bearish")
-        )
-        sentiment_align = "Market Aligned 🎯" if is_market_aligned else "Counter-Trend 🔄"
-        
-        setup_reason = (
-            f"VWAP Trend Pullback | Above VWAP (${current_vwap:.2f}) + 8EMA Rising (${current_ema8:.2f}) | {confluence_tag} 🚀"
-            if is_long else
-            f"VWAP Trend Pullback | Below VWAP (${current_vwap:.2f}) + 8EMA Falling (${current_ema8:.2f}) | {confluence_tag} 🩸"
-        )
-        
-        # Rigorous A+ Scoring Formula
-        score = 10
-        if (is_long and (ema8_slice > vwap_slice).all()) or (is_short and (ema8_slice < vwap_slice).all()):
+
+        # 7. Rigorous A+ Scoring Formula
+        score = 14
+        if rvol >= 2.0:
             score += 3
-        if (is_long and long_15m_confirmed) or (is_short and short_15m_confirmed):
+        elif rvol >= 1.5:
             score += 2
-        if "★" in confluence_tag:
-            score += 2
-        if is_market_aligned:
+
+        if is_long and market_align.get("spy_above_vwap") and market_align.get("qqq_above_vwap"):
             score += 3
-        if vol >= prev_vol * 1.15:
-            score += 2
-        if rvol > 1.2:
-            score += 1
-            
-        # Only assign A+ if score >= 19 AND market is aligned AND volume expanded >= 15%
-        if score >= 19 and is_market_aligned and (vol >= prev_vol * 1.15):
-            grade = "A+"
-        elif score >= 15:
-            grade = "A"
-        elif score >= 11:
-            grade = "B"
+        elif is_short and (market_align.get("spy_above_vwap") is False) and (market_align.get("qqq_above_vwap") is False):
+            score += 3
         else:
-            grade = "C"
-        
+            score += 1
+
+        if is_long and current_ema8 > current_vwap:
+            score += 2
+        elif is_short and current_ema8 < current_vwap:
+            score += 2
+
+        bar_range = high_price - low_price
+        if bar_range > 0:
+            if is_long and ((close_price - low_price) / bar_range) >= 0.70:
+                score += 2
+            elif is_short and ((high_price - close_price) / bar_range) >= 0.70:
+                score += 2
+
+        grade = "A+" if score >= 19 else "A"
+
+        if is_long:
+            setup_reason = f"5m PMB Long | Closed Above PMH (${pm_high:.2f}) | RVOL {rvol:.1f}x | Above VWAP (${current_vwap:.2f}) + 8EMA (${current_ema8:.2f}) | 2R Target: ${target_2r_px:.2f} 🚀"
+            confluence_tag = f"PMH Breakout (${pm_high:.2f}) + RVOL {rvol:.1f}x"
+        else:
+            setup_reason = f"5m PMB Short | Closed Below PML (${pm_low:.2f}) | RVOL {rvol:.1f}x | Below VWAP (${current_vwap:.2f}) + 8EMA (${current_ema8:.2f}) | 2R Target: ${target_2r_px:.2f} 🩸"
+            confluence_tag = f"PML Breakdown (${pm_low:.2f}) + RVOL {rvol:.1f}x"
+
         logger.info(
-            f"[{ticker}] 🎯 {grade} {action} SIGNAL! Price: ${close_price:.2f} | "
-            f"VWAP: ${current_vwap:.2f} | 8EMA: ${current_ema8:.2f} | SL: ${stop_loss_px:.2f} | TP1: ${target_1_px:.2f} | {setup_reason}"
+            f"[{ticker}] 🎯 {grade} PMB {action} SIGNAL! Price: ${close_price:.2f} | "
+            f"PMH: ${pm_high:.2f} | PML: ${pm_low:.2f} | VWAP: ${current_vwap:.2f} | 8EMA: ${current_ema8:.2f} | "
+            f"RVOL: {rvol:.1f}x | Hard SL: ${hard_stop_px:.2f} | 2R Target: ${target_2r_px:.2f}"
         )
-        
+
         return {
             'action': action,
             'type': signal_type,
             'price': close_price,
             'vwap': round(current_vwap, 2),
             'ema8': round(current_ema8, 2),
-            'stop_loss': round(stop_loss_px, 2),
-            'target_1': round(target_1_px, 2),
+            'stop_loss': round(hard_stop_px, 2),
+            'target_1': round(target_2r_px, 2),
             'pm_high': round(pm_high, 2),
             'pm_low': round(pm_low, 2),
+            'r_risk': round(r_risk, 2),
             'hod': round(hod, 2),
             'lod': round(lod, 2),
             'confluence': confluence_tag,
-            'rsi': rsi_val or 50.0,
-            'rvol': rvol,
+            'rsi': 50.0,
+            'rvol': round(rvol, 1),
             'score': score,
             'grade': grade,
             'reason': setup_reason,
             'time': rth_bars.index[-1],
-            'zone_summary': f"VWAP ${current_vwap:.2f} / 8EMA ${current_ema8:.2f}",
+            'zone_summary': f"PMH ${pm_high:.2f} / PML ${pm_low:.2f}",
             'in_zone': True,
-            'zone_details': {'pm_high': pm_high, 'pm_low': pm_low, 'hod': hod, 'lod': lod, 'stop_loss': stop_loss_px, 'target_1': target_1_px},
-            'sentiment_align': sentiment_align,
-            'tech_trend': "Bullish" if is_long else "Bearish",
-            'market_sentiment': m_sentiment,
-            'market_sentiment_summary': m_summary,
+            'zone_details': {'pm_high': pm_high, 'pm_low': pm_low, 'hod': hod, 'lod': lod, 'stop_loss': hard_stop_px, 'target_1': target_2r_px, 'r_risk': r_risk},
+            'sentiment_align': "Market Aligned 🎯" if (is_long and long_market_ok) or (is_short and short_market_ok) else "Neutral",
+            'tech_trend': "Bullish Breakout" if is_long else "Bearish Breakdown",
+            'market_sentiment': "Bullish" if long_market_ok else ("Bearish" if short_market_ok else "Neutral"),
+            'market_sentiment_summary': market_align.get("summary", ""),
             'suggested_option': best_opt,
-            'macd_cross': False,
-            'macd_status': "Bullish" if is_long else "Bearish",
+            'strategy': "PMB",
         }
     except Exception as e:
         logger.error(f"Error evaluating ticker {ticker}: {e}\n{tb.format_exc()}")
+        return None
         return None
 
 def precalculate_daily_bands(tickers):
@@ -749,7 +784,7 @@ def is_market_hours():
 
 
 def bot_loop():
-    logger.info("Starting background 3-Sigma alert bot loop (A+ Setups Only)...")
+    logger.info("Starting background 5-Minute Premarket Breakout (PMB) alert bot loop (A+ Setups Only)...")
     
     while True:
         try:
@@ -758,11 +793,11 @@ def bot_loop():
                 time.sleep(300)
                 continue
 
-            # Opening bell check (trading begins at 9:30 AM ET market open)
+            # Opening bell check (trading begins at 9:40 AM ET after the 10m whipsaw filter)
             ny_tz = get_ny_timezone()
             now = datetime.now(ny_tz)
             current_mins = now.hour * 60 + now.minute
-            earliest_trade_mins = int(os.getenv("EARLIEST_TRADE_TIME_MINS", "570"))  # 9:30 AM ET (market open)
+            earliest_trade_mins = int(os.getenv("EARLIEST_TRADE_TIME_MINS", "580"))  # 9:40 AM ET
             if current_mins < earliest_trade_mins:
                 open_hr = earliest_trade_mins // 60
                 open_mn = earliest_trade_mins % 60
@@ -770,7 +805,7 @@ def bot_loop():
                 disp_hr = open_hr if open_hr <= 12 else open_hr - 12
                 if disp_hr == 0:
                     disp_hr = 12
-                logger.info(f"Outside trading window (trading begins at {disp_hr}:{open_mn:02d} {suffix} ET). Bot sleeping for 30s...")
+                logger.info(f"Outside trading window (PMB trading begins at {disp_hr}:{open_mn:02d} {suffix} ET). Bot sleeping for 30s...")
                 time.sleep(30)
                 continue
 
@@ -785,7 +820,7 @@ def bot_loop():
             except Exception:
                 pass
 
-            latest_trade_mins = int(os.getenv("LATEST_TRADE_TIME_MINS", "660"))  # 11:00 AM ET morning cutoff
+            latest_trade_mins = int(os.getenv("LATEST_TRADE_TIME_MINS", "690"))  # 11:30 AM ET morning cutoff
             if current_mins > latest_trade_mins:
                 close_hr = latest_trade_mins // 60
                 close_mn = latest_trade_mins % 60
@@ -793,11 +828,11 @@ def bot_loop():
                 disp_hr = close_hr if close_hr <= 12 else close_hr - 12
                 if disp_hr == 0:
                     disp_hr = 12
-                logger.info(f"Trading window closed for new entries (trades permitted 9:30 AM - {disp_hr}:{close_mn:02d} {suffix} ET). Monitoring open positions only. Sleeping 60s...")
+                logger.info(f"Trading window closed for new entries (PMB trades permitted 9:40 AM - {disp_hr}:{close_mn:02d} {suffix} ET). Monitoring open positions only. Sleeping 60s...")
                 time.sleep(60)
                 continue
 
-            logger.info("--- Starting 3-Sigma A+ Reversal Bot Cycle ---")
+            logger.info("--- Starting 5-Minute Premarket Breakout (PMB) Bot Cycle ---")
 
             try:
                 # 1. Determine tickers to scan: Strictly Top 50 Stocks list
@@ -820,10 +855,10 @@ def bot_loop():
                 candle_interval = os.getenv("CANDLE_INTERVAL_3SIGMA", "5m")
                 scan_interval = int(os.getenv("SCAN_INTERVAL_3SIGMA", "60"))
                 
-                # 2. Pre-calculate daily bands
+                # 2. Pre-calculate daily bands (cached)
                 precalculate_daily_bands(tickers)
                 
-                logger.info(f"Scanning {len(tickers)} Top 50 tickers in parallel ({candle_interval} candles, PM Breakout + VWAP Retest)...")
+                logger.info(f"Scanning {len(tickers)} Top 50 tickers in parallel ({candle_interval} candles, 5-Minute PM Breakout (PMB))...")
 
                 # 3. Download and compute in parallel
                 results = fetch_batch_concurrent(
@@ -924,16 +959,16 @@ def bot_loop():
                     with open(save_file, "w") as f:
                         json.dump({
                             "ok": True,
-                            "mode": "3sigma",
+                            "mode": "pmb",
                             "timestamp": datetime.now(ny_tz).strftime("%b %d, %Y  %I:%M %p"),
                             "count": len(all_signals),
                             "market_sentiment": current_sentiment,
                             "results": all_signals
                         }, f, indent=2)
                 except Exception as save_err:
-                    logger.warning(f"Could not save 3sigma bot results: {save_err}")
+                    logger.warning(f"Could not save PMB bot results: {save_err}")
 
-                logger.info(f"--- 3-Sigma Bot Cycle Complete. New A+ alerts: {triggered_count}, Suppressed (already alerted today): {skipped_count}. Sleeping for {scan_interval}s ---")
+                logger.info(f"--- 5-Minute PMB Bot Cycle Complete. New A+ alerts: {triggered_count}, Suppressed (already alerted today): {skipped_count}. Sleeping for {scan_interval}s ---")
             except Exception as bot_err:
                 logger.error(f"Error during bot scan cycle: {bot_err}")
 

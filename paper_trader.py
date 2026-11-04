@@ -140,8 +140,8 @@ class PaperTrader:
         self.trailing_stop_callback_pct = _cfg("PAPER_TRAILING_STOP_CALLBACK_PCT", "2.5", float)
         self.breakeven_stop_pct = _cfg("PAPER_BREAKEVEN_STOP_PCT", "0.0", float)
         self.max_hold_minutes = _cfg("PAPER_MAX_HOLD_MINUTES", "0", int)
-        self.earliest_trade_mins = _cfg("EARLIEST_TRADE_TIME_MINS", "570", int)
-        self.latest_trade_mins = _cfg("LATEST_TRADE_TIME_MINS", "660", int)
+        self.earliest_trade_mins = _cfg("EARLIEST_TRADE_TIME_MINS", "580", int)
+        self.latest_trade_mins = _cfg("LATEST_TRADE_TIME_MINS", "690", int)
         self.close_before_eod = _cfg("PAPER_CLOSE_BEFORE_MARKET_CLOSE", "true", bool)
 
     # ── Authentication ──────────────────────────────────────────────
@@ -642,7 +642,18 @@ class PaperTrader:
             from reversal_scanner import find_best_option
 
             logger.info(f"[PaperTrader] 🔍 Searching for best {signal_type} option on {ticker} @ ${last_price:.2f}...")
-            best = find_best_option(ticker, signal_type, last_price)
+            best = find_best_option(
+                ticker,
+                signal_type,
+                last_price,
+                min_dte=30,
+                max_dte=60,
+                target_delta_min=0.45,
+                target_delta_max=0.60,
+                min_oi=500,
+                max_spread_dollars=0.05,
+                max_spread_pct=2.0
+            )
 
             if not best:
                 logger.warning(f"[PaperTrader] No suitable option contract found for {ticker} ({signal_type})")
@@ -898,14 +909,16 @@ class PaperTrader:
             else:
                 entry_p = trade_record.get("entry_price", 1.0)
                 if exit_price is None or exit_price <= 0:
-                    if reason in ("take_profit", "take_profit_hod_lod", "tp1_hod_lod"):
+                    if reason in ("profit_target_2r", "take_profit", "take_profit_hod_lod", "tp1_hod_lod"):
                         exit_price = round(entry_p * (1.0 + (self.take_profit_pct / 100.0)), 2)
                     elif reason in ("runner_exit_8ema", "trailing_stop"):
                         exit_price = round(entry_p * 1.15, 2)
                     elif reason == "breakeven_stop":
                         exit_price = round(entry_p * 1.0, 2)
-                    elif reason in ("stop_loss", "stop_loss_vwap"):
+                    elif reason in ("hard_emergency_stop", "stop_loss", "stop_loss_vwap", "stop_loss_rejection"):
                         exit_price = round(entry_p * (1.0 - (self.stop_loss_pct / 100.0)), 2)
+                    elif reason in ("structural_stop_pmh", "structural_stop_pml", "structural_invalidation"):
+                        exit_price = round(entry_p * (1.0 - (min(self.stop_loss_pct, 10.0) / 100.0)), 2)
                     elif reason == "time_stop":
                         exit_price = round(entry_p * 0.98, 2)
                     else:
@@ -1056,64 +1069,67 @@ class PaperTrader:
                                         logger.warning(f"[PaperTrader] Candle timing check error: {ex} — skipping exit check for safety")
                                         continue
 
-                                # 1. Strategy Stop-Loss: Beneath rejection low or VWAP (Long) / Above rejection high or VWAP (Short)
-                                sl_price = trade.get("stop_loss")
+                                # ── PMB Strategy Exits (Hybrid Invalidation & 2:1 Asymmetry) ──
+                                hard_sl = trade.get("stop_loss")
+                                tp_2r = trade.get("tp1_target")
+                                pmh = trade.get("pmh")
+                                pml = trade.get("pml")
+
                                 if sig == "bullish":
-                                    if (sl_price and c_low <= sl_price) or (c_close < c_vwap):
+                                    # 1. Hard Emergency Stop (Max Loss Protection: candle low <= hard_sl)
+                                    if hard_sl and (c_low <= hard_sl):
                                         logger.info(
-                                            f"[PaperTrader] 🛑 STRATEGY STOP-LOSS on {trade['ticker']} | "
-                                            f"Stock Low=${c_low:.2f} <= SL=${sl_price} or Close=${c_close:.2f} < VWAP=${c_vwap:.2f}"
+                                            f"[PaperTrader] 🛑 HARD EMERGENCY STOP on {trade['ticker']} | "
+                                            f"Stock Low=${c_low:.2f} <= Hard SL=${hard_sl:.2f}"
                                         )
-                                        positions_to_close.append((trade, "stop_loss_rejection"))
+                                        positions_to_close.append((trade, "hard_emergency_stop"))
                                         continue
+
+                                    # 2. Structural Stop (Early Invalidation: 5m candle closes back below PMH)
+                                    if pmh and (c_close < pmh):
+                                        logger.info(
+                                            f"[PaperTrader] 🛑 STRUCTURAL STOP (PMH Invalidation) on {trade['ticker']} | "
+                                            f"5m Candle Closed Below PMH (Close=${c_close:.2f} < PMH=${pmh:.2f})"
+                                        )
+                                        positions_to_close.append((trade, "structural_stop_pmh"))
+                                        continue
+
+                                    # 3. Profit Target (2:1 Asymmetry / 2R)
+                                    if tp_2r and (c_high >= tp_2r):
+                                        logger.info(
+                                            f"[PaperTrader] 🎯 2:1 PROFIT TARGET HIT on {trade['ticker']} | "
+                                            f"Stock High=${c_high:.2f} >= 2R Target=${tp_2r:.2f}"
+                                        )
+                                        positions_to_close.append((trade, "profit_target_2r"))
+                                        continue
+
                                 elif sig == "bearish":
-                                    if (sl_price and c_high >= sl_price) or (c_close > c_vwap):
+                                    # 1. Hard Emergency Stop (Max Loss Protection: candle high >= hard_sl)
+                                    if hard_sl and (c_high >= hard_sl):
                                         logger.info(
-                                            f"[PaperTrader] 🛑 STRATEGY STOP-LOSS on {trade['ticker']} | "
-                                            f"Stock High=${c_high:.2f} >= SL=${sl_price} or Close=${c_close:.2f} > VWAP=${c_vwap:.2f}"
+                                            f"[PaperTrader] 🛑 HARD EMERGENCY STOP on {trade['ticker']} | "
+                                            f"Stock High=${c_high:.2f} >= Hard SL=${hard_sl:.2f}"
                                         )
-                                        positions_to_close.append((trade, "stop_loss_rejection"))
+                                        positions_to_close.append((trade, "hard_emergency_stop"))
                                         continue
 
-                                # 2. Strategy Target 1 (50% Scale-Out at Prior HOD/LOD)
-                                tp1_target = trade.get("tp1_target")
-                                if not trade.get("tp1_hit") and tp1_target:
-                                    total_qty = trade.get("quantity", 1)
-                                    if (sig == "bullish" and c_high >= tp1_target) or (sig == "bearish" and c_low <= tp1_target):
-                                        trade["tp1_hit"] = True
-                                        trade["runner_active"] = True
-                                        if total_qty >= 2:
-                                            scale_qty = total_qty // 2
-                                            logger.info(
-                                                f"[PaperTrader] 🎯 TARGET 1 SCALE-OUT on {trade['ticker']} | "
-                                                f"Price reached ${tp1_target:.2f} | Scaling out {scale_qty}/{total_qty} contracts"
-                                            )
-                                            self.close_position(trade, reason="tp1_scale_out", qty_to_close=scale_qty)
-                                        else:
-                                            trade["breakeven_locked"] = True
-                                            trade_log_dirty = True
-                                            logger.info(
-                                                f"[PaperTrader] 🎯 TARGET 1 HIT on {trade['ticker']} | "
-                                                f"Single contract held -> Breakeven stop locked, trailing runner on 8 EMA"
-                                            )
+                                    # 2. Structural Stop (Early Invalidation: 5m candle closes back above PML)
+                                    if pml and (c_close > pml):
+                                        logger.info(
+                                            f"[PaperTrader] 🛑 STRUCTURAL STOP (PML Invalidation) on {trade['ticker']} | "
+                                            f"5m Candle Closed Above PML (Close=${c_close:.2f} > PML=${pml:.2f})"
+                                        )
+                                        positions_to_close.append((trade, "structural_stop_pml"))
+                                        continue
 
-                                # 3. Runner Exit: Completed 5-Minute Candle Close Across 8 EMA
-                                # - Long trade: Exit when completed 5m candle closes below 8 EMA (c_close < c_ema8)
-                                # - Short trade: Exit when completed 5m candle closes above 8 EMA (c_close > c_ema8)
-                                if sig == "bullish" and c_close < c_ema8:
-                                    logger.info(
-                                        f"[PaperTrader] 🏃 RUNNER 8 EMA EXIT on {trade['ticker']} | "
-                                        f"5m candle closed below 8 EMA (Close=${c_close:.2f} < 8EMA=${c_ema8:.2f})"
-                                    )
-                                    positions_to_close.append((trade, "runner_exit_8ema"))
-                                    continue
-                                elif sig == "bearish" and c_close > c_ema8:
-                                    logger.info(
-                                        f"[PaperTrader] 🏃 RUNNER 8 EMA EXIT on {trade['ticker']} | "
-                                        f"5m candle closed above 8 EMA (Close=${c_close:.2f} > 8EMA=${c_ema8:.2f})"
-                                    )
-                                    positions_to_close.append((trade, "runner_exit_8ema"))
-                                    continue
+                                    # 3. Profit Target (2:1 Asymmetry / 2R)
+                                    if tp_2r and (c_low <= tp_2r):
+                                        logger.info(
+                                            f"[PaperTrader] 🎯 2:1 PROFIT TARGET HIT on {trade['ticker']} | "
+                                            f"Stock Low=${c_low:.2f} <= 2R Target=${tp_2r:.2f}"
+                                        )
+                                        positions_to_close.append((trade, "profit_target_2r"))
+                                        continue
                     except Exception as ex:
                         logger.debug(f"[PaperTrader] 5m strategy exit check error for {trade['ticker']}: {ex}")
 
