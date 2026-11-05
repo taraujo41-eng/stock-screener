@@ -335,9 +335,10 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
 
     # 1. Send SMS Notification
     if send_reversal_alert and alert_method in ("SMS", "BOTH"):
+        action_label = "BUY CALL" if signal_type == "bullish" else "BUY PUT"
         sms_msg = (
             f"{grade_icon} {grade_str} {zone_title}: {ticker}\n"
-            f"Action: {action} ({signal_type.upper()})\n"
+            f"Action: {action_label} ({signal_type.upper()})\n"
             f"Price: ${last_price:.2f} | PMH: {pmh_str} | PML: {pml_str}\n"
             f"VWAP: ${vwap_target:.2f} | 8 EMA: ${ema8:.2f}\n"
             f"Hard SL: {sl_str} | 2R Target: {tp1_str}\n"
@@ -354,9 +355,10 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
     # 2. Send Telegram Notification
     if send_reversal_alert and alert_method in ("TELEGRAM", "BOTH"):
         rvol_formatted = f"{rvol:.1f}x" if rvol is not None else "N/A"
+        action_label = "BUY CALL" if signal_type == "bullish" else "BUY PUT"
         tg_msg = (
             f"🚨 <b>{grade_icon} {grade_str} {zone_title}: {ticker}</b> 🚨\n\n"
-            f"<b>Action:</b> {action} ({signal_type.upper()})\n"
+            f"<b>Action:</b> {action_label} ({signal_type.upper()})\n"
             f"<b>Setup:</b> {_esc(reason or action)}\n"
             f"<b>Price:</b> ${last_price:.2f}\n"
             f"<b>Premarket Range:</b> PMH {pmh_str} | PML {pml_str}\n"
@@ -376,7 +378,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
         from paper_trader import get_paper_trader
         pt = get_paper_trader()
         if pt.enabled:
-            trade_signal = "bullish" if action == "BUY" else "bearish"
+            trade_signal = signal_type
             result = pt.place_option_order(
                 ticker=ticker,
                 signal_type=trade_signal,
@@ -589,7 +591,7 @@ def evaluate_ticker_process(ticker, df):
         if not (is_long or is_short):
             return None
 
-        action = "BUY"
+        action = "BUY" if is_long else "SELL"
         signal_type = "bullish" if is_long else "bearish"
 
         # 6. Derivative / Option Contract Lookup (PMB Specs: 30-60 DTE, Delta 0.45-0.60, OI >= 500, Spread <= $0.05/2%)
