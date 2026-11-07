@@ -2716,6 +2716,26 @@ body {
   max-width: 240px;
 }
 
+.top50-remove-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1;
+  padding: 6px 10px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.top50-remove-btn:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.15);
+}
+
 /* ============================================================
    Daily Movers (Market Close Top 10 Gainers & Losers)
    ============================================================ */

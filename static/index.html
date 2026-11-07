@@ -52,7 +52,7 @@
         <p class="mode-desc" id="modeDesc">Scans tickers on 5m/15m candles for VWAP Trend Pullbacks, 8 EMA pocket retests, and high-conviction A+ setups.</p>
         <div class="mode-links">
           <button class="edit-link" id="editWatchlistBtn" onclick="openWatchlistModal()">⚙️ Edit Watchlist</button>
-          <button class="edit-link edit-link--top50" id="viewTop50Btn" onclick="openTop50Modal()">🔥 View Top 50</button>
+          <button class="edit-link edit-link--top50" id="viewTop50Btn" onclick="openTop50Modal()">🤖 Bot Tickers</button>
         </div>
       </div>
 
@@ -119,7 +119,7 @@
         </button>
         <button class="scan-btn scan-btn--top50" id="scanTop50Btn" onclick="runScan('top50')">
           <div class="scan-btn__spinner"></div>
-          <span class="scan-btn__text">🔥 Scan Top 50</span>
+          <span class="scan-btn__text">🤖 Scan Bot Tickers</span>
         </button>
         <button class="scan-btn scan-btn--rsidiv" id="scanRsiDivBtn" onclick="runScan('rsidiv')" title="Scans for Daily RSI Divergences (after market close)">
           <div class="scan-btn__spinner"></div>
@@ -714,33 +714,40 @@
     </div>
   </div>
 
-  <!-- Top 50 Tickers Modal Overlay -->
+  <!-- Bot Tickers Modal Overlay -->
   <div class="modal-overlay hidden" id="top50Modal">
     <div class="modal modal--top50">
       <div class="modal__header">
-        <span class="modal__title">🔥 Top 50 Most Active Stocks</span>
+        <span class="modal__title">🤖 Bot Tickers</span>
         <button class="modal__close" onclick="closeTop50Modal()">&times;</button>
       </div>
 
+      <div class="modal__add">
+        <input type="text" class="modal__input" id="newTop50TickerInput" placeholder="Add Ticker to Bot List (e.g. NVDA)" onkeydown="handleNewTop50TickerKey(event)">
+        <button class="modal__add-btn" onclick="addTop50TickerFromInput()">Add</button>
+      </div>
+
+      <div class="modal__msg hidden" id="top50ModalMsg"></div>
+
       <div class="top50-actions-bar">
         <button class="top50-action-btn top50-action-btn--primary" onclick="closeTop50Modal(); runScan('top50')">
-          ⚡ Scan Top 50 Now
+          ⚡ Scan Bot Tickers Now
         </button>
         <button class="top50-action-btn top50-action-btn--secondary" onclick="loadTop50IntoWatchlist(true)">
           📋 Set as My Watchlist
         </button>
       </div>
 
-      <div class="modal__count" id="top50Count">50 TICKERS • RANKED BY VOLUME & MOMENTUM</div>
+      <div class="modal__count" id="top50Count">50 TICKERS • SCANNED BY 3-SIGMA BOT</div>
 
       <div class="top50-list" id="top50Container">
         <!-- Rendered dynamically via JS -->
       </div>
 
-      <button class="modal__done-btn" onclick="closeTop50Modal()">Close</button>
+      <button class="modal__done-btn" onclick="closeTop50Modal()">Done</button>
     </div>
   </div>
 
-  <script src="/app.js?v=7.1"></script>
+  <script src="/app.js?v=7.2"></script>
 </body>
 </html>

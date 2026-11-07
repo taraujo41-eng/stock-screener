@@ -92,22 +92,39 @@ WATCHLIST_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_watchlist_scan.json")
 OPTIONS_WATCHLIST_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_options_watchlist_scan.json")
 UNUSUAL_OPTIONS_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_unusual_options_scan.json")
 TOP_50_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_top50_scan.json")
-TOP_50_STOCKS_FILE = os.path.join(os.path.dirname(__file__), "top50_stocks.json")
+TOP_50_STOCKS_FILE = os.path.join(SCAN_DATA_DIR, "top50_stocks.json")
 
 def load_top50_stocks():
-    """Load top 50 stocks with rank, ticker, and company name."""
-    if os.path.exists(TOP_50_STOCKS_FILE):
+    """Load top 50 / bot tickers with rank, ticker, and company name."""
+    scan_dir_path = os.path.join(SCAN_DATA_DIR, "top50_stocks.json")
+    base_dir_path = os.path.join(os.path.dirname(__file__), "top50_stocks.json")
+    target = scan_dir_path if os.path.exists(scan_dir_path) else base_dir_path
+    if os.path.exists(target):
         try:
-            with open(TOP_50_STOCKS_FILE, "r") as f:
+            with open(target, "r") as f:
                 data = json.load(f)
                 if isinstance(data, list) and len(data) > 0:
                     return data
         except Exception as e:
-            print(f"Error loading top 50 stocks from {TOP_50_STOCKS_FILE}: {e}")
+            print(f"Error loading bot tickers from {target}: {e}")
     return []
 
+def save_top50_stocks(stocks):
+    """Save bot tickers list to disk in SCAN_DATA_DIR and base dir."""
+    paths = [os.path.join(SCAN_DATA_DIR, "top50_stocks.json")]
+    base = os.path.join(os.path.dirname(__file__), "top50_stocks.json")
+    if os.path.abspath(base) != os.path.abspath(paths[0]):
+        paths.append(base)
+    for p in paths:
+        try:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "w") as f:
+                json.dump(stocks, f, indent=2)
+        except Exception as e:
+            print(f"Error saving bot tickers to {p}: {e}")
+
 def load_top50_tickers():
-    """Return list of ticker symbols for top 50 stocks."""
+    """Return list of ticker symbols for bot tickers."""
     stocks = load_top50_stocks()
     return [s["ticker"] for s in stocks if isinstance(s, dict) and "ticker" in s]
 
@@ -787,6 +804,65 @@ def get_top50_tickers():
         "count": len(stocks),
         "stocks": stocks,
         "tickers": [s["ticker"] for s in stocks if isinstance(s, dict) and "ticker" in s]
+    })
+
+@app.route("/api/top50/add", methods=["POST"])
+def top50_add():
+    """Add a ticker to Bot Tickers list."""
+    data = request.get_json(silent=True) or {}
+    ticker = data.get("ticker", "").strip().upper().replace(" ", "")
+    name = data.get("name", "").strip()
+    if not ticker or not ticker.isalpha() or len(ticker) > 5:
+        return jsonify({"ok": False, "error": "Invalid ticker symbol"}), 400
+    
+    stocks = load_top50_stocks()
+    existing = [s["ticker"].upper() for s in stocks if isinstance(s, dict) and "ticker" in s]
+    if ticker in existing:
+        return jsonify({"ok": False, "error": f"{ticker} is already in Bot Tickers"}), 409
+    
+    if not name:
+        try:
+            from premarket_movers import COMPANY_NAMES
+            name = COMPANY_NAMES.get(ticker, f"{ticker} Inc")
+        except Exception:
+            name = f"{ticker} Inc"
+
+    new_stock = {
+        "rank": len(stocks) + 1,
+        "ticker": ticker,
+        "name": name
+    }
+    stocks.append(new_stock)
+    save_top50_stocks(stocks)
+    return jsonify({
+        "ok": True,
+        "stocks": stocks,
+        "count": len(stocks),
+        "tickers": [s["ticker"] for s in stocks if isinstance(s, dict) and "ticker" in s]
+    })
+
+@app.route("/api/top50/remove", methods=["POST"])
+def top50_remove():
+    """Remove a ticker from Bot Tickers list."""
+    data = request.get_json(silent=True) or {}
+    ticker = data.get("ticker", "").strip().upper().replace(" ", "")
+    if not ticker:
+        return jsonify({"ok": False, "error": "Missing ticker symbol"}), 400
+    
+    stocks = load_top50_stocks()
+    updated = [s for s in stocks if isinstance(s, dict) and s.get("ticker", "").upper() != ticker]
+    if len(updated) == len(stocks):
+        return jsonify({"ok": False, "error": f"{ticker} not found in Bot Tickers"}), 404
+    
+    for i, s in enumerate(updated, start=1):
+        s["rank"] = i
+    
+    save_top50_stocks(updated)
+    return jsonify({
+        "ok": True,
+        "stocks": updated,
+        "count": len(updated),
+        "tickers": [s["ticker"] for s in updated if isinstance(s, dict) and "ticker" in s]
     })
 
 @app.route("/api/scan/options/watchlist", methods=["POST"])

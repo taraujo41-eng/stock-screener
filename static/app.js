@@ -1606,8 +1606,8 @@ async function importFromWebull() {
 
 let cachedTop50Stocks = null;
 
-async function fetchTop50Stocks() {
-  if (cachedTop50Stocks && cachedTop50Stocks.length > 0) return cachedTop50Stocks;
+async function fetchTop50Stocks(forceRefresh = false) {
+  if (!forceRefresh && cachedTop50Stocks && cachedTop50Stocks.length > 0) return cachedTop50Stocks;
   try {
     const res = await fetch("/api/top50/tickers");
     const data = await res.json();
@@ -1616,7 +1616,7 @@ async function fetchTop50Stocks() {
       return cachedTop50Stocks;
     }
   } catch (e) {
-    console.error("Failed to fetch top 50 tickers:", e);
+    console.error("Failed to fetch bot tickers:", e);
   }
   return [];
 }
@@ -1625,10 +1625,17 @@ async function openTop50Modal() {
   const modal = document.getElementById("top50Modal");
   if (!modal) return;
   modal.classList.remove("hidden");
+  const msgEl = document.getElementById("top50ModalMsg");
+  if (msgEl) msgEl.classList.add("hidden");
+  const input = document.getElementById("newTop50TickerInput");
+  if (input) {
+    input.value = "";
+    input.focus();
+  }
   const container = document.getElementById("top50Container");
   if (container) {
-    container.innerHTML = `<div style="text-align: center; padding: 24px; color: var(--text-muted);">Loading Top 50 stocks...</div>`;
-    const stocks = await fetchTop50Stocks();
+    container.innerHTML = `<div style="text-align: center; padding: 24px; color: var(--text-muted);">Loading Bot Tickers...</div>`;
+    const stocks = await fetchTop50Stocks(true);
     renderTop50UI(stocks);
   }
 }
@@ -1637,20 +1644,101 @@ function closeTop50Modal() {
   document.getElementById("top50Modal")?.classList.add("hidden");
 }
 
+function handleNewTop50TickerKey(e) {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    addTop50TickerFromInput();
+  }
+}
+
+async function addTop50TickerFromInput() {
+  const input = document.getElementById("newTop50TickerInput");
+  if (!input) return;
+  const raw = input.value.trim().toUpperCase();
+  if (!raw) return;
+
+  const msgEl = document.getElementById("top50ModalMsg");
+  input.value = "";
+
+  try {
+    const res = await fetch("/api/top50/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker: raw })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      cachedTop50Stocks = data.stocks;
+      renderTop50UI(data.stocks);
+      if (msgEl) {
+        msgEl.textContent = `✓ Added ${raw} to Bot Tickers`;
+        msgEl.className = "modal__msg modal__msg--success";
+        msgEl.classList.remove("hidden");
+        setTimeout(() => msgEl.classList.add("hidden"), 3000);
+      }
+    } else {
+      if (msgEl) {
+        msgEl.textContent = data.error || `Could not add ${raw}`;
+        msgEl.className = "modal__msg modal__msg--error";
+        msgEl.classList.remove("hidden");
+        setTimeout(() => msgEl.classList.add("hidden"), 3500);
+      }
+    }
+  } catch (err) {
+    console.error("Error adding bot ticker:", err);
+  }
+}
+
+async function removeTop50Ticker(ticker) {
+  const msgEl = document.getElementById("top50ModalMsg");
+  try {
+    const res = await fetch("/api/top50/remove", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker: ticker })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      cachedTop50Stocks = data.stocks;
+      renderTop50UI(data.stocks);
+      if (msgEl) {
+        msgEl.textContent = `✓ Removed ${ticker} from Bot Tickers`;
+        msgEl.className = "modal__msg modal__msg--success";
+        msgEl.classList.remove("hidden");
+        setTimeout(() => msgEl.classList.add("hidden"), 2500);
+      }
+    } else {
+      if (msgEl) {
+        msgEl.textContent = data.error || `Could not remove ${ticker}`;
+        msgEl.className = "modal__msg modal__msg--error";
+        msgEl.classList.remove("hidden");
+      }
+    }
+  } catch (err) {
+    console.error("Error removing bot ticker:", err);
+  }
+}
+
 function renderTop50UI(stocks) {
   const container = document.getElementById("top50Container");
+  const countEl = document.getElementById("top50Count");
   if (!container) return;
   if (!stocks || stocks.length === 0) {
-    container.innerHTML = `<div style="text-align: center; padding: 24px; color: var(--text-muted);">No stock list available.</div>`;
+    container.innerHTML = `<div style="text-align: center; padding: 24px; color: var(--text-muted);">No bot tickers found. Add some above.</div>`;
+    if (countEl) countEl.textContent = "0 TICKERS • SCANNED BY 3-SIGMA BOT";
     return;
   }
-  container.innerHTML = stocks.map(s => `
+  if (countEl) {
+    countEl.textContent = `${stocks.length} TICKERS • SCANNED BY 3-SIGMA BOT`;
+  }
+  container.innerHTML = stocks.map((s, idx) => `
     <div class="top50-row">
       <div class="top50-row__left">
-        <span class="top50-row__rank">#${s.rank}</span>
+        <span class="top50-row__rank">#${s.rank || (idx + 1)}</span>
         <span class="top50-row__symbol">${s.ticker}</span>
+        <span class="top50-row__name" title="${s.name || ''}">${s.name || ''}</span>
       </div>
-      <div class="top50-row__name" title="${s.name || ''}">${s.name || ''}</div>
+      <button class="top50-remove-btn" onclick="removeTop50Ticker('${s.ticker}')" title="Remove ${s.ticker} from Bot Tickers">✕</button>
     </div>
   `).join("");
 }
