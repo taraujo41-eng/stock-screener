@@ -1172,7 +1172,7 @@ def find_best_option(ticker, signal_type, last_price, min_dte=None, max_dte=None
     - Target 0-30 DTE (minimizes theta decay / optimized for day trading)
     - Delta between 0.45 and 0.60 (ATM or slightly ITM)
     - Open Interest >= 500 contracts
-    - Spread <= $0.05 or <= 2% of contract premium
+    - Spread <= $0.10 or <= 2% of contract premium
     - Strict live quotes required: non-zero Bid and Ask
     - Returns None if no liquid contract with valid quotes is found
     """
@@ -1188,7 +1188,7 @@ def find_best_option(ticker, signal_type, last_price, min_dte=None, max_dte=None
         if min_oi is None:
             min_oi = int(os.getenv("OPTIONS_MIN_OI", "500"))
         if max_spread_dollars is None:
-            max_spread_dollars = float(os.getenv("OPTIONS_MAX_SPREAD_DOLLARS", "0.05"))
+            max_spread_dollars = float(os.getenv("OPTIONS_MAX_SPREAD_DOLLARS", "0.10"))
         if max_spread_pct is None:
             max_spread_pct = float(os.getenv("OPTIONS_MAX_SPREAD_PCT", "2.0"))
 
@@ -1279,7 +1279,7 @@ def find_best_option(ticker, signal_type, last_price, min_dte=None, max_dte=None
                 iv_val = (c.get("impliedVolatility") or 0.35)
                 iv_pct = iv_val * 100.0 if iv_val < 5.0 else iv_val
 
-                # Spread filter: Bid-Ask Spread <= $0.05 OR <= 2% of contract premium (or max_spread_pct)
+                # Spread filter: Bid-Ask Spread <= $0.10 OR <= 2% of contract premium (or max_spread_pct)
                 spread_ok = (spread <= max_spread_dollars) or (spread_pct <= max_spread_pct)
                 if not spread_ok and spread_pct > 8.0:
                     continue

@@ -307,7 +307,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
     
     alert_method = os.getenv("ALERT_METHOD", "TELEGRAM").upper()
     
-    # 0. Find best option contract suggestion (PMB specs: 0-30 DTE, Delta 0.45-0.60, OI >= 500, Spread <= $0.05/2%)
+    # 0. Find best option contract suggestion (PMB specs: 0-30 DTE, Delta 0.45-0.60, OI >= 500, Spread <= $0.10/2%)
     opt_str = "None"
     opt_info = None
     try:
@@ -321,7 +321,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             target_delta_min=0.45,
             target_delta_max=0.60,
             min_oi=500,
-            max_spread_dollars=0.05,
+            max_spread_dollars=float(os.getenv("OPTIONS_MAX_SPREAD_DOLLARS", "0.10")),
             max_spread_pct=2.0
         )
         if opt_info:
@@ -594,7 +594,7 @@ def evaluate_ticker_process(ticker, df):
         action = "BUY" if is_long else "SELL"
         signal_type = "bullish" if is_long else "bearish"
 
-        # 6. Derivative / Option Contract Lookup (PMB Specs: 0-30 DTE, Delta 0.45-0.60, OI >= 500, Spread <= $0.05/2%)
+        # 6. Derivative / Option Contract Lookup (PMB Specs: 0-30 DTE, Delta 0.45-0.60, OI >= 500, Spread <= $0.10/2%)
         best_opt = None
         try:
             from reversal_scanner import find_best_option
@@ -607,7 +607,7 @@ def evaluate_ticker_process(ticker, df):
                 target_delta_min=0.45,
                 target_delta_max=0.60,
                 min_oi=500,
-                max_spread_dollars=0.05,
+                max_spread_dollars=float(os.getenv("OPTIONS_MAX_SPREAD_DOLLARS", "0.10")),
                 max_spread_pct=2.0
             )
         except Exception as ex:

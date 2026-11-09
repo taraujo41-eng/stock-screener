@@ -651,7 +651,7 @@ class PaperTrader:
                 target_delta_min=0.45,
                 target_delta_max=0.60,
                 min_oi=500,
-                max_spread_dollars=0.05,
+                max_spread_dollars=float(os.getenv("OPTIONS_MAX_SPREAD_DOLLARS", "0.10")),
                 max_spread_pct=2.0
             )
 
