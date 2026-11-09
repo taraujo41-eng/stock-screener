@@ -1169,7 +1169,7 @@ def _get_target_friday_exp(valid_exps=None, target_dte=30):
 def find_best_option(ticker, signal_type, last_price, min_dte=None, max_dte=None, target_delta_min=None, target_delta_max=None, min_oi=None, max_spread_dollars=None, max_spread_pct=None):
     """
     Find the ideal live option contract from Webull:
-    - Target 30-60 DTE (minimizes theta decay)
+    - Target 0-30 DTE (minimizes theta decay / optimized for day trading)
     - Delta between 0.45 and 0.60 (ATM or slightly ITM)
     - Open Interest >= 500 contracts
     - Spread <= $0.05 or <= 2% of contract premium
@@ -1178,9 +1178,9 @@ def find_best_option(ticker, signal_type, last_price, min_dte=None, max_dte=None
     """
     try:
         if min_dte is None:
-            min_dte = int(os.getenv("OPTIONS_MIN_DTE", "30"))
+            min_dte = int(os.getenv("OPTIONS_MIN_DTE", "0"))
         if max_dte is None:
-            max_dte = int(os.getenv("OPTIONS_MAX_DTE", "60"))
+            max_dte = int(os.getenv("OPTIONS_MAX_DTE", "30"))
         if target_delta_min is None:
             target_delta_min = float(os.getenv("OPTIONS_MIN_DELTA", "0.45"))
         if target_delta_max is None:
@@ -1221,7 +1221,7 @@ def find_best_option(ticker, signal_type, last_price, min_dte=None, max_dte=None
                 except Exception:
                     exp_date = datetime.fromtimestamp(exp).date()
                 dte = (exp_date - today_date).days
-                if 14 <= dte <= 90:
+                if 0 <= dte <= 45:
                     valid_exps.append((exp, dte))
 
         if not valid_exps:
@@ -1230,7 +1230,7 @@ def find_best_option(ticker, signal_type, last_price, min_dte=None, max_dte=None
         best_contract = None
         best_score = -1
         
-        # Scan valid expirations (prioritizing 30-60 DTE for PMB strategy)
+        # Scan valid expirations (prioritizing 0-30 DTE for PMB strategy)
         for exp_ts, dte_days in valid_exps[:8]:
             chain = fetch_options_for_expiration(ticker, exp_ts)
             if not chain:
@@ -1295,8 +1295,8 @@ def find_best_option(ticker, signal_type, last_price, min_dte=None, max_dte=None
                 # Scoring Formula
                 delta_fit = max(0.2, 1.0 - abs(est_delta - 0.52) * 2.5)
                 spread_fit = max(0.2, 1.0 - (spread_pct / max(1.0, max_spread_pct * 3)))
-                ideal_dte = 45.0
-                dte_fit = max(0.2, 1.0 - abs(dte_days - ideal_dte) / 30.0)
+                ideal_dte = 14.0
+                dte_fit = max(0.2, 1.0 - abs(dte_days - ideal_dte) / 20.0)
                 liq_base = min(10000, oi + (vol * 2))
                 
                 score = (liq_base ** 0.5) * 10.0 * spread_fit * delta_fit * dte_fit
