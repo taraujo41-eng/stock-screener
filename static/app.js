@@ -36,8 +36,18 @@ function fmtEta(seconds) {
 function updateModeDesc() {
   const desc = document.getElementById("modeDesc");
   const subtitle = document.getElementById("headerSubtitle");
-  if (desc) desc.textContent = "Scans your watchlist tickers using all criteria: Technicals, Market Sentiment, Reversals, Sigma Bands & Options Exhaustion";
-  if (subtitle) subtitle.textContent = "Technicals & Market Sentiment × Your Custom Watchlist";
+  if (desc) desc.textContent = "📋 Watchlist: A+ Swing Trade Scanner (Daily Chart, 30-60 DTE Options) • 🤖 Bot Tickers: Premarket Breakouts";
+  if (subtitle) subtitle.textContent = "A+ Swing Trade & Trend Scanner (Daily Chart • 30–60 DTE Options)";
+}
+
+function openCriteriaModal() {
+  const modal = document.getElementById("criteriaModal");
+  if (modal) modal.classList.remove("hidden");
+}
+
+function closeCriteriaModal() {
+  const modal = document.getElementById("criteriaModal");
+  if (modal) modal.classList.add("hidden");
 }
 
 // ── Market Sentiment Live UI ──────────────────────────────
@@ -137,9 +147,9 @@ async function loadLastWatchlistScan() {
 
   document.getElementById("results").innerHTML = `
     <div class="empty-state">
-      <div class="empty-state__icon">📋</div>
-      <div class="empty-state__title">Ready to scan</div>
-      <div class="empty-state__text">Tap scan to analyze your watchlist tickers<br>using all criteria (Reversals, Sigma Bands, RSI & Options)</div>
+      <div class="empty-state__icon">🎯</div>
+      <div class="empty-state__title">A+ Swing Trade Scanner Ready</div>
+      <div class="empty-state__text">Tap <b>Scan Watchlist (Swing A+)</b> to screen for Mega/Large-Cap swing trade setups<br>(8 EMA Pullbacks, Breakouts, 3SD Reversals with 30-60 DTE Options)</div>
     </div>
   `;
   hideAuxUI();
@@ -1073,6 +1083,9 @@ function displayResults(data) {
     } else if (isOptions) {
       emptyTitle = "No setups found";
       emptyText = "No options meeting all criteria right now.";
+    } else if (currentResultMode === "watchlist") {
+      emptyTitle = "All clear";
+      emptyText = "No A+ swing trade setups meeting strict criteria right now.";
     } else {
       emptyTitle = "All clear";
       emptyText = "No reversal setups found right now.";

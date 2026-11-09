@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="/icon.png">
   <link rel="icon" href="/icon.png">
-  <link rel="stylesheet" href="/style.css?v=5.0">
+  <link rel="stylesheet" href="/style.css?v=6.0">
   <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body>
@@ -26,13 +26,13 @@
     <header class="header">
       <span class="header__icon">📋</span>
       <h1 class="header__title">Watchlist Scanner</h1>
-      <p class="header__subtitle" id="headerSubtitle">VWAP Trend Pullback &amp; Momentum Scanner</p>
+      <p class="header__subtitle" id="headerSubtitle">A+ Swing Trade &amp; Trend Scanner (Daily Chart • 30–60 DTE Options)</p>
     </header>
 
     <!-- Navigation Tabs (Scanner vs Paper Trader vs Daily Movers) -->
     <div class="main-tabs">
       <button class="main-tab main-tab--active" id="tabScannerBtn" onclick="switchMainTab('scanner')">
-        🔎 VWAP Trend Scanner
+        🔎 A+ Swing Trade Scanner
       </button>
       <button class="main-tab" id="tabPaperBtn" onclick="switchMainTab('paper')">
         🤖 A+ Auto Trader <span class="tab-badge" id="paperBadge">0</span>
@@ -51,6 +51,7 @@
       <div class="mode-info">
         <p class="mode-desc" id="modeDesc">📋 Watchlist: A+ Swing Trade Scanner (Daily Chart, 30-60 DTE Options) • 🤖 Bot Tickers: Premarket Breakouts</p>
         <div class="mode-links">
+          <button class="edit-link" id="viewCriteriaBtn" onclick="openCriteriaModal()">🎯 Swing Criteria</button>
           <button class="edit-link" id="editWatchlistBtn" onclick="openWatchlistModal()">⚙️ Edit Watchlist</button>
           <button class="edit-link edit-link--top50" id="viewTop50Btn" onclick="openTop50Modal()">🤖 Bot Tickers</button>
         </div>
@@ -679,6 +680,64 @@
     </div>
   </div>
 
+  <!-- A+ Swing Trade Scanner Criteria Modal Overlay -->
+  <div class="modal-overlay hidden" id="criteriaModal">
+    <div class="modal modal--criteria">
+      <div class="modal__header">
+        <span class="modal__title">🎯 A+ Swing Trade Criteria &amp; Strategy</span>
+        <button class="modal__close" onclick="closeCriteriaModal()">&times;</button>
+      </div>
+      <div class="modal__content criteria-modal-content">
+        
+        <div class="criteria-sec">
+          <div class="criteria-sec__title">🏛️ [1] Universe &amp; Liquidity Filter (Base Scan)</div>
+          <ul class="criteria-sec__list">
+            <li><strong>Market Capitalization:</strong> ≥ $10 Billion (Mega / Large-Cap only)</li>
+            <li><strong>Average Daily Volume:</strong> ≥ 2,000,000 shares (20-day SMA)</li>
+            <li><strong>Share Price:</strong> ≥ $20.00</li>
+            <li><strong>Option Chain Liquidity:</strong> Tight bid-ask spread (≤ $0.05 to $0.10 near ATM), Open Interest ≥ 500 across target strikes</li>
+          </ul>
+        </div>
+
+        <div class="criteria-sec">
+          <div class="criteria-sec__title">📈 [2] Multi-Timeframe Trend &amp; Momentum (Daily Chart)</div>
+          <ul class="criteria-sec__list">
+            <li><strong>Primary Trend:</strong> Daily Close &gt; 50-day SMA (Longs) / Daily Close &lt; 50-day SMA (Shorts)</li>
+            <li><strong>Short-Term Momentum:</strong>
+              <div class="criteria-subbox">
+                • <em>8 EMA Trend Pullback:</em> Price touches or closes near 8 EMA while 8 EMA is sloped in trend direction.<br>
+                • <em>Key Level Breakout:</em> Daily close breaks out from consolidation with 8 EMA &gt; 21 EMA.<br>
+                • <em>3SD Bollinger Band Reversal:</em> Daily price touching 3-Standard-Deviation Bollinger Band with confirmed RSI divergence.
+              </div>
+            </li>
+            <li><strong>Trend Strength:</strong> ADX(14) ≥ 20 and rising (confirms non-choppy regime)</li>
+            <li><strong>Overextension / Reversal:</strong> Daily RSI(14) between 45–60 on trend pullbacks; OR touching 3SD band with RSI divergence</li>
+          </ul>
+        </div>
+
+        <div class="criteria-sec">
+          <div class="criteria-sec__title">📊 [3] Volume &amp; Catalyst Confluence</div>
+          <ul class="criteria-sec__list">
+            <li><strong>Relative Volume (RVOL):</strong> ≥ 1.2x to 1.5x on setup day / breakout candle</li>
+            <li><strong>Earnings / Binary Event:</strong> 🛡️ Safe: NO earnings or major corporate catalysts within next 14 calendar days (avoids IV crush &amp; gap risk)</li>
+          </ul>
+        </div>
+
+        <div class="criteria-sec">
+          <div class="criteria-sec__title">📝 [4] Execution &amp; Sizing Plan</div>
+          <ul class="criteria-sec__list">
+            <li><strong>Expiration (DTE):</strong> 30 to 60 DTE (prevents rapid front-month theta decay)</li>
+            <li><strong>Target Delta:</strong> 0.45 to 0.60 (Directional ATM / Slight ITM)</li>
+            <li><strong>Risk-to-Reward Ratio:</strong> Minimum 2:1 required (Target 1: 2.0R Trim 50%, Target 2: 3.2R Runner)</li>
+            <li><strong>Institutional Pre-Trade Log:</strong> Tap <em>"📋 Copy Pre-Trade Log (Template)"</em> on any card for an instant copy-paste trading journal entry.</li>
+          </ul>
+        </div>
+
+      </div>
+      <button class="modal__done-btn" onclick="closeCriteriaModal()">Done</button>
+    </div>
+  </div>
+
   <!-- Watchlist Manager Modal Overlay -->
   <div class="modal-overlay hidden" id="watchlistModal">
     <div class="modal">
@@ -748,6 +807,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=7.2"></script>
+  <script src="/app.js?v=8.0"></script>
 </body>
 </html>
