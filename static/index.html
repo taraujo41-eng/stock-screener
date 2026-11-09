@@ -49,7 +49,7 @@
     <div id="scannerView">
       <!-- Scanner description -->
       <div class="mode-info">
-        <p class="mode-desc" id="modeDesc">Scans tickers on 5m/15m candles for VWAP Trend Pullbacks, 8 EMA pocket retests, and high-conviction A+ setups.</p>
+        <p class="mode-desc" id="modeDesc">📋 Watchlist: A+ Swing Trade Scanner (Daily Chart, 30-60 DTE Options) • 🤖 Bot Tickers: Premarket Breakouts</p>
         <div class="mode-links">
           <button class="edit-link" id="editWatchlistBtn" onclick="openWatchlistModal()">⚙️ Edit Watchlist</button>
           <button class="edit-link edit-link--top50" id="viewTop50Btn" onclick="openTop50Modal()">🤖 Bot Tickers</button>
@@ -113,9 +113,9 @@
 
       <!-- Scan Buttons Grid -->
       <div class="scan-grid">
-        <button class="scan-btn" id="scanBtn" onclick="runScan('watchlist')">
+        <button class="scan-btn" id="scanBtn" onclick="runScan('watchlist')" title="A+ Swing Trade Scanner: 8 EMA Pullback, Breakout &amp; 3SD Reversals (30-60 DTE Options)">
           <div class="scan-btn__spinner"></div>
-          <span class="scan-btn__text">📋 Scan Watchlist</span>
+          <span class="scan-btn__text">📋 Scan Watchlist (Swing A+)</span>
         </button>
         <button class="scan-btn scan-btn--top50" id="scanTop50Btn" onclick="runScan('top50')">
           <div class="scan-btn__spinner"></div>

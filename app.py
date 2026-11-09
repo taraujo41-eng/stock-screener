@@ -605,7 +605,7 @@ def scan_watchlist():
         return _scan_conflict_response()
     scan_id = str(int(time.time() * 1000))
     _reset_progress(status="running", mode="watchlist", scan_id=scan_id)
-    scan_progress["phase_label"] = "Initiating watchlist scan (all criteria)..."
+    scan_progress["phase_label"] = "Initiating Watchlist A+ Swing Trade scan (Daily Chart, 30-60 DTE Options)..."
 
     data = request.get_json(silent=True) or {}
     extended_hours = data.get("extended_hours", False)
@@ -650,7 +650,7 @@ def scan_watchlist():
             _release_scan()
 
     threading.Thread(target=_run, daemon=False).start()
-    return jsonify({"ok": True, "scan_id": scan_id, "message": "Watchlist scan started (all criteria)"})
+    return jsonify({"ok": True, "scan_id": scan_id, "message": "Watchlist A+ Swing Trade scan started"})
 
 @app.route("/api/scan/watchlist/log", methods=["GET"])
 def get_scan_debug_log():

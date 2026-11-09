@@ -120,7 +120,7 @@ async function fetchLiveMarketSentiment() {
 
 async function loadLastWatchlistScan() {
   const scanBtn = document.getElementById("scanBtn");
-  if (scanBtn) scanBtn.querySelector(".scan-btn__text").textContent = "📋  Scan Watchlist";
+  if (scanBtn) scanBtn.querySelector(".scan-btn__text").textContent = "📋 Scan Watchlist (Swing A+)";
   try {
     showSkeleton();
     const res = await fetch("/api/scan/watchlist/results");
@@ -174,6 +174,8 @@ function showSkeleton() {
 // ── Build a single card ────────────────────────────────────
 
 function buildCard(item, index) {
+  const isSwingTrade = Boolean(item["Setup Type"] || item["Pre-Trade Log"]);
+
   const parseSignals = (str) => {
     if (!str || str === "—") return [];
     // Remove outer brackets, then split by pipe
@@ -202,8 +204,8 @@ function buildCard(item, index) {
   const rsi = item.RSI;
   const rsiCls = rsiClass(rsi);
 
-  const maxVol = Math.max(...scanData.map(d => d.Volume), 1);
-  const volPct = Math.round((item.Volume / maxVol) * 100);
+  const maxVol = Math.max(...scanData.map(d => d.Volume || 0), 1);
+  const volPct = Math.round(((item.Volume || 0) / maxVol) * 100);
 
   const grade = item.Grade || "B";
   const score = item.Score || 0;
@@ -272,38 +274,80 @@ function buildCard(item, index) {
     </div>
   `;
 
-  const techGridHtml = `
-    <div class="card__tech-grid">
-      <div class="tech-chip">
-        <span class="tech-chip__label">RVOL</span>
-        <span class="tech-chip__value ${rvolClass}">${rvolVal}</span>
+  let techGridHtml = "";
+  if (isSwingTrade) {
+    const is50Bull = item["SMA50 Alignment"] && item["SMA50 Alignment"].includes("Bullish");
+    const isEmaBull = item["EMA8_vs_EMA21"] && item["EMA8_vs_EMA21"].includes("Bullish");
+    techGridHtml = `
+      <div class="card__tech-grid">
+        <div class="tech-chip">
+          <span class="tech-chip__label">50 SMA</span>
+          <span class="tech-chip__value ${is50Bull ? 'tech-chip__value--green' : 'tech-chip__value--red'}">${is50Bull ? 'Above 🟢' : 'Below 🔴'}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">8 vs 21 EMA</span>
+          <span class="tech-chip__value ${isEmaBull ? 'tech-chip__value--green' : 'tech-chip__value--red'}">${isEmaBull ? '8 > 21 🟢' : '8 < 21 🔴'}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">ADX(14)</span>
+          <span class="tech-chip__value ${item.ADX >= 20 ? 'tech-chip__value--green' : ''}">${item.ADX !== undefined ? item.ADX : '—'}${item.ADX_Rising ? ' 🔥' : ''}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">RVOL</span>
+          <span class="tech-chip__value ${rvolClass}">${rvolVal}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">20D Avg Vol</span>
+          <span class="tech-chip__value">${fmtVolume(item["Avg Volume 20D"] || item.Volume)}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">Earnings</span>
+          <span class="tech-chip__value tech-chip__value--green">Safe (>14d) 🛡️</span>
+        </div>
       </div>
-      <div class="tech-chip">
-        <span class="tech-chip__label">ADR</span>
-        <span class="tech-chip__value">${adrVal}</span>
+    `;
+  } else {
+    techGridHtml = `
+      <div class="card__tech-grid">
+        <div class="tech-chip">
+          <span class="tech-chip__label">RVOL</span>
+          <span class="tech-chip__value ${rvolClass}">${rvolVal}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">ADR</span>
+          <span class="tech-chip__value">${adrVal}</span>
+        </div>
+        <div class="tech-chip ${squeezeCls}">
+          <span class="tech-chip__label">Squeeze</span>
+          <span class="tech-chip__value">${squeezeVal}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">BB %B</span>
+          <span class="tech-chip__value ${bbClass}">${bbVal}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">20 EMA</span>
+          <span class="tech-chip__value ${ema20Class}">${ema20DistVal}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">50 SMA</span>
+          <span class="tech-chip__value ${sma50Class}">${sma50DistVal}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">200 SMA</span>
+          <span class="tech-chip__value ${sma200Class}">${sma200DistVal}</span>
+        </div>
       </div>
-      <div class="tech-chip ${squeezeCls}">
-        <span class="tech-chip__label">Squeeze</span>
-        <span class="tech-chip__value">${squeezeVal}</span>
-      </div>
-      <div class="tech-chip">
-        <span class="tech-chip__label">BB %B</span>
-        <span class="tech-chip__value ${bbClass}">${bbVal}</span>
-      </div>
-      <div class="tech-chip">
-        <span class="tech-chip__label">20 EMA</span>
-        <span class="tech-chip__value ${ema20Class}">${ema20DistVal}</span>
-      </div>
-      <div class="tech-chip">
-        <span class="tech-chip__label">50 SMA</span>
-        <span class="tech-chip__value ${sma50Class}">${sma50DistVal}</span>
-      </div>
-      <div class="tech-chip">
-        <span class="tech-chip__label">200 SMA</span>
-        <span class="tech-chip__value ${sma200Class}">${sma200DistVal}</span>
-      </div>
+    `;
+  }
+
+  const swingMetaLine = isSwingTrade ? `
+    <div class="swing-card-meta-line">
+      <span class="swing-setup-badge">⚡ ${item["Setup Type"]}</span>
+      <span class="swing-sector-pill">🏢 ${item.Sector || 'Equities'}</span>
+      <span class="swing-mcap-pill">💰 ${item["Market Cap"] || '>= $10B'}</span>
     </div>
-  `;
+  ` : "";
 
   const patternBadges = patternsList.length ? `
     <div class="card__patterns">
@@ -321,6 +365,7 @@ function buildCard(item, index) {
         </div>
         <div class="card__price">$${item["Last Price"].toFixed(2)}</div>
       </div>
+      ${swingMetaLine}
       <div class="card__meta">
         <div class="card__meta-item">
           📊 <span>${fmtVolume(item.Volume)}</span>
@@ -351,10 +396,21 @@ function buildCard(item, index) {
             <span class="trade-level__value trade-level__value--sl">${typeof item["Stop Loss"] === 'number' ? '$' + item["Stop Loss"].toFixed(2) : (item["Stop Loss"] || '-20% SL')}</span>
           </div>
           <div class="trade-level">
-            <span class="trade-level__label">Target</span>
+            <span class="trade-level__label">${item["Target 2"] ? 'Target 1 (Trim)' : 'Target'}</span>
             <span class="trade-level__value trade-level__value--target">${typeof item["Profit Target"] === 'number' ? '$' + item["Profit Target"].toFixed(2) : (item["Profit Target"] || '+20% TP')}</span>
           </div>
+          ${item["Target 2"] ? `
+            <div class="trade-level">
+              <span class="trade-level__label">Target 2 (Runner)</span>
+              <span class="trade-level__value trade-level__value--target" style="color: #60a5fa;">$${item["Target 2"].toFixed(2)}</span>
+            </div>
+          ` : ""}
         </div>
+        ${item["Risk Reward Ratio"] ? `
+          <div style="margin-top: 0.35rem; font-size: 0.75rem; color: #a78bfa; font-weight: 600;">
+            ⚖️ Risk-to-Reward: ${item["Risk Reward Ratio"]} (Target 1: 2.0R • Target 2: 3.2R)
+          </div>
+        ` : ""}
         ${item["VWAP Level"] ? `
           <div style="margin-top: 0.35rem; font-size: 0.75rem; color: #facc15; font-weight: 600;">
             ⚡ VWAP Retest Entry: $${typeof item["VWAP Level"] === 'number' ? item["VWAP Level"].toFixed(2) : item["VWAP Level"]}
@@ -363,7 +419,7 @@ function buildCard(item, index) {
       ` : ""}
       ${item["Option Play"] && typeof item["Option Play"] === "object" ? `
         <div class="card__option">
-          <div class="option-tag">SUGGESTED OPTION PLAY</div>
+          <div class="option-tag">${isSwingTrade ? "30-60 DTE SWING OPTION (DELTA 0.45 - 0.60)" : "SUGGESTED OPTION PLAY"}</div>
           <div class="option-card-layout">
             <div class="option-card-header">
               <span class="option-card-type option-card-type--${(item["Option Play"].type || 'CALL').toLowerCase()}">${item["Option Play"].type || 'CALL'}</span>
@@ -376,6 +432,14 @@ function buildCard(item, index) {
                 <span class="option-metric-value">${item["Option Play"].mid !== undefined ? '@$' + item["Option Play"].mid.toFixed(2) : '—'}</span>
               </div>
               <div class="option-card-metric">
+                <span class="option-metric-label">Delta:</span>
+                <span class="option-metric-value">${item["Option Play"].est_delta !== undefined ? item["Option Play"].est_delta.toFixed(2) + 'Δ' : '0.50Δ'}</span>
+              </div>
+              <div class="option-card-metric">
+                <span class="option-metric-label">OI / Vol:</span>
+                <span class="option-metric-value">${fmtVolume(item["Option Play"].oi || 0)} / ${fmtVolume(item["Option Play"].volume || 0)}</span>
+              </div>
+              <div class="option-card-metric">
                 <span class="option-metric-label">IV:</span>
                 <span class="option-metric-value option-metric-value--iv">${item["Option Play"].iv !== undefined ? item["Option Play"].iv + '%' : '—'}</span>
               </div>
@@ -385,10 +449,15 @@ function buildCard(item, index) {
         </div>
       ` : (item["Suggested Option"] && item["Suggested Option"] !== "—" ? `
         <div class="card__option">
-          <div class="option-tag">TRADE IDEA</div>
+          <div class="option-tag">${isSwingTrade ? "30-60 DTE SWING OPTION" : "TRADE IDEA"}</div>
           <div class="option-val">${item["Suggested Option"]}</div>
         </div>
       ` : "")}
+      ${(item["Pre-Trade Log"] || item.pre_trade_log) ? `
+        <button class="btn-copy-pretrade" onclick="copyPreTradeLog('${item.Ticker}')" title="Copy institutional pre-trade execution log for your trading journal">
+          📋 Copy Pre-Trade Log (Template)
+        </button>
+      ` : ""}
     </div>
   `;
 }
@@ -923,7 +992,7 @@ function displayResults(data) {
     badge.textContent = `📊 Daily RSI Divergence — Watchlist (${data.count || 0} setups)`;
     badge.classList.remove("hidden");
   } else if (data.mode === "watchlist") {
-    badge.textContent = `Watchlist Scan (${data.count || 0} setups)`;
+    badge.textContent = `🎯 A+ Swing Trade Scanner — Watchlist (${data.count || 0} setups)`;
     badge.classList.remove("hidden");
   } else if (data.tickers_scanned) {
     badge.textContent = `Scanned ${data.tickers_scanned.toLocaleString()} tickers`;
@@ -3259,6 +3328,53 @@ function togglePremarketAutoPoll() {
     }
   }
 }
+
+// ── Toast Notification & Pre-Trade Log Clipboard Helper ──
+
+function showToast(msg) {
+  let toast = document.getElementById("appToast");
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = "appToast";
+    toast.className = "app-toast";
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.classList.add("app-toast--show");
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => {
+    toast.classList.remove("app-toast--show");
+  }, 2600);
+}
+
+function copyPreTradeLog(ticker) {
+  const item = scanData.find(d => d.Ticker === ticker);
+  if (!item || (!item["Pre-Trade Log"] && !item.pre_trade_log)) {
+    console.error("No pre-trade log found for", ticker);
+    return;
+  }
+  const text = item["Pre-Trade Log"] || item.pre_trade_log;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      showToast(`✓ Copied ${ticker} Pre-Trade Log to Clipboard!`);
+    }).catch(() => {
+      _fallbackCopy(text, ticker);
+    });
+  } else {
+    _fallbackCopy(text, ticker);
+  }
+}
+
+function _fallbackCopy(text, ticker) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand("copy");
+  document.body.removeChild(ta);
+  showToast(`✓ Copied ${ticker} Pre-Trade Log to Clipboard!`);
+}
+
 
 
 

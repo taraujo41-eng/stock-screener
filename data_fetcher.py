@@ -896,12 +896,16 @@ def fetch_quotes_batch(tickers, max_workers=10, on_progress=None):
                 mcap = float(q["marketValue"]) if q.get("marketValue") else None
                 vol = int(float(q["volume"])) if q.get("volume") else None
                 avg_vol = int(float(q["avgVol3M"])) if q.get("avgVol3M") else (int(float(q["avgVol10D"])) if q.get("avgVol10D") else None)
+                name = q.get("name")
+                earnings = q.get("nextEarningDay") or q.get("estimateEarningsDate") or q.get("latestEarningsDate")
                 return sym, {
                     "price": price,
                     "close": pre_close,
                     "marketCap": mcap,
                     "avgVolume": avg_vol,
                     "volume": vol,
+                    "name": name,
+                    "earnings": earnings,
                 }
         except Exception:
             pass
