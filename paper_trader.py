@@ -768,6 +768,7 @@ class PaperTrader:
                 "quantity": order_qty,
                 "dte": best["dte"],
                 "expiration": best.get("exp", ""),
+                "expiration_date": best.get("exp_date", ""),
                 "zone": zone_summary,
                 "in_zone": in_zone,
                 "setup": setup_reason,
@@ -801,22 +802,23 @@ class PaperTrader:
     # ── Position Management / Exits ─────────────────────────────────
 
     def get_trade_option_quote(self, trade_record):
-        """Fetch live option quote (bid, ask, mid) for an open trade."""
+        """Fetch live option quote (bid, ask, mid) for an open trade using Webull or Yahoo fallback."""
         ticker = trade_record.get("ticker")
         strike = trade_record.get("strike")
         opt_type = trade_record.get("type")
-        exp_str = trade_record.get("expiration", "")
+        exp_date_str = trade_record.get("expiration_date")
 
-        # 1. Primary: Query Webull real-time options chain quote
-        exp_date_str = None
-        if "-" in exp_str and len(exp_str) == 10:
-            exp_date_str = exp_str
-        elif exp_str:
-            curr_year = datetime.now().year
-            try:
-                exp_date_str = datetime.strptime(f"{exp_str} {curr_year}", "%b %d %Y").strftime("%Y-%m-%d")
-            except Exception:
-                pass
+        # 1. Primary: Resolve clean YYYY-MM-DD expiration date
+        if not exp_date_str:
+            exp_str = trade_record.get("expiration", "")
+            if "-" in exp_str and len(exp_str) == 10:
+                exp_date_str = exp_str
+            elif exp_str:
+                curr_year = datetime.now().year
+                try:
+                    exp_date_str = datetime.strptime(f"{exp_str} {curr_year}", "%b %d %Y").strftime("%Y-%m-%d")
+                except Exception:
+                    pass
 
         if ticker and strike and opt_type and exp_date_str:
             try:
@@ -834,7 +836,7 @@ class PaperTrader:
 
         # 2. Fallback: Query Webull quote by instrument_id if available
         instrument_id = trade_record.get("instrument_id")
-        if ticker and instrument_id:
+        if ticker and instrument_id and not instrument_id.startswith("SIM_"):
             try:
                 from data_fetcher import get_unofficial_client
                 wb = get_unofficial_client()
@@ -852,6 +854,57 @@ class PaperTrader:
                 pass
 
         return None
+
+    def estimate_option_exit_price(self, trade_record, current_stock_price=None):
+        """
+        Realistic fallback estimate for option price when live option quote is unavailable.
+        Calculates intrinsic value and delta-based price movement from entry.
+        Strictly prevents fabricating a gain if the underlying stock moved against the position.
+        """
+        try:
+            entry_opt_price = float(trade_record.get("entry_price") or 1.0)
+            entry_stock_price = trade_record.get("stock_price_at_entry")
+            strike = float(trade_record.get("strike") or 0.0)
+            opt_type = str(trade_record.get("type") or "CALL").upper()
+
+            # If current stock price not provided, attempt a quick fetch
+            if current_stock_price is None or current_stock_price <= 0:
+                try:
+                    from data_fetcher import fetch_one
+                    df_bar = fetch_one(trade_record.get("ticker"), days=1, interval="5m")
+                    if df_bar is not None and not df_bar.empty:
+                        current_stock_price = float(df_bar["Close"].iloc[-1])
+                except Exception:
+                    pass
+
+            if current_stock_price is None or current_stock_price <= 0:
+                return max(0.05, round(entry_opt_price * 0.50, 2))
+
+            current_stock_price = float(current_stock_price)
+
+            if opt_type == "PUT":
+                intrinsic_val = max(0.0, strike - current_stock_price)
+                if entry_stock_price and entry_stock_price > 0:
+                    dS = current_stock_price - float(entry_stock_price)
+                    # Put delta is negative (~ -0.50): as stock rises, put premium drops
+                    delta_change = -0.50 * dS
+                    est_val = max(intrinsic_val, entry_opt_price + delta_change)
+                else:
+                    est_val = intrinsic_val
+                return max(0.05, round(est_val, 2))
+            else:  # CALL
+                intrinsic_val = max(0.0, current_stock_price - strike)
+                if entry_stock_price and entry_stock_price > 0:
+                    dS = current_stock_price - float(entry_stock_price)
+                    # Call delta is positive (~ +0.50): as stock drops, call premium drops
+                    delta_change = 0.50 * dS
+                    est_val = max(intrinsic_val, entry_opt_price + delta_change)
+                else:
+                    est_val = intrinsic_val
+                return max(0.05, round(est_val, 2))
+        except Exception as e:
+            logger.error(f"[PaperTrader] Error estimating option exit price: {e}")
+            return max(0.05, round(float(trade_record.get("entry_price", 1.0)) * 0.50, 2))
 
     def close_position(self, trade_record, exit_price=None, reason="manual", qty_to_close=None):
         """Sell to close an open option position (supports full or partial exit)."""
@@ -875,14 +928,23 @@ class PaperTrader:
                     elif mid is not None and mid > 0:
                         exit_price = mid
 
+            # If live quote is still missing, calculate delta-adjusted intrinsic price
+            if exit_price is None or exit_price <= 0:
+                exit_price = self.estimate_option_exit_price(trade_record)
+                logger.info(
+                    f"[PaperTrader] ℹ️ Live quote unavailable on exit — estimated realistic option price for "
+                    f"{trade_record['ticker']} {trade_record['type']} as ${exit_price:.2f}"
+                )
+
             client_order_id = str(uuid.uuid4())[:20]
 
             logger.info(
                 f"[PaperTrader] 📤 Closing {'partial' if is_partial else 'full'} position: {trade_record['ticker']} "
-                f"{trade_record['type']} ${trade_record['strike']} | Qty: {close_qty}/{total_qty} | Reason: {reason}"
+                f"{trade_record['type']} ${trade_record['strike']} | Qty: {close_qty}/{total_qty} | "
+                f"Exit Price: ${exit_price:.2f} | Reason: {reason}"
             )
 
-            if getattr(self, "_is_real_paper_account", False) and instrument_id:
+            if getattr(self, "_is_real_paper_account", False) and instrument_id and not instrument_id.startswith("SIM_"):
                 new_orders = [{
                     "client_order_id": client_order_id,
                     "order_type": "MARKET" if not exit_price else "LIMIT",
@@ -907,23 +969,10 @@ class PaperTrader:
                 result = resp.json() if resp.status_code == 200 else {"error": resp.text[:500]}
                 logger.info(f"[PaperTrader] Close order result: {json.dumps(result)[:300]}")
             else:
-                entry_p = trade_record.get("entry_price", 1.0)
-                if exit_price is None or exit_price <= 0:
-                    if reason in ("profit_target_2r", "take_profit", "take_profit_hod_lod", "tp1_hod_lod"):
-                        exit_price = round(entry_p * (1.0 + (self.take_profit_pct / 100.0)), 2)
-                    elif reason in ("runner_exit_8ema", "trailing_stop"):
-                        exit_price = round(entry_p * 1.15, 2)
-                    elif reason == "breakeven_stop":
-                        exit_price = round(entry_p * 1.0, 2)
-                    elif reason in ("hard_emergency_stop", "stop_loss", "stop_loss_vwap", "stop_loss_rejection"):
-                        exit_price = round(entry_p * (1.0 - (self.stop_loss_pct / 100.0)), 2)
-                    elif reason in ("structural_stop_pmh", "structural_stop_pml", "structural_invalidation"):
-                        exit_price = round(entry_p * (1.0 - (min(self.stop_loss_pct, 10.0) / 100.0)), 2)
-                    elif reason == "time_stop":
-                        exit_price = round(entry_p * 0.98, 2)
-                    else:
-                        exit_price = round(entry_p * 0.95, 2)
-                logger.info(f"[PaperTrader] 🛡️ [SIMULATION MODE] Simulated Close executed for {trade_record['ticker']} (Qty: {close_qty}) @ exit price ${exit_price:.2f}")
+                logger.info(
+                    f"[PaperTrader] 🛡️ [SIMULATION MODE] Simulated Close executed for {trade_record['ticker']} "
+                    f"(Qty: {close_qty}) @ realistic exit price ${exit_price:.2f}"
+                )
 
             # Update trade record
             ny_tz = get_ny_timezone()
@@ -1074,61 +1123,63 @@ class PaperTrader:
                                 tp_2r = trade.get("tp1_target")
                                 pmh = trade.get("pmh")
                                 pml = trade.get("pml")
+                                entry_stock = trade.get("stock_price_at_entry") or c_open
+                                curr_stock_price = float(rth_bars["Close"].iloc[-1])
 
                                 if sig == "bullish":
-                                    # 1. Hard Emergency Stop (Max Loss Protection: candle low <= hard_sl)
-                                    if hard_sl and (c_low <= hard_sl):
+                                    # 1. Hard Emergency Stop (Max Loss Protection: candle low <= hard_sl OR current stock <= hard_sl)
+                                    if hard_sl and (c_low <= hard_sl or curr_stock_price <= hard_sl):
                                         logger.info(
                                             f"[PaperTrader] 🛑 HARD EMERGENCY STOP on {trade['ticker']} | "
-                                            f"Stock Low=${c_low:.2f} <= Hard SL=${hard_sl:.2f}"
+                                            f"Stock=${curr_stock_price:.2f} <= Hard SL=${hard_sl:.2f}"
                                         )
-                                        positions_to_close.append((trade, "hard_emergency_stop"))
+                                        positions_to_close.append((trade, "hard_emergency_stop", current_price))
                                         continue
 
-                                    # 2. Structural Stop (Early Invalidation: 5m candle closes back below PMH)
-                                    if pmh and (c_close < pmh):
+                                    # 2. Structural Stop (Early Invalidation: candle closes below PMH OR current stock below PMH)
+                                    if pmh and (c_close < pmh or curr_stock_price < pmh):
                                         logger.info(
                                             f"[PaperTrader] 🛑 STRUCTURAL STOP (PMH Invalidation) on {trade['ticker']} | "
-                                            f"5m Candle Closed Below PMH (Close=${c_close:.2f} < PMH=${pmh:.2f})"
+                                            f"Stock Below PMH (Close=${c_close:.2f}, Current=${curr_stock_price:.2f} < PMH=${pmh:.2f})"
                                         )
-                                        positions_to_close.append((trade, "structural_stop_pmh"))
+                                        positions_to_close.append((trade, "structural_stop_pmh", current_price))
                                         continue
 
-                                    # 3. Profit Target (2:1 Asymmetry / 2R)
-                                    if tp_2r and (c_high >= tp_2r):
+                                    # 3. Profit Target (2:1 Asymmetry / 2R) — Strictly requires stock trading ABOVE entry price!
+                                    if tp_2r and (c_high >= tp_2r or curr_stock_price >= tp_2r) and (curr_stock_price >= entry_stock):
                                         logger.info(
                                             f"[PaperTrader] 🎯 2:1 PROFIT TARGET HIT on {trade['ticker']} | "
                                             f"Stock High=${c_high:.2f} >= 2R Target=${tp_2r:.2f}"
                                         )
-                                        positions_to_close.append((trade, "profit_target_2r"))
+                                        positions_to_close.append((trade, "profit_target_2r", current_price))
                                         continue
 
                                 elif sig == "bearish":
-                                    # 1. Hard Emergency Stop (Max Loss Protection: candle high >= hard_sl)
-                                    if hard_sl and (c_high >= hard_sl):
+                                    # 1. Hard Emergency Stop (Max Loss Protection: candle high >= hard_sl OR current stock >= hard_sl)
+                                    if hard_sl and (c_high >= hard_sl or curr_stock_price >= hard_sl):
                                         logger.info(
                                             f"[PaperTrader] 🛑 HARD EMERGENCY STOP on {trade['ticker']} | "
-                                            f"Stock High=${c_high:.2f} >= Hard SL=${hard_sl:.2f}"
+                                            f"Stock=${curr_stock_price:.2f} >= Hard SL=${hard_sl:.2f}"
                                         )
-                                        positions_to_close.append((trade, "hard_emergency_stop"))
+                                        positions_to_close.append((trade, "hard_emergency_stop", current_price))
                                         continue
 
-                                    # 2. Structural Stop (Early Invalidation: 5m candle closes back above PML)
-                                    if pml and (c_close > pml):
+                                    # 2. Structural Stop (Early Invalidation: candle closes above PML OR current stock above PML)
+                                    if pml and (c_close > pml or curr_stock_price > pml):
                                         logger.info(
                                             f"[PaperTrader] 🛑 STRUCTURAL STOP (PML Invalidation) on {trade['ticker']} | "
-                                            f"5m Candle Closed Above PML (Close=${c_close:.2f} > PML=${pml:.2f})"
+                                            f"Stock Above PML (Close=${c_close:.2f}, Current=${curr_stock_price:.2f} > PML=${pml:.2f})"
                                         )
-                                        positions_to_close.append((trade, "structural_stop_pml"))
+                                        positions_to_close.append((trade, "structural_stop_pml", current_price))
                                         continue
 
-                                    # 3. Profit Target (2:1 Asymmetry / 2R)
-                                    if tp_2r and (c_low <= tp_2r):
+                                    # 3. Profit Target (2:1 Asymmetry / 2R) — Strictly requires stock trading BELOW entry price!
+                                    if tp_2r and (c_low <= tp_2r or curr_stock_price <= tp_2r) and (curr_stock_price <= entry_stock):
                                         logger.info(
                                             f"[PaperTrader] 🎯 2:1 PROFIT TARGET HIT on {trade['ticker']} | "
                                             f"Stock Low=${c_low:.2f} <= 2R Target=${tp_2r:.2f}"
                                         )
-                                        positions_to_close.append((trade, "profit_target_2r"))
+                                        positions_to_close.append((trade, "profit_target_2r", current_price))
                                         continue
                     except Exception as ex:
                         logger.debug(f"[PaperTrader] 5m strategy exit check error for {trade['ticker']}: {ex}")
@@ -1141,7 +1192,7 @@ class PaperTrader:
                             f"[PaperTrader] 🛑 STOP-LOSS triggered on {trade['ticker']} | "
                             f"Entry: ${entry_price:.2f} → Bid: ${current_price:.2f} | Loss: {loss_pct:.1f}% >= {self.stop_loss_pct}%"
                         )
-                        positions_to_close.append((trade, "stop_loss"))
+                        positions_to_close.append((trade, "stop_loss", current_price))
                         continue
 
                 # 3. Breakeven Stop Protection (Locks in Breakeven once trade gains >= breakeven_stop_pct)
@@ -1158,7 +1209,7 @@ class PaperTrader:
                                 f"[PaperTrader] 🛡️ BREAKEVEN STOP triggered on {trade['ticker']} | "
                                 f"Peak was +{peak:.1f}%, now {pnl_pct:+.1f}% <= 0.0% | Exiting to protect capital."
                             )
-                            positions_to_close.append((trade, "breakeven_stop"))
+                            positions_to_close.append((trade, "breakeven_stop", current_price))
                             continue
 
                 # 4. Fixed Option Take-Profit Target (only when strategy 8 EMA exits are disabled)
@@ -1168,7 +1219,7 @@ class PaperTrader:
                             f"[PaperTrader] 🎯 TAKE-PROFIT (Target Reached) on {trade['ticker']} | "
                             f"Entry: ${entry_price:.2f} → Bid: ${current_price:.2f} | Gain: +{pnl_pct:.1f}% >= +{self.take_profit_pct}%"
                         )
-                        positions_to_close.append((trade, "take_profit"))
+                        positions_to_close.append((trade, "take_profit", current_price))
                         continue
 
                 # 5. Trailing Stop Protection
@@ -1181,7 +1232,7 @@ class PaperTrader:
                             f"[PaperTrader] 🛡️ TRAILING STOP triggered on {trade['ticker']} | "
                             f"Peak: +{peak:.1f}% → Now: {pnl_pct:+.1f}% (Floor: +{stop_floor_pct:.1f}%) | Locking in gains"
                         )
-                        positions_to_close.append((trade, "trailing_stop"))
+                        positions_to_close.append((trade, "trailing_stop", current_price))
                         continue
 
                 # 5. Take-Profit @ VWAP (Requires Option Profitability Gate)
@@ -1203,7 +1254,7 @@ class PaperTrader:
                                             f"[PaperTrader] 🎯 TAKE-PROFIT @ VWAP on {trade['ticker']} | "
                                             f"Stock: ${stock_price:.2f} (Target: ${vwap_target:.2f}) | Option P&L: +{pnl_pct:.1f}% >= +{self.vwap_min_profit_pct}%"
                                         )
-                                        positions_to_close.append((trade, "take_profit"))
+                                        positions_to_close.append((trade, "take_profit", current_price))
                                         continue
                                     else:
                                         logger.info(
@@ -1212,7 +1263,7 @@ class PaperTrader:
                                         )
                                 else:
                                     # Fallback if quote is unavailable
-                                    positions_to_close.append((trade, "take_profit"))
+                                    positions_to_close.append((trade, "take_profit", current_price))
                                     continue
                     except Exception as ex:
                         logger.debug(f"[PaperTrader] VWAP exit check error: {ex}")
@@ -1227,7 +1278,7 @@ class PaperTrader:
                                 f"[PaperTrader] ⌛ TIME-STOP / STAGNATION on {trade['ticker']} | "
                                 f"Held {hold_duration_mins:.0f}m >= {self.max_hold_minutes}m | P&L: {pnl_pct:+.1f}% | Exiting to avoid theta bleed"
                             )
-                            positions_to_close.append((trade, "time_stop"))
+                            positions_to_close.append((trade, "time_stop", current_price))
                             continue
                     except Exception as ex:
                         logger.debug(f"[PaperTrader] Time-stop check error: {ex}")
@@ -1235,7 +1286,7 @@ class PaperTrader:
                 # 7. End-of-Day (EOD) Close
                 if self.close_before_eod and current_minutes >= eod_minutes:
                     logger.info(f"[PaperTrader] 🕓 EOD close for {trade['ticker']} at {now.strftime('%H:%M')}")
-                    positions_to_close.append((trade, "eod_close"))
+                    positions_to_close.append((trade, "eod_close", current_price))
                     continue
 
                 # Status log for monitoring
@@ -1252,8 +1303,13 @@ class PaperTrader:
             with self._lock:
                 _save_trade_log(self._trade_log)
 
-        for trade, reason in positions_to_close:
-            self.close_position(trade, reason=reason)
+        for item in positions_to_close:
+            if len(item) == 3:
+                trade, reason, px = item
+                self.close_position(trade, exit_price=px, reason=reason)
+            else:
+                trade, reason = item
+                self.close_position(trade, reason=reason)
 
     def monitor_loop(self):
         """Background thread: checks open positions every 30s for exit conditions."""

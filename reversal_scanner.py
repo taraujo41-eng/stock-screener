@@ -1400,6 +1400,7 @@ def find_best_option(ticker, signal_type, last_price, min_dte=None, max_dte=None
                         "strike": strike,
                         "type": "CALL" if signal_type == "bullish" else "PUT",
                         "exp": exp_dt.strftime("%b %d"),
+                        "exp_date": exp_dt.strftime("%Y-%m-%d"),
                         "dte": dte_days,
                         "mid": mid,
                         "bid": bid,

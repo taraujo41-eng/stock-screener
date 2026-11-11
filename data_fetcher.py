@@ -577,9 +577,140 @@ def _fetch_yahoo_fallback_one(ticker, days=180, interval="1d", includePrePost="f
 
 # ── Options Chain Download (Webull Unofficial) ───────────────
 
+def _fetch_yahoo_options_chain(ticker):
+    """Fallback options chain fetcher using yfinance."""
+    try:
+        import yfinance as yf
+        t = yf.Ticker(ticker)
+        if not t.options:
+            return None
+        
+        expirations = []
+        for exp_str in t.options:
+            try:
+                dt = datetime.strptime(exp_str, "%Y-%m-%d")
+                expirations.append(int(dt.timestamp()))
+            except Exception:
+                continue
+
+        if not expirations:
+            return None
+
+        underlyingPrice = None
+        try:
+            fast_info = getattr(t, "fast_info", None)
+            if fast_info and hasattr(fast_info, "last_price"):
+                underlyingPrice = float(fast_info.last_price)
+            if not underlyingPrice:
+                hist = t.history(period="1d")
+                if not hist.empty:
+                    underlyingPrice = float(hist["Close"].iloc[-1])
+        except Exception:
+            pass
+
+        print(f"[Yahoo Finance Fallback] Fetched options chain for {ticker} (got {len(expirations)} expirations)")
+        return {
+            "ticker": ticker,
+            "expirations": expirations,
+            "underlyingPrice": underlyingPrice,
+            "firstChain": None,
+            "allChains": {}
+        }
+    except Exception as e:
+        print(f"[Yahoo Options Fallback] Error fetching options chain for {ticker}: {e}")
+        return None
+
+
+def _fetch_yahoo_options_for_expiration(ticker, expiration_ts):
+    """Fetch options for a specific expiration timestamp from Yahoo Finance."""
+    try:
+        import yfinance as yf
+        t = yf.Ticker(ticker)
+        if not t.options:
+            return None
+
+        date_str = datetime.fromtimestamp(expiration_ts).strftime("%Y-%m-%d")
+        target_exp = None
+        if date_str in t.options:
+            target_exp = date_str
+        else:
+            t_dt = datetime.strptime(date_str, "%Y-%m-%d").date()
+            min_diff = 999
+            for o_exp in t.options:
+                try:
+                    o_dt = datetime.strptime(o_exp, "%Y-%m-%d").date()
+                    diff = abs((o_dt - t_dt).days)
+                    if diff < min_diff and diff <= 3:
+                        min_diff = diff
+                        target_exp = o_exp
+                except Exception:
+                    continue
+
+        if not target_exp:
+            return None
+
+        chain = t.option_chain(target_exp)
+        calls = []
+        puts = []
+
+        # Get underlying price for delta approximation if delta missing
+        und_price = None
+        try:
+            hist = t.history(period="1d")
+            if not hist.empty:
+                und_price = float(hist["Close"].iloc[-1])
+        except Exception:
+            pass
+
+        for df_side, side_name in [(chain.calls, "calls"), (chain.puts, "puts")]:
+            if df_side is None or df_side.empty:
+                continue
+            for _, item in df_side.iterrows():
+                strike = float(item.get("strike", 0))
+                bid_val = float(item.get("bid", 0)) if pd.notnull(item.get("bid")) else None
+                ask_val = float(item.get("ask", 0)) if pd.notnull(item.get("ask")) else None
+                last_p = float(item.get("lastPrice", 0)) if pd.notnull(item.get("lastPrice")) else None
+
+                if (bid_val is None or bid_val <= 0) and (ask_val is None or ask_val <= 0) and last_p:
+                    bid_val = last_p
+                    ask_val = last_p
+
+                # Estimate ATM delta if delta not in yfinance
+                est_delta = 0.50
+                if und_price and und_price > 0:
+                    moneyness = (und_price - strike) / und_price
+                    if side_name == "calls":
+                        est_delta = max(0.05, min(0.95, 0.50 + moneyness * 3.0))
+                    else:
+                        est_delta = max(0.05, min(0.95, 0.50 - moneyness * 3.0))
+
+                c_data = {
+                    "contractSymbol": item.get("contractSymbol"),
+                    "strike": strike,
+                    "tickerId": None,
+                    "bid": bid_val,
+                    "ask": ask_val,
+                    "close": last_p,
+                    "volume": int(item.get("volume", 0)) if pd.notnull(item.get("volume")) else 0,
+                    "openInterest": int(item.get("openInterest", 0)) if pd.notnull(item.get("openInterest")) else 0,
+                    "impliedVolatility": float(item.get("impliedVolatility", 0)) if pd.notnull(item.get("impliedVolatility")) else None,
+                    "delta": round(est_delta, 2)
+                }
+                if side_name == "calls":
+                    calls.append(c_data)
+                else:
+                    puts.append(c_data)
+
+        print(f"[Yahoo Finance Fallback] Fetched {len(calls)} calls & {len(puts)} puts for {ticker} at {target_exp}")
+        return {"calls": calls, "puts": puts}
+    except Exception as e:
+        print(f"[Yahoo Options Fallback] Error fetching options at exp {expiration_ts} for {ticker}: {e}")
+        return None
+
+
 def fetch_options_chain(ticker):
     """
-    Fetch options chain using Webull API (Option B — fetches real-time options data).
+    Fetch options chain using Webull API with seamless Yahoo Finance fallback.
     """
     wb_un = get_unofficial_client()
     if wb_un:
@@ -658,11 +789,12 @@ def fetch_options_chain(ticker):
         except Exception as e:
             print(f"[Webull Unofficial] Error fetching option chain for {ticker}: {e}")
             
-    return None
+    # Fallback to Yahoo Finance options chain
+    return _fetch_yahoo_options_chain(ticker)
 
 
 def fetch_options_for_expiration(ticker, expiration_ts):
-    """Fetch live options chain for a specific expiration timestamp directly from Webull."""
+    """Fetch live options chain for a specific expiration timestamp with Yahoo fallback."""
     wb_un = get_unofficial_client()
     if wb_un:
         try:
@@ -731,59 +863,136 @@ def fetch_options_for_expiration(ticker, expiration_ts):
                             elif direction == "put":
                                 puts.append(c_data)
                         break
-                return {"calls": calls, "puts": puts}
+                if calls or puts:
+                    return {"calls": calls, "puts": puts}
         except Exception as e:
             print(f"[Webull Unofficial] Error fetching options at expiration timestamp {expiration_ts}: {e}")
 
-    return None
+    # Fallback to Yahoo Finance options chain for expiration
+    return _fetch_yahoo_options_for_expiration(ticker, expiration_ts)
+
+
+def _fetch_yahoo_option_live_quote(ticker, strike, option_type, exp_date_str):
+    """Direct live option quote fetch from Yahoo Finance."""
+    try:
+        import yfinance as yf
+        t = yf.Ticker(ticker)
+        if not t.options:
+            return None
+
+        target_exp = None
+        if exp_date_str in t.options:
+            target_exp = exp_date_str
+        else:
+            t_dt = datetime.strptime(exp_date_str, "%Y-%m-%d").date()
+            min_diff = 999
+            for o_exp in t.options:
+                try:
+                    o_dt = datetime.strptime(o_exp, "%Y-%m-%d").date()
+                    diff = abs((o_dt - t_dt).days)
+                    if diff < min_diff and diff <= 3:
+                        min_diff = diff
+                        target_exp = o_exp
+                except Exception:
+                    continue
+
+        if not target_exp:
+            return None
+
+        chain = t.option_chain(target_exp)
+        df_side = chain.calls if str(option_type).lower() in ("call", "calls") else chain.puts
+        if df_side.empty:
+            return None
+
+        target_strike = float(strike)
+        matches = df_side[abs(df_side["strike"] - target_strike) < 0.05]
+        if matches.empty:
+            diffs = (df_side["strike"] - target_strike).abs()
+            closest_idx = diffs.idxmin()
+            if diffs.loc[closest_idx] <= max(1.0, target_strike * 0.02):
+                matches = df_side.loc[[closest_idx]]
+            else:
+                return None
+
+        row = matches.iloc[0]
+        bid = float(row.get("bid", 0)) if pd.notnull(row.get("bid")) else 0.0
+        ask = float(row.get("ask", 0)) if pd.notnull(row.get("ask")) else 0.0
+        last_p = float(row.get("lastPrice", 0)) if pd.notnull(row.get("lastPrice")) else 0.0
+
+        if bid <= 0 and ask <= 0:
+            bid = last_p
+            ask = last_p
+
+        mid = round((bid + ask) / 2.0, 2) if (bid > 0 and ask > 0) else last_p
+        vol = int(row.get("volume", 0)) if pd.notnull(row.get("volume")) else 0
+        oi = int(row.get("openInterest", 0)) if pd.notnull(row.get("openInterest")) else 0
+
+        return {
+            "symbol": row.get("contractSymbol"),
+            "tickerId": None,
+            "bid": bid,
+            "ask": ask,
+            "mid": mid,
+            "close": last_p,
+            "volume": vol,
+            "openInterest": oi,
+            "delta": None,
+            "source": "YahooFinance"
+        }
+    except Exception as e:
+        print(f"[Yahoo Options Fallback] Error fetching live quote for {ticker} ${strike} {option_type}: {e}")
+        return None
 
 
 def get_option_live_quote(ticker, strike, option_type, exp_date_str):
     """
-    Fetch the exact live bid, ask, mid and details for a specific option contract from Webull.
+    Fetch the exact live bid, ask, mid and details for a specific option contract.
+    Primary: Webull API. Automatic Fallback: Yahoo Finance.
     exp_date_str format: 'YYYY-MM-DD'
     """
     wb_un = get_unofficial_client()
-    if not wb_un:
-        return None
-    try:
-        import requests
-        headers = wb_un.build_req_headers()
-        tid = get_stock_ticker_id(wb_un, ticker)
-        data = {
-            'count': -1,
-            'direction': 'all',
-            'tickerId': tid,
-            'expireDate': exp_date_str,
-            'unSymbol': ticker
-        }
-        res = requests.post(wb_un._urls.options_exp_dat_new(), json=data, headers=headers, timeout=wb_un.timeout)
-        if res.status_code != 200:
-            return None
-        for entry in res.json().get('expireDateList', []):
-            if entry.get('from', {}).get('date') == exp_date_str:
-                for item in entry.get('data', []):
-                    item_strike = float(item.get('strikePrice', 0))
-                    item_dir = item.get('direction', '').lower()
-                    if abs(item_strike - float(strike)) < 0.01 and item_dir == option_type.lower():
-                        bid = float(item['bidList'][0]['price']) if item.get('bidList') and len(item['bidList']) > 0 else None
-                        ask = float(item['askList'][0]['price']) if item.get('askList') and len(item['askList']) > 0 else None
-                        close_p = float(item.get('close')) if item.get('close') else None
-                        mid = round((bid + ask) / 2.0, 2) if (bid is not None and ask is not None) else close_p
-                        return {
-                            'symbol': item.get('symbol'),
-                            'tickerId': item.get('tickerId'),
-                            'bid': bid,
-                            'ask': ask,
-                            'mid': mid,
-                            'close': close_p,
-                            'volume': int(float(item.get('volume', 0))) if item.get('volume') else 0,
-                            'openInterest': int(float(item.get('openInterest', 0))) if item.get('openInterest') else 0,
-                            'delta': float(item.get('delta', 0)) if item.get('delta') else None
-                        }
-    except Exception as e:
-        print(f"[Webull Unofficial] Error fetching live quote for {ticker} ${strike} {option_type}: {e}")
-    return None
+    if wb_un:
+        try:
+            import requests
+            headers = wb_un.build_req_headers()
+            tid = get_stock_ticker_id(wb_un, ticker)
+            data = {
+                'count': -1,
+                'direction': 'all',
+                'tickerId': tid,
+                'expireDate': exp_date_str,
+                'unSymbol': ticker
+            }
+            res = requests.post(wb_un._urls.options_exp_dat_new(), json=data, headers=headers, timeout=wb_un.timeout)
+            if res.status_code == 200:
+                for entry in res.json().get('expireDateList', []):
+                    if entry.get('from', {}).get('date') == exp_date_str:
+                        for item in entry.get('data', []):
+                            item_strike = float(item.get('strikePrice', 0))
+                            item_dir = item.get('direction', '').lower()
+                            if abs(item_strike - float(strike)) < 0.01 and item_dir == option_type.lower():
+                                bid = float(item['bidList'][0]['price']) if item.get('bidList') and len(item['bidList']) > 0 else None
+                                ask = float(item['askList'][0]['price']) if item.get('askList') and len(item['askList']) > 0 else None
+                                close_p = float(item.get('close')) if item.get('close') else None
+                                mid = round((bid + ask) / 2.0, 2) if (bid is not None and ask is not None) else close_p
+                                if (bid is not None and bid > 0) or (ask is not None and ask > 0):
+                                    return {
+                                        'symbol': item.get('symbol'),
+                                        'tickerId': item.get('tickerId'),
+                                        'bid': bid,
+                                        'ask': ask,
+                                        'mid': mid,
+                                        'close': close_p,
+                                        'volume': int(float(item.get('volume', 0))) if item.get('volume') else 0,
+                                        'openInterest': int(float(item.get('openInterest', 0))) if item.get('openInterest') else 0,
+                                        'delta': float(item.get('delta', 0)) if item.get('delta') else None,
+                                        'source': 'Webull'
+                                    }
+        except Exception as e:
+            print(f"[Webull Unofficial] Error fetching live quote for {ticker} ${strike} {option_type}: {e}")
+
+    # Fallback to Yahoo Finance live quote
+    return _fetch_yahoo_option_live_quote(ticker, strike, option_type, exp_date_str)
 
 
 # ── Batch download (sequential — for watchlists) ────────────────────
