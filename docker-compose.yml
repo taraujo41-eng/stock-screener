@@ -29,6 +29,7 @@ services:
       - LATEST_TRADE_TIME_MINS=930
       - ALLOW_DELAYED_OPTIONS_TRADING=true
       - EXECUTE_TEST_TRADE_ON_START=true
+      - TEST_TRADE_AUTO_CLOSE_SECS=60
     volumes:
       - ./conf:/app/conf
       - scan_data:/app/scan_data

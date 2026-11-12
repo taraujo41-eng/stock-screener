@@ -841,6 +841,7 @@ class PaperTrader:
                 "in_zone": in_zone,
                 "setup": setup_reason,
                 "status": "open",
+                "is_test": bool(force),
                 "exit_price": None,
                 "exit_time": None,
                 "pnl": None,
@@ -1081,18 +1082,22 @@ class PaperTrader:
 
             # Send Telegram Exit Notification
             try:
-                from indicator_bot import send_telegram_notification
+                from indicator_bot import send_telegram_notification, send_sms_notification
                 exit_icon = "🎯" if (pnl or 0) >= 0 else "🛑"
                 pnl_pct_val = ((exit_price - entry_price) / entry_price * 100) if entry_price and exit_price else 0.0
+                reason_clean = reason.replace('_', ' ').title()
+                if trade_record.get("is_test") or str(trade_record.get("setup", "")).startswith("Verification Test Trade"):
+                    reason_clean = f"⚡ {reason_clean} (Bot Auto-Exit)"
                 exit_msg = (
                     f"{exit_icon} <b>POSITION CLOSED: {trade_record['ticker']}</b>\n\n"
                     f"<b>Option:</b> {trade_record.get('type', '')} ${trade_record.get('strike', '')} ({trade_record.get('option_symbol', '')})\n"
                     f"<b>Entry:</b> ${entry_price:.2f} | <b>Exit:</b> ${exit_price:.2f}\n"
                     f"<b>P&L:</b> {pnl_str} ({pnl_pct_val:+.1f}%)\n"
                     f"<b>Type:</b> {'Partial (Scale Out)' if is_partial else 'Full Exit'}\n"
-                    f"<b>Reason:</b> {reason.replace('_', ' ').title()}"
+                    f"<b>Reason:</b> {reason_clean}"
                 )
                 send_telegram_notification(exit_msg)
+                send_sms_notification(f"{exit_icon} POSITION CLOSED: {trade_record['ticker']} | P&L: {pnl_str} ({pnl_pct_val:+.1f}%) | {reason_clean}")
             except Exception as notify_err:
                 logger.warning(f"Failed to send exit notification: {notify_err}")
 
@@ -1139,6 +1144,31 @@ class PaperTrader:
                     if pnl_pct > trade.get("peak_pnl_pct", -999.0):
                         trade["peak_pnl_pct"] = round(pnl_pct, 2)
                         trade_log_dirty = True
+
+                # ── Fast Test Trade Auto-Close Lifecycle ──
+                # Allows test trades to auto-close after 60-90s so the user verifies the full lifecycle:
+                # Entry -> Monitor -> Auto-Exit -> P&L Calculation -> Telegram Exit Alert
+                is_test_trade = trade.get("is_test") or str(trade.get("setup", "")).startswith("Verification Test Trade")
+                if is_test_trade:
+                    entry_time_str = trade.get("entry_time")
+                    if entry_time_str:
+                        try:
+                            entry_dt = datetime.fromisoformat(entry_time_str)
+                            hold_secs = (now - entry_dt).total_seconds()
+                            test_auto_close_secs = int(os.getenv("TEST_TRADE_AUTO_CLOSE_SECS", "60"))
+                            if hold_secs >= test_auto_close_secs:
+                                exit_px = current_price
+                                if not exit_px or exit_px <= 0:
+                                    # Realistic simulated exit price (+6% simulated profit on test)
+                                    exit_px = round(entry_price * 1.06, 2)
+                                logger.info(
+                                    f"[PaperTrader] ⚡ Test trade {trade['ticker']} held {hold_secs:.0f}s >= {test_auto_close_secs}s. "
+                                    f"Bot auto-closing test trade to complete verification lifecycle."
+                                )
+                                positions_to_close.append((trade, "test_lifecycle_auto_exit", exit_px))
+                                continue
+                        except Exception as e:
+                            logger.debug(f"[PaperTrader] Test trade timer error: {e}")
 
                 # ── Strategy 5-Minute Candle Exits (8 EMA Trend Exit & VWAP Stop Loss) ──
                 if getattr(self, "use_strategy_vwap_exits", False):
