@@ -140,7 +140,7 @@ class PaperTrader:
         self.trailing_stop_callback_pct = _cfg("PAPER_TRAILING_STOP_CALLBACK_PCT", "2.5", float)
         self.breakeven_stop_pct = _cfg("PAPER_BREAKEVEN_STOP_PCT", "0.0", float)
         self.max_hold_minutes = _cfg("PAPER_MAX_HOLD_MINUTES", "0", int)
-        self.earliest_trade_mins = _cfg("EARLIEST_TRADE_TIME_MINS", "580", int)
+        self.earliest_trade_mins = _cfg("EARLIEST_TRADE_TIME_MINS", "590", int)
         self.latest_trade_mins = _cfg("LATEST_TRADE_TIME_MINS", "690", int)
         self.close_before_eod = _cfg("PAPER_CLOSE_BEFORE_MARKET_CLOSE", "true", bool)
         self.allow_delayed_options = _cfg("ALLOW_DELAYED_OPTIONS_TRADING", "false", bool)

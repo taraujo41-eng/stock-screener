@@ -443,14 +443,14 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
 
 def evaluate_ticker_process(ticker, df):
     """
-    TRADING STRATEGY SPECIFICATION: 5-MINUTE PREMARKET BREAKOUT (PMB)
+    TRADING STRATEGY SPECIFICATION: 5-MINUTE PREMARKET BREAKOUT & VWAP RETEST (PMB)
     
     1. Overview:
        - Asset Class: Large-Cap / High Liquidity Equities & Directional Options (Market Cap >= $10B)
        - Execution Timeframe: 5-Minute Chart
        - Session Reference Window: 04:00 - 09:30 ET (Premarket High / Low)
-       - Active Trading Window: 09:40 - 11:30 ET (Locks out initial 10-minute whipsaw)
-       - Edge: Opening expansion momentum outside established premarket balance area.
+       - Active Trading Window: 09:50 - 11:30 ET (Waits for 9:45 candle to close, locks out opening whipsaw)
+       - Edge: Opening expansion momentum outside established premarket balance area & high-probability VWAP retests.
     
     2. Key Levels & Parameters:
        - PMH: Highest price printed between 04:00 and 09:30 ET.
@@ -461,27 +461,25 @@ def evaluate_ticker_process(ticker, df):
     
     3. Entry Rules:
        - Long Setup:
-         1. Time: 09:40 - 11:30 ET.
-         2. Trigger: 5m candle closes strictly above PMH (Close > PMH).
-         3. Confirmations:
-            - Breakout volume >= 1.5x 20-period Volume SMA.
-            - Price trading above VWAP and above 8 EMA.
-            - Broad market (SPY/QQQ) trading above session VWAP.
-         4. Execution: Enter at close of confirming 5m candle.
+         1. Time: 09:50 - 11:30 ET (Strictly after 9:45 candle closes).
+         2. Candle confirmation: 5m candle MUST be Bullish (Close > Open).
+         3. Setup A (PMH Breakout): 5m candle closes strictly above PMH (Close > PMH), RVOL >= 1.5, Close > VWAP & 8 EMA.
+         4. Setup B (VWAP Retest): Price broke PMH, holds above PMH (Close >= PMH), retests VWAP (Low near VWAP) and closes above VWAP.
+         5. Market Filter: SPY or QQQ trading above session VWAP.
        - Short Setup:
-         1. Time: 09:40 - 11:30 ET.
-         2. Trigger: 5m candle closes strictly below PML (Close < PML).
-         3. Confirmations:
-            - Breakout volume >= 1.5x 20-period Volume SMA.
-            - Price trading below VWAP and below 8 EMA.
-            - Broad market (SPY/QQQ) trading below session VWAP.
-         4. Execution: Enter at close of confirming 5m candle.
+         1. Time: 09:50 - 11:30 ET (Strictly after 9:45 candle closes).
+         2. Candle confirmation: 5m candle MUST be Bearish (Close < Open).
+         3. Setup A (PML Breakdown): 5m candle closes strictly below PML (Close < PML), RVOL >= 1.5, Close < VWAP & 8 EMA.
+         4. Setup B (VWAP Retest): Price broke PML, holds below PML (Close <= PML), retests VWAP (High near VWAP) and closes below VWAP.
+         5. Market Filter: SPY or QQQ trading below session VWAP.
     
     4. Risk Management & Exits:
        - Structural Stop (Early Invalidation): Close < PMH (Long) / Close > PML (Short).
-       - Hard Emergency Stop (Max Loss Protection):
-         * Long: low of breakout candle OR Entry - (1.0 * ATR(14)), whichever is tighter (higher).
-         * Short: high of breakout candle OR Entry + (1.0 * ATR(14)), whichever is tighter (lower).
+       - Hard Emergency Stop:
+         * Breakout Long: low of breakout candle OR Entry - (1.0 * ATR(14)), whichever is tighter (higher).
+         * VWAP Retest Long: min(retest low, VWAP) - 0.05 OR Entry - (1.0 * ATR(14)).
+         * Breakout Short: high of breakout candle OR Entry + (1.0 * ATR(14)), whichever is tighter (lower).
+         * VWAP Retest Short: max(retest high, VWAP) + 0.05 OR Entry + (1.0 * ATR(14)).
        - Profit Target (2:1 Asymmetry / 2R):
          * Long: Entry + (2.0 * R)
          * Short: Entry - (2.0 * R)
@@ -510,7 +508,7 @@ def evaluate_ticker_process(ticker, df):
         if pm_range_pct < 0.25:
             return None
 
-        # 1. Active Trading Window: 09:40 - 11:30 ET
+        # 1. Active Trading Window: 09:50 - 11:30 ET (strictly after 9:45 candle closes)
         last_dt = rth_bars.index[-1]
         ny_tz = get_ny_timezone()
         if hasattr(last_dt, "tzinfo") and last_dt.tzinfo is not None:
@@ -518,7 +516,7 @@ def evaluate_ticker_process(ticker, df):
         else:
             dt_ny = last_dt
         mins_from_midnight = dt_ny.hour * 60 + dt_ny.minute
-        earliest_mins = int(os.getenv("EARLIEST_TRADE_TIME_MINS", "580"))  # 09:40 AM ET
+        earliest_mins = int(os.getenv("EARLIEST_TRADE_TIME_MINS", "590"))  # 09:50 AM ET (after 9:45 candle)
         latest_mins = int(os.getenv("LATEST_TRADE_TIME_MINS", "690"))      # 11:30 AM ET
         if mins_from_midnight < earliest_mins or mins_from_midnight > latest_mins:
             return None
@@ -567,29 +565,81 @@ def evaluate_ticker_process(ticker, df):
 
         is_long = False
         is_short = False
+        is_vwap_retest = False
         hard_stop_px = 0.0
         target_2r_px = 0.0
         r_risk = 0.0
 
-        # Long Setup Evaluation
-        if (close_price > pm_high) and (rvol >= 1.5) and (close_price > current_vwap) and (close_price > current_ema8) and long_market_ok:
-            is_long = True
-            atr_stop = close_price - (1.0 * current_atr)
-            hard_stop_px = max(low_price, atr_stop)
-            if hard_stop_px >= close_price:
-                hard_stop_px = close_price - (0.5 * current_atr)
-            r_risk = max(0.05, close_price - hard_stop_px)
-            target_2r_px = close_price + (2.0 * r_risk)
+        # History references for VWAP retest
+        rth_high_max = float(rth_bars["High"].max())
+        rth_low_min = float(rth_bars["Low"].min())
+        prev_bar = rth_bars.iloc[-2] if len(rth_bars) >= 2 else last_bar
+        prev_low = float(prev_bar["Low"])
+        prev_high = float(prev_bar["High"])
 
-        # Short Setup Evaluation
-        elif (close_price < pm_low) and (rvol >= 1.5) and (close_price < current_vwap) and (close_price < current_ema8) and short_market_ok:
-            is_short = True
-            atr_stop = close_price + (1.0 * current_atr)
-            hard_stop_px = min(high_price, atr_stop)
-            if hard_stop_px <= close_price:
-                hard_stop_px = close_price + (0.5 * current_atr)
-            r_risk = max(0.05, hard_stop_px - close_price)
-            target_2r_px = close_price - (2.0 * r_risk)
+        # Retest checks:
+        # Long: price touched VWAP (current or previous low near VWAP) and holds at/above VWAP
+        long_retested_vwap = (low_price <= current_vwap * 1.003 or prev_low <= current_vwap * 1.003) and (close_price >= current_vwap * 0.998)
+        # Short: price touched VWAP (current or previous high near VWAP) and holds at/below VWAP
+        short_retested_vwap = (high_price >= current_vwap * 0.997 or prev_high >= current_vwap * 0.997) and (close_price <= current_vwap * 1.002)
+
+        # -------------------------------------------------------------
+        # Long Setup Evaluation (Call Options)
+        # 1. Candle MUST be Bullish (Green): Close > Open
+        # 2. Price must be holding above Premarket High (Close >= PMH)
+        # 3. Market alignment (SPY/QQQ above VWAP)
+        # 4. Either:
+        #    a) Direct PMH Breakout: Close > PMH, RVOL >= 1.5, Close > VWAP & 8 EMA
+        #    b) VWAP Retest above PMH: Broke PMH, Low retested VWAP, Close bounced >= VWAP, Close >= PMH
+        # -------------------------------------------------------------
+        if long_market_ok and (close_price > open_price):
+            is_pmh_breakout = (close_price > pm_high) and (rvol >= 1.5) and (close_price > current_vwap) and (close_price > current_ema8)
+            is_long_vwap_retest = (rth_high_max >= pm_high) and (close_price >= pm_high * 0.998) and long_retested_vwap and (close_price >= current_vwap)
+
+            if is_pmh_breakout or is_long_vwap_retest:
+                is_long = True
+                is_vwap_retest = is_long_vwap_retest
+                if is_vwap_retest:
+                    retest_sl = min(low_price, current_vwap) - 0.05
+                    atr_sl = close_price - (1.0 * current_atr)
+                    hard_stop_px = max(retest_sl, atr_sl)
+                else:
+                    atr_stop = close_price - (1.0 * current_atr)
+                    hard_stop_px = max(low_price, atr_stop)
+
+                if hard_stop_px >= close_price:
+                    hard_stop_px = close_price - (0.5 * current_atr)
+                r_risk = max(0.05, close_price - hard_stop_px)
+                target_2r_px = close_price + (2.0 * r_risk)
+
+        # -------------------------------------------------------------
+        # Short Setup Evaluation (Put Options)
+        # 1. Candle MUST be Bearish (Red): Close < Open
+        # 2. Price must be holding below Premarket Low (Close <= PML)
+        # 3. Market alignment (SPY/QQQ below VWAP)
+        # 4. Either:
+        #    a) Direct PML Breakdown: Close < PML, RVOL >= 1.5, Close < VWAP & 8 EMA
+        #    b) VWAP Retest below PML: Broke PML, High retested VWAP, Close rejected <= VWAP, Close <= PML
+        # -------------------------------------------------------------
+        elif short_market_ok and (close_price < open_price):
+            is_pml_breakdown = (close_price < pm_low) and (rvol >= 1.5) and (close_price < current_vwap) and (close_price < current_ema8)
+            is_short_vwap_retest = (rth_low_min <= pm_low) and (close_price <= pm_low * 1.002) and short_retested_vwap and (close_price <= current_vwap)
+
+            if is_pml_breakdown or is_short_vwap_retest:
+                is_short = True
+                is_vwap_retest = is_short_vwap_retest
+                if is_vwap_retest:
+                    retest_sl = max(high_price, current_vwap) + 0.05
+                    atr_sl = close_price + (1.0 * current_atr)
+                    hard_stop_px = min(retest_sl, atr_sl)
+                else:
+                    atr_stop = close_price + (1.0 * current_atr)
+                    hard_stop_px = min(high_price, atr_stop)
+
+                if hard_stop_px <= close_price:
+                    hard_stop_px = close_price + (0.5 * current_atr)
+                r_risk = max(0.05, hard_stop_px - close_price)
+                target_2r_px = close_price - (2.0 * r_risk)
 
         if not (is_long or is_short):
             return None
@@ -617,12 +667,14 @@ def evaluate_ticker_process(ticker, df):
             logger.debug(f"Option search error for {ticker}: {ex}")
 
         if not best_opt:
-            logger.info(f"[{ticker}] ⚠️ {signal_type.upper()} PMB Breakout detected @ ${close_price:.2f}, but no liquid 0-30 DTE option contract found.")
+            logger.info(f"[{ticker}] ⚠️ {signal_type.upper()} PMB {'VWAP Retest' if is_vwap_retest else 'Breakout'} detected @ ${close_price:.2f}, but no liquid 0-30 DTE option contract found.")
             return None
 
         # 7. Rigorous A+ Scoring Formula
         score = 14
-        if rvol >= 2.0:
+        if is_vwap_retest:
+            score += 3  # High-confluence VWAP Retest
+        elif rvol >= 2.0:
             score += 3
         elif rvol >= 1.5:
             score += 2
@@ -641,22 +693,30 @@ def evaluate_ticker_process(ticker, df):
 
         bar_range = high_price - low_price
         if bar_range > 0:
-            if is_long and ((close_price - low_price) / bar_range) >= 0.70:
+            if is_long and ((close_price - low_price) / bar_range) >= 0.60:
                 score += 2
-            elif is_short and ((high_price - close_price) / bar_range) >= 0.70:
+            elif is_short and ((high_price - close_price) / bar_range) >= 0.60:
                 score += 2
 
         grade = "A+" if score >= 19 else "A"
 
         if is_long:
-            setup_reason = f"5m PMB Long | Closed Above PMH (${pm_high:.2f}) | RVOL {rvol:.1f}x | Above VWAP (${current_vwap:.2f}) + 8EMA (${current_ema8:.2f}) | 2R Target: ${target_2r_px:.2f} 🚀"
-            confluence_tag = f"PMH Breakout (${pm_high:.2f}) + RVOL {rvol:.1f}x"
+            if is_vwap_retest:
+                setup_reason = f"5m PMB + VWAP Retest Long | Tested VWAP (${current_vwap:.2f}) Above PMH (${pm_high:.2f}) | Bullish Candle | 2R Target: ${target_2r_px:.2f} 🚀"
+                confluence_tag = f"PMH (${pm_high:.2f}) + VWAP Retest Bounce"
+            else:
+                setup_reason = f"5m PMB Long Breakout | Bullish Candle Above PMH (${pm_high:.2f}) | RVOL {rvol:.1f}x | Above VWAP (${current_vwap:.2f}) + 8EMA (${current_ema8:.2f}) | 2R Target: ${target_2r_px:.2f} 🚀"
+                confluence_tag = f"PMH Breakout (${pm_high:.2f}) + RVOL {rvol:.1f}x"
         else:
-            setup_reason = f"5m PMB Short | Closed Below PML (${pm_low:.2f}) | RVOL {rvol:.1f}x | Below VWAP (${current_vwap:.2f}) + 8EMA (${current_ema8:.2f}) | 2R Target: ${target_2r_px:.2f} 🩸"
-            confluence_tag = f"PML Breakdown (${pm_low:.2f}) + RVOL {rvol:.1f}x"
+            if is_vwap_retest:
+                setup_reason = f"5m PMB + VWAP Retest Short | Tested VWAP (${current_vwap:.2f}) Below PML (${pm_low:.2f}) | Bearish Candle | 2R Target: ${target_2r_px:.2f} 🩸"
+                confluence_tag = f"PML (${pm_low:.2f}) + VWAP Retest Rejection"
+            else:
+                setup_reason = f"5m PMB Short Breakdown | Bearish Candle Below PML (${pm_low:.2f}) | RVOL {rvol:.1f}x | Below VWAP (${current_vwap:.2f}) + 8EMA (${current_ema8:.2f}) | 2R Target: ${target_2r_px:.2f} 🩸"
+                confluence_tag = f"PML Breakdown (${pm_low:.2f}) + RVOL {rvol:.1f}x"
 
         logger.info(
-            f"[{ticker}] 🎯 {grade} PMB {action} SIGNAL! Price: ${close_price:.2f} | "
+            f"[{ticker}] 🎯 {grade} PMB {'VWAP Retest' if is_vwap_retest else 'Breakout'} {action} SIGNAL! Price: ${close_price:.2f} | "
             f"PMH: ${pm_high:.2f} | PML: ${pm_low:.2f} | VWAP: ${current_vwap:.2f} | 8EMA: ${current_ema8:.2f} | "
             f"RVOL: {rvol:.1f}x | Hard SL: ${hard_stop_px:.2f} | 2R Target: ${target_2r_px:.2f}"
         )
@@ -683,17 +743,16 @@ def evaluate_ticker_process(ticker, df):
             'time': rth_bars.index[-1],
             'zone_summary': f"PMH ${pm_high:.2f} / PML ${pm_low:.2f}",
             'in_zone': True,
-            'zone_details': {'pm_high': pm_high, 'pm_low': pm_low, 'hod': hod, 'lod': lod, 'stop_loss': hard_stop_px, 'target_1': target_2r_px, 'r_risk': r_risk},
+            'zone_details': {'pm_high': pm_high, 'pm_low': pm_low, 'hod': hod, 'lod': lod, 'stop_loss': hard_stop_px, 'target_1': target_2r_px, 'r_risk': r_risk, 'is_vwap_retest': is_vwap_retest},
             'sentiment_align': "Market Aligned 🎯" if (is_long and long_market_ok) or (is_short and short_market_ok) else "Neutral",
             'tech_trend': "Bullish Breakout" if is_long else "Bearish Breakdown",
             'market_sentiment': "Bullish" if long_market_ok else ("Bearish" if short_market_ok else "Neutral"),
             'market_sentiment_summary': market_align.get("summary", ""),
             'suggested_option': best_opt,
-            'strategy': "PMB",
+            'strategy': "PMB + VWAP Retest" if is_vwap_retest else "PMB",
         }
     except Exception as e:
         logger.error(f"Error evaluating ticker {ticker}: {e}\n{tb.format_exc()}")
-        return None
         return None
 
 def precalculate_daily_bands(tickers):
@@ -798,11 +857,11 @@ def bot_loop():
                 time.sleep(300)
                 continue
 
-            # Opening bell check (trading begins at 9:40 AM ET after the 10m whipsaw filter)
+            # Opening bell check (trading begins at 9:50 AM ET after the 9:45 candle closes)
             ny_tz = get_ny_timezone()
             now = datetime.now(ny_tz)
             current_mins = now.hour * 60 + now.minute
-            earliest_trade_mins = int(os.getenv("EARLIEST_TRADE_TIME_MINS", "580"))  # 9:40 AM ET
+            earliest_trade_mins = int(os.getenv("EARLIEST_TRADE_TIME_MINS", "590"))  # 9:50 AM ET (after 9:45 candle)
             if current_mins < earliest_trade_mins:
                 open_hr = earliest_trade_mins // 60
                 open_mn = earliest_trade_mins % 60
@@ -810,7 +869,7 @@ def bot_loop():
                 disp_hr = open_hr if open_hr <= 12 else open_hr - 12
                 if disp_hr == 0:
                     disp_hr = 12
-                logger.info(f"Outside trading window (PMB trading begins at {disp_hr}:{open_mn:02d} {suffix} ET). Bot sleeping for 30s...")
+                logger.info(f"Outside trading window (PMB trading begins at {disp_hr}:{open_mn:02d} {suffix} ET after 9:45 candle). Bot sleeping for 30s...")
                 time.sleep(30)
                 continue
 
@@ -833,7 +892,7 @@ def bot_loop():
                 disp_hr = close_hr if close_hr <= 12 else close_hr - 12
                 if disp_hr == 0:
                     disp_hr = 12
-                logger.info(f"Trading window closed for new entries (PMB trades permitted 9:40 AM - {disp_hr}:{close_mn:02d} {suffix} ET). Monitoring open positions only. Sleeping 60s...")
+                logger.info(f"Trading window closed for new entries (PMB trades permitted 9:50 AM - {disp_hr}:{close_mn:02d} {suffix} ET). Monitoring open positions only. Sleeping 60s...")
                 time.sleep(60)
                 continue
 
