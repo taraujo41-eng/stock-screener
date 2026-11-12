@@ -24,6 +24,8 @@ services:
       - .env
     environment:
       - SCAN_DATA_DIR=/app/scan_data
+      - EARLIEST_TRADE_TIME_MINS=580
+      - LATEST_TRADE_TIME_MINS=930
     volumes:
       - ./conf:/app/conf
       - scan_data:/app/scan_data

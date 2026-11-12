@@ -24,3 +24,5 @@ jobs:
             docker compose up -d --build
             echo "✅ Verifying running containers:"
             docker ps
+            echo "📋 Latest Bot Logs:"
+            docker logs --tail 30 stock_scanner_bot
