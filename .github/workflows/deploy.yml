@@ -25,4 +25,5 @@ jobs:
             echo "✅ Verifying running containers:"
             docker ps
             echo "📋 Latest Bot Logs:"
-            docker logs --tail 30 stock_scanner_bot
+            sleep 8
+            docker logs --tail 50 stock_scanner_bot
