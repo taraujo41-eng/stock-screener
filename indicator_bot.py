@@ -96,6 +96,21 @@ def get_market_index_alignment(max_age_seconds=45):
         spy_df = fetch_one("SPY", days=2, interval="5m", includePrePost="true")
         qqq_df = fetch_one("QQQ", days=2, interval="5m", includePrePost="true")
 
+        # Resilient fallback to yfinance if Webull data is unavailable or empty
+        if spy_df is None or len(spy_df) < 2:
+            try:
+                import yfinance as yf
+                spy_df = yf.Ticker("SPY").history(period="2d", interval="5m", prepost=True)
+            except Exception:
+                pass
+
+        if qqq_df is None or len(qqq_df) < 2:
+            try:
+                import yfinance as yf
+                qqq_df = yf.Ticker("QQQ").history(period="2d", interval="5m", prepost=True)
+            except Exception:
+                pass
+
         def _check_vwap(df):
             if df is None or len(df) < 2:
                 return None, 0.0, 0.0
@@ -114,8 +129,12 @@ def get_market_index_alignment(max_age_seconds=45):
         spy_above, spy_c, spy_vwap = _check_vwap(spy_df)
         qqq_above, qqq_c, qqq_vwap = _check_vwap(qqq_df)
 
-        long_ok = (spy_above is True) or (qqq_above is True)
-        short_ok = (spy_above is False) or (qqq_above is False)
+        if spy_above is None and qqq_above is None:
+            long_ok = True
+            short_ok = True
+        else:
+            long_ok = (spy_above is True) or (qqq_above is True)
+            short_ok = (spy_above is False) or (qqq_above is False)
 
         summary_parts = []
         if spy_above is not None:
@@ -573,15 +592,15 @@ def evaluate_ticker_process(ticker, df):
         # History references for VWAP retest
         rth_high_max = float(rth_bars["High"].max())
         rth_low_min = float(rth_bars["Low"].min())
-        prev_bar = rth_bars.iloc[-2] if len(rth_bars) >= 2 else last_bar
-        prev_low = float(prev_bar["Low"])
-        prev_high = float(prev_bar["High"])
+        recent_bars = rth_bars.iloc[-3:] if len(rth_bars) >= 3 else rth_bars
+        recent_low_min = float(recent_bars["Low"].min())
+        recent_high_max = float(recent_bars["High"].max())
 
         # Retest checks:
-        # Long: price touched VWAP (current or previous low near VWAP) and holds at/above VWAP
-        long_retested_vwap = (low_price <= current_vwap * 1.003 or prev_low <= current_vwap * 1.003) and (close_price >= current_vwap * 0.998)
-        # Short: price touched VWAP (current or previous high near VWAP) and holds at/below VWAP
-        short_retested_vwap = (high_price >= current_vwap * 0.997 or prev_high >= current_vwap * 0.997) and (close_price <= current_vwap * 1.002)
+        # Long: price touched VWAP within the last 3 bars (Low <= VWAP * 1.003) and current bar holds/bounces at or above VWAP
+        long_retested_vwap = (recent_low_min <= current_vwap * 1.003) and (close_price >= current_vwap * 0.998)
+        # Short: price touched VWAP within the last 3 bars (High >= VWAP * 0.997) and current bar holds/rejects at or below VWAP
+        short_retested_vwap = (recent_high_max >= current_vwap * 0.997) and (close_price <= current_vwap * 1.002)
 
         # -------------------------------------------------------------
         # Long Setup Evaluation (Call Options)
