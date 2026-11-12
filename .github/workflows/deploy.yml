@@ -22,6 +22,10 @@ jobs:
             cd /home/ubuntu/stock-scanner
             git pull origin main
             docker compose up -d --build
+            echo "🔄 Resetting trading bot account to $3,000 and clearing history..."
+            docker exec stock_scanner_web python -c "from paper_trader import get_paper_trader; pt = get_paper_trader(); pt.reset_trade_log()"
+            curl -s -X POST http://127.0.0.1:5000/api/paper/reset || true
+            docker compose restart indicator_bot
             echo "✅ Verifying running containers:"
             docker ps
             echo "📋 Latest Bot Logs:"
