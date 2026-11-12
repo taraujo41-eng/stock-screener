@@ -143,6 +143,28 @@ class PaperTrader:
         self.earliest_trade_mins = _cfg("EARLIEST_TRADE_TIME_MINS", "580", int)
         self.latest_trade_mins = _cfg("LATEST_TRADE_TIME_MINS", "690", int)
         self.close_before_eod = _cfg("PAPER_CLOSE_BEFORE_MARKET_CLOSE", "true", bool)
+        self.allow_delayed_options = _cfg("ALLOW_DELAYED_OPTIONS_TRADING", "false", bool)
+        self._last_delayed_alert_date = None
+
+    def _notify_delayed_data_once(self, ticker_or_ctx, detail):
+        """Send at most one Telegram warning per trading day when live real-time options data is unavailable."""
+        today_ny = datetime.now(get_ny_timezone()).date()
+        if self._last_delayed_alert_date == today_ny:
+            return
+        self._last_delayed_alert_date = today_ny
+        try:
+            from indicator_bot import send_telegram_notification
+            msg = (
+                "⚠️ <b>LIVE OPTIONS DATA NOT ACTIVE</b>\n\n"
+                f"<b>Context:</b> {ticker_or_ctx}\n"
+                f"<b>Status:</b> {detail}\n\n"
+                "New automated option trades are <b>paused</b> so the bot does not trade on 15-minute delayed quotes.\n\n"
+                "<b>Action required:</b> Open the <b>Webull OpenAPI Developer Portal</b> and enable/subscribe to "
+                "<code>US_OPTION</code> (OPRA Real-Time) under your App Key. The bot re-checks every 5 minutes automatically."
+            )
+            send_telegram_notification(msg)
+        except Exception as e:
+            logger.debug(f"[PaperTrader] Failed to send delayed-data Telegram warning: {e}")
 
     # ── Authentication ──────────────────────────────────────────────
 
@@ -659,11 +681,26 @@ class PaperTrader:
                 logger.warning(f"[PaperTrader] No suitable option contract found for {ticker} ({signal_type})")
                 return None
 
+            is_realtime = bool(best.get("is_realtime", False))
+            quote_source = best.get("quote_source", "Unknown")
+            rt_tag = "LIVE" if is_realtime else "DELAYED"
+
             logger.info(
-                f"[PaperTrader] Found Live Webull Option: {best['symbol']} | {best['type']} | "
+                f"[PaperTrader] Found {rt_tag} Option ({quote_source}): {best['symbol']} | {best['type']} | "
                 f"Strike ${best['strike']} | Exp {best['exp']} | "
                 f"Bid ${best['bid']:.2f} | Ask ${best['ask']:.2f} | Mid ${best['mid']:.2f} | Spread {best.get('spread_pct', 0)}%"
             )
+
+            if not is_realtime and not self.allow_delayed_options:
+                logger.warning(
+                    f"[PaperTrader] ⛔ Blocked entry on {ticker}: options data source '{quote_source}' is NOT real-time. "
+                    f"Enable US_OPTION in Webull OpenAPI Portal (or set ALLOW_DELAYED_OPTIONS_TRADING=true)."
+                )
+                self._notify_delayed_data_once(
+                    f"Blocked entry on {ticker} ({best['symbol']})",
+                    f"Quote source was {quote_source} (15-min delayed)"
+                )
+                return None
 
             # 2. Risk check
             ask_price = best.get("ask", best["mid"])
@@ -778,6 +815,8 @@ class PaperTrader:
                 "pnl": None,
                 "exit_reason": None,
                 "mode": "WEBULL_PAPER_API" if getattr(self, "_is_real_paper_account", False) else "LOCAL_SIMULATION",
+                "quote_source": quote_source,
+                "is_realtime": is_realtime,
                 "order_response": result,
             }
 
@@ -827,7 +866,8 @@ class PaperTrader:
                     ticker=ticker,
                     strike=strike,
                     option_type=opt_type,
-                    exp_date_str=exp_date_str
+                    exp_date_str=exp_date_str,
+                    option_symbol=trade_record.get("option_symbol")
                 )
                 if live_q:
                     return live_q

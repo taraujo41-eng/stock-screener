@@ -398,7 +398,8 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             if result:
                 trade_executed = True
                 mode_str = result.get('mode', 'Simulation')
-                logger.info(f"📈 {grade_str} {zone_title} Paper trade placed for {ticker}: {result.get('option_symbol', '')} @ ${result.get('entry_price', 0):.2f} ({mode_str})")
+                feed_str = f"{'LIVE' if result.get('is_realtime') else 'DELAYED'} ({result.get('quote_source', 'Unknown')})"
+                logger.info(f"📈 {grade_str} {zone_title} Paper trade placed for {ticker}: {result.get('option_symbol', '')} @ ${result.get('entry_price', 0):.2f} ({mode_str} | {feed_str})")
                 
                 # Send trade notification via same alert method
                 trade_msg = (
@@ -409,6 +410,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                     f"Stock: ${last_price:.2f} | PMH: {pmh_str} | PML: {pml_str}\n"
                     f"Hard SL: {sl_str} | 2R Target: {tp1_str}\n"
                     f"Early Invalidation: {struct_invalidation}\n"
+                    f"Data Feed: {feed_str}\n"
                     f"Mode: {mode_str}"
                 )
                 if alert_method in ("SMS", "BOTH"):
@@ -426,6 +428,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                         f"<b>Profit Target (2R):</b> {_esc(tp1_str)} (2:1 Asymmetry)\n"
                         f"<b>Early Invalidation:</b> 🏃 {_esc(struct_invalidation)}\n"
                         f"<b>Setup:</b> {_esc(reason or action)}\n"
+                        f"<b>Data Feed:</b> {_esc(feed_str)}\n"
                         f"<b>Mode:</b> {_esc(mode_str)}"
                     )
                     send_telegram_notification(tg_trade)
@@ -996,6 +999,18 @@ def start_bot_thread():
             if pt.login():
                 pt.start_monitor_thread()
                 logger.info("Paper trader initialized and position monitor started.")
+                try:
+                    from data_fetcher import test_connection
+                    diag = test_connection("SPY")
+                    if diag.get("realtime_options_ready"):
+                        logger.info("✅ Real-time Webull options market data verified active on startup.")
+                    else:
+                        opt_err = diag.get("webull_openapi_options_error") or diag.get("webull_unofficial_options_mode")
+                        logger.warning(f"⚠️ Real-time options data NOT active on startup ({opt_err}).")
+                        if not pt.allow_delayed_options:
+                            pt._notify_delayed_data_once("Bot startup check (SPY)", str(opt_err))
+                except Exception as diag_err:
+                    logger.warning(f"Startup market-data check failed: {diag_err}")
             else:
                 logger.warning("Paper trader login failed — auto-trading disabled.")
         else:

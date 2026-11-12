@@ -13,6 +13,7 @@ Now integrates:
 """
 
 import sys
+import threading
 import requests
 import pandas as pd
 import numpy as np
@@ -30,11 +31,62 @@ load_dotenv()
 
 warnings.filterwarnings("ignore")
 
-# ── Webull Circuit Breaker (skip after N consecutive failures) ───────────
+# ── Shared Timezone, Parsing & Entitlement Helpers ────────────────────
+
+def _get_ny_tz():
+    """Return America/New_York tzinfo using zoneinfo with pytz fallback."""
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo("America/New_York")
+    except Exception:
+        import pytz
+        return pytz.timezone("America/New_York")
+
+
+def _ny_date_to_ts(date_str):
+    """Convert 'YYYY-MM-DD' to noon America/New_York Unix timestamp so UTC/EST map to the same calendar date."""
+    dt = datetime.strptime(str(date_str).strip(), "%Y-%m-%d").replace(hour=12, minute=0, second=0, microsecond=0, tzinfo=_get_ny_tz())
+    return int(dt.timestamp())
+
+
+def _ts_to_ny_date_str(ts):
+    """Convert Unix timestamp to 'YYYY-MM-DD' in America/New_York timezone."""
+    return datetime.fromtimestamp(float(ts), tz=_get_ny_tz()).strftime("%Y-%m-%d")
+
+
+def _safe_float(val, default=None):
+    """Safely parse numeric strings/numbers while treating None and '' as missing."""
+    if val is None or val == "":
+        return default
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(val, default=0):
+    """Safely parse integer strings/numbers."""
+    f = _safe_float(val, None)
+    return int(f) if f is not None else default
+
+
+def _chunks(seq, size=20):
+    """Yield successive slices of length `size` from `seq`."""
+    for idx in range(0, len(seq), size):
+        yield seq[idx:idx + size]
+
+
+# ── Webull Circuit Breaker & OpenAPI Subscription Cache ───────────────
 
 _webull_unofficial_failures = 0
 _webull_openapi_failures = 0
 _WEBULL_MAX_FAILURES = 30  # High resilience threshold to ensure Webull is always the primary data provider
+
+_OPENAPI_NOT_SUBSCRIBED_TTL = int(os.getenv("OPENAPI_RETRY_SECONDS", "300"))
+_openapi_sub_lock = threading.Lock()
+_openapi_sub_blocked_until = {}  # scope -> epoch seconds
+_openapi_sub_errors = {}         # scope -> last error message
+
 
 def reset_webull_circuit_breaker():
     """Reset the circuit breaker — call at the start of each new scan."""
@@ -43,164 +95,293 @@ def reset_webull_circuit_breaker():
     _webull_openapi_failures = 0
 
 
-# ── Webull Unofficial Client Loader (Option B — inherits personal subscriptions) ──
+def _is_openapi_scope_blocked(scope):
+    """Return True if an OpenAPI market-data scope recently returned MARKET_DATA_NOT_SUBSCRIBED."""
+    with _openapi_sub_lock:
+        until = _openapi_sub_blocked_until.get(scope, 0.0)
+        if until > time.time():
+            return True
+        if scope in _openapi_sub_blocked_until:
+            _openapi_sub_blocked_until.pop(scope, None)
+        return False
 
+
+def _mark_openapi_scope_blocked(scope, reason):
+    """Cache an OpenAPI MARKET_DATA_NOT_SUBSCRIBED error for _OPENAPI_NOT_SUBSCRIBED_TTL seconds."""
+    now = time.time()
+    with _openapi_sub_lock:
+        already_blocked = _openapi_sub_blocked_until.get(scope, 0.0) > now
+        _openapi_sub_blocked_until[scope] = now + _OPENAPI_NOT_SUBSCRIBED_TTL
+        _openapi_sub_errors[scope] = str(reason)
+    if not already_blocked:
+        print(
+            f"[Webull OpenAPI] ⚠️ Scope '{scope}' not subscribed ({reason}) — "
+            f"retrying automatically in {_OPENAPI_NOT_SUBSCRIBED_TTL}s."
+        )
+
+
+def _clear_openapi_scope_block(scope=None):
+    """Clear negative subscription cache for `scope`, or all scopes when `scope` is None."""
+    with _openapi_sub_lock:
+        if scope is None:
+            _openapi_sub_blocked_until.clear()
+            _openapi_sub_errors.clear()
+        else:
+            _openapi_sub_blocked_until.pop(scope, None)
+            _openapi_sub_errors.pop(scope, None)
+
+
+def _extract_openapi_error(obj):
+    """Inspect a Webull SDK ServerException or HTTP Response -> (is_not_subscribed, status_code, message)."""
+    if hasattr(obj, "http_status") or hasattr(obj, "error_code"):
+        status = getattr(obj, "http_status", None)
+        code = str(getattr(obj, "error_code", "") or "")
+        msg = str(getattr(obj, "error_msg", "") or str(obj))
+        combined = f"{code}: {msg}" if code else msg
+    elif hasattr(obj, "status_code"):
+        status = getattr(obj, "status_code", None)
+        text = str(getattr(obj, "text", "") or "")
+        combined = f"HTTP {status}: {text[:300]}"
+    else:
+        status = None
+        combined = str(obj)
+
+    upper = combined.upper()
+    is_not_sub = (
+        "MARKET_DATA_NOT_SUBSCRIBED" in upper
+        or (status == 403 and ("SUBSCRIBE" in upper or "INSUFFICIENT PERMISSION" in upper))
+    )
+    return is_not_sub, status, combined
+
+
+# ── Webull Unofficial Client Loader (Option B — Legacy / Fallback) ────
+
+_unofficial_lock = threading.Lock()
 _unofficial_client = None
 _unofficial_initialized = False
+_unofficial_authenticated = False
+
+
+def is_unofficial_authenticated():
+    """Return True only when the unofficial Webull session passed wb.is_logged_in()."""
+    return _unofficial_authenticated
+
 
 def get_unofficial_client():
-    """Retrieve and initialize the unofficial Webull client using account credentials."""
-    global _unofficial_client, _unofficial_initialized
-    if _unofficial_client is not None:
+    """Retrieve and initialize the unofficial Webull client cleanly and verify login state."""
+    global _unofficial_client, _unofficial_initialized, _unofficial_authenticated
+    if _unofficial_initialized:
         return _unofficial_client
 
-    token_path = os.path.dirname(__file__)
-    credentials_file = os.path.join(token_path, "webull_credentials.json")
-    env_access_token = (os.getenv("WEBULL_ACCESS_TOKEN") or "").strip() or None
-    env_did = (os.getenv("WEBULL_DID") or "").strip() or None
-    
-    try:
-        try:
-            from webull.webull import webull
-        except ImportError:
-            from webull import webull
-        wb = webull()
+    with _unofficial_lock:
+        if _unofficial_initialized:
+            return _unofficial_client
+
         token_path = os.path.dirname(__file__)
         credentials_file = os.path.join(token_path, "webull_credentials.json")
-        
-        # 1. Try to load cached token from environment variables or default token
-        if env_access_token:
+        env_access_token = (os.getenv("WEBULL_ACCESS_TOKEN") or "").strip() or None
+        env_did = (os.getenv("WEBULL_DID") or "").strip() or None
+
+        try:
             try:
-                wb._access_token = env_access_token
-                wb._did = env_did
-                wb._refresh_token = (os.getenv("WEBULL_REFRESH_TOKEN") or "dummy_refresh_token_bypassed").strip()
-                
+                from webull.webull import webull
+            except ImportError:
+                from webull import webull
+            wb = webull()
+
+            # Sync did.bin to WEBULL_DID when provided so internal SDK calls match the env DID
+            if env_did:
+                did_bin_file = os.path.join(token_path, "did.bin")
                 try:
-                    did_bin_file = os.path.join(token_path, "did.bin")
-                    if not os.path.exists(did_bin_file):
+                    existing_did = None
+                    if os.path.exists(did_bin_file):
+                        with open(did_bin_file, "rb") as f:
+                            existing_did = pickle.load(f)
+                    if existing_did != env_did:
                         with open(did_bin_file, "wb") as f:
                             pickle.dump(env_did, f)
                 except Exception:
                     pass
-                
-                wb._account_id = None
-                print("[Webull Unofficial] Successfully authenticated using Environment Variables.")
-                _unofficial_client = wb
-                _unofficial_initialized = True
-                return _unofficial_client
-            except Exception as e:
-                print(f"[Webull Unofficial] Environment token load failed: {e}")
-        
-        # 2. Try to load cached token from local credentials file
-        if os.path.exists(credentials_file):
-            try:
-                with open(credentials_file, "rb") as f:
-                    token_data = pickle.load(f)
-                
-                wb._access_token = token_data.get("accessToken")
-                wb._refresh_token = token_data.get("refreshToken")
-                wb._token_expire = token_data.get("tokenExpireTime")
-                wb._uuid = token_data.get("uuid")
-                
-                did_bin_file = os.path.join(token_path, "did.bin")
-                if os.path.exists(did_bin_file):
+
+            # 1. Try to load token from environment variables
+            if env_access_token:
+                try:
+                    wb._access_token = env_access_token
+                    if env_did:
+                        wb._did = env_did
+                    wb._refresh_token = (os.getenv("WEBULL_REFRESH_TOKEN") or "dummy_refresh_token_bypassed").strip()
+                    wb._account_id = None
+
                     try:
-                        with open(did_bin_file, "rb") as f:
-                            wb._did = pickle.load(f)
+                        _unofficial_authenticated = bool(wb.is_logged_in())
                     except Exception:
-                        pass
-                
-                if wb._access_token:
-                    wb._account_id = token_data.get("account_id")
-                    print("[Webull Unofficial] Successfully loaded cached credentials.")
+                        _unofficial_authenticated = False
+
+                    if _unofficial_authenticated:
+                        print("[Webull Unofficial] Authenticated session verified via Environment Variables.")
+                    else:
+                        print("[Webull Unofficial] ⚠️ Env token expired/invalid (is_logged_in=False) — options fallback quotes are 15-min DELAYED guest data.")
                     _unofficial_client = wb
                     _unofficial_initialized = True
                     return _unofficial_client
-            except Exception as e:
-                print(f"[Webull Unofficial] Cached token load failed: {e}")
-        
-        # 3. Perform Login if cached token fails/does not exist
-        email = os.getenv("WEBULL_EMAIL")
-        password = os.getenv("WEBULL_PASSWORD")
-        trade_pin = os.getenv("WEBULL_TRADE_PIN")
-        import sys
-        is_interactive = sys.stdin and sys.stdin.isatty()
-        if not is_interactive or not (email and password):
-            print("[Webull Unofficial] Skipping fresh login in non-interactive environment.")
+                except Exception as e:
+                    print(f"[Webull Unofficial] Environment token load failed: {e}")
+
+            # 2. Try to load cached token from local credentials file
+            if os.path.exists(credentials_file):
+                try:
+                    with open(credentials_file, "rb") as f:
+                        token_data = pickle.load(f)
+
+                    wb._access_token = token_data.get("accessToken")
+                    wb._refresh_token = token_data.get("refreshToken")
+                    wb._token_expire = token_data.get("tokenExpireTime")
+                    wb._uuid = token_data.get("uuid")
+
+                    did_bin_file = os.path.join(token_path, "did.bin")
+                    if os.path.exists(did_bin_file):
+                        try:
+                            with open(did_bin_file, "rb") as f:
+                                wb._did = pickle.load(f)
+                        except Exception:
+                            pass
+
+                    if wb._access_token:
+                        wb._account_id = token_data.get("account_id")
+                        try:
+                            _unofficial_authenticated = bool(wb.is_logged_in())
+                        except Exception:
+                            _unofficial_authenticated = False
+
+                        if _unofficial_authenticated:
+                            print("[Webull Unofficial] Verified cached session from webull_credentials.json.")
+                        else:
+                            print("[Webull Unofficial] ⚠️ Cached credentials expired — running as delayed guest session.")
+                        _unofficial_client = wb
+                        _unofficial_initialized = True
+                        return _unofficial_client
+                except Exception as e:
+                    print(f"[Webull Unofficial] Cached token load failed: {e}")
+
+            # 3. Perform Login if cached token fails/does not exist
+            email = os.getenv("WEBULL_EMAIL")
+            password = os.getenv("WEBULL_PASSWORD")
+            is_interactive = sys.stdin and sys.stdin.isatty()
+            if not is_interactive or not (email and password):
+                print("[Webull Unofficial] Skipping fresh login in non-interactive environment.")
+                _unofficial_client = None
+                _unofficial_authenticated = False
+                _unofficial_initialized = True
+                return None
+
+            print(f"[Webull Unofficial] Logging in as '{email}'...")
+            res = wb.login(email, password, save_token=True, token_path=token_path)
+            if "accessToken" in res:
+                print("[Webull Unofficial] Login successful!")
+                _unofficial_client = wb
+                _unofficial_authenticated = True
+            else:
+                print(f"[Webull Unofficial] Login failed: {res}")
+                _unofficial_client = None
+                _unofficial_authenticated = False
+        except Exception as e:
+            print(f"[Webull Unofficial] Initialization error: {e}")
             _unofficial_client = None
-            _unofficial_initialized = True
-            return None
+            _unofficial_authenticated = False
 
-        print(f"[Webull Unofficial] Logging in as '{email}'...")
-        res = wb.login(email, password, save_token=True, token_path=token_path)
-        if 'accessToken' in res:
-            print("[Webull Unofficial] Login successful!")
-            _unofficial_client = wb
-        else:
-            print(f"[Webull Unofficial] Login failed: {res}")
-            _unofficial_client = None
-    except Exception as e:
-        print(f"[Webull Unofficial] Initialization error: {e}")
-        _unofficial_client = None
-
-    _unofficial_initialized = True
-    return _unofficial_client
+        _unofficial_initialized = True
+        return _unofficial_client
 
 
-# ── Webull OpenAPI Lazy Client Loader (Option A) ─────────────────────────
+# ── Webull OpenAPI Lazy Client Loader (Option A — Primary) ────────────
 
+_openapi_lock = threading.Lock()
 _webull_client = None
 _webull_initialized = False
 
+
 def get_webull_client():
-    """Retrieve and initialize the Webull OpenAPI client dynamically."""
+    """Retrieve and initialize the Webull OpenAPI DataClient dynamically."""
     global _webull_client, _webull_initialized
     if _webull_initialized:
         return _webull_client
 
-    # Bypass only if credentials are not configured
-    app_key = os.getenv("WEBULL_APP_KEY")
-    app_secret = os.getenv("WEBULL_APP_SECRET")
-    has_credentials = bool(app_key and app_key != "your_app_key_here" and app_secret and app_secret != "your_app_secret_here")
+    with _openapi_lock:
+        if _webull_initialized:
+            return _webull_client
 
-    import sys
-    if not has_credentials:
-        if not (sys.stdin and sys.stdin.isatty()):
-            print("[Webull OpenAPI] Skipping Webull OpenAPI client in non-interactive environment (no credentials configured).")
+        app_key = (os.getenv("WEBULL_APP_KEY") or "").strip()
+        app_secret = (os.getenv("WEBULL_APP_SECRET") or "").strip()
+        has_credentials = bool(
+            app_key and app_key != "your_app_key_here"
+            and app_secret and app_secret != "your_app_secret_here"
+        )
+
+        if not has_credentials:
+            print("[Webull OpenAPI] Credentials not configured — OpenAPI client disabled.")
             _webull_client = None
             _webull_initialized = True
             return None
-        
-    app_key = os.getenv("WEBULL_APP_KEY")
 
-    app_secret = os.getenv("WEBULL_APP_SECRET")
-    region_str = os.getenv("WEBULL_REGION", "us").lower()
-    
-    if app_key and app_key != "your_app_key_here" and app_secret and app_secret != "your_app_secret_here":
+        region_str = (os.getenv("WEBULL_REGION") or "us").strip().lower()
         try:
+            # Ensure unofficial `webull` package does not break OpenAPI SDK's `__version__` check
+            import webull
+            if not hasattr(webull, "__version__"):
+                webull.__version__ = "3.0.4"
+
             from webull.core.client import ApiClient
             from webull.core.common.region import Region
             from webull.data.data_client import DataClient
-            
-            # Map region string to Region enum
+
             region = Region.US.value
             for r in Region:
                 if r.value == region_str:
                     region = r.value
                     break
-            
-            print(f"[Webull OpenAPI] Initializing client for region '{region}'...")
+
+            print(f"[Webull OpenAPI] Initializing DataClient for region '{region}'...")
             api_client = ApiClient(app_key, app_secret, region)
             _webull_client = DataClient(api_client)
-            print("[Webull OpenAPI] Client initialized successfully.")
+            print("[Webull OpenAPI] DataClient initialized successfully.")
         except Exception as e:
-            print(f"[Webull OpenAPI] Error initializing client: {e}")
+            print(f"[Webull OpenAPI] Error initializing DataClient: {e}")
             _webull_client = None
-    else:
-        _webull_client = None
-        
-    _webull_initialized = True
-    return _webull_client
+
+        _webull_initialized = True
+        return _webull_client
+
+
+def get_market_data_status():
+    """Summarize live market data readiness across Webull OpenAPI and Unofficial fallback."""
+    app_key = (os.getenv("WEBULL_APP_KEY") or "").strip()
+    app_secret = (os.getenv("WEBULL_APP_SECRET") or "").strip()
+    openapi_configured = bool(
+        app_key and app_key != "your_app_key_here"
+        and app_secret and app_secret != "your_app_secret_here"
+    )
+    wb_api = get_webull_client() if openapi_configured else None
+    wb_un = get_unofficial_client()
+
+    with _openapi_sub_lock:
+        now = time.time()
+        stock_blocked = _openapi_sub_blocked_until.get("US_STOCK", 0.0) > now
+        option_blocked = _openapi_sub_blocked_until.get("US_OPTION", 0.0) > now
+        stock_err = _openapi_sub_errors.get("US_STOCK")
+        option_err = _openapi_sub_errors.get("US_OPTION")
+
+    openapi_opt_ready = bool(wb_api is not None and not option_blocked)
+    return {
+        "openapi_configured": openapi_configured,
+        "openapi_client_ready": wb_api is not None,
+        "openapi_stock_blocked": stock_blocked,
+        "openapi_stock_error": stock_err,
+        "openapi_option_blocked": option_blocked,
+        "openapi_option_error": option_err,
+        "unofficial_configured": wb_un is not None,
+        "unofficial_authenticated": _unofficial_authenticated,
+        "realtime_options_ready": openapi_opt_ready or _unofficial_authenticated,
+    }
 
 
 
@@ -210,15 +391,17 @@ def get_webull_client():
 
 def _fetch_webull_openapi_one(ticker, days=180, interval="1d", includePrePost="false"):
     """Query historical candlestick data from Webull OpenAPI."""
+    if _is_openapi_scope_blocked("US_STOCK"):
+        return None
+
     client = get_webull_client()
     if not client:
         return None
-        
+
     try:
         from webull.data.common.category import Category
         from webull.data.common.timespan import Timespan
-        
-        # Mapped intervals
+
         interval_map = {
             "1d": Timespan.D,
             "5m": Timespan.M5,
@@ -227,35 +410,32 @@ def _fetch_webull_openapi_one(ticker, days=180, interval="1d", includePrePost="f
             "60m": Timespan.M60
         }
         timespan = interval_map.get(interval, Timespan.D)
-        
-        # K-line count
-        if interval == "1d":
-            count = str(min(1200, days))
-        else:
-            count = "600"
-            
-        print(f"[Webull OpenAPI] Fetching {ticker} historical bars ({interval}, count={count})...")
-        
+        count = str(min(1200, days)) if interval == "1d" else "600"
+
         resp = client.market_data.get_history_bar(
             symbol=ticker,
             category=Category.US_STOCK,
             timespan=timespan,
             count=count
         )
-        
+
         if resp.status_code != 200:
+            is_not_sub, _, err_msg = _extract_openapi_error(resp)
+            if is_not_sub:
+                _mark_openapi_scope_blocked("US_STOCK", err_msg)
             return None
-            
+
+        _clear_openapi_scope_block("US_STOCK")
         res_data = resp.json()
         bars_list = []
         if isinstance(res_data, list):
             bars_list = res_data
         elif isinstance(res_data, dict):
             bars_list = res_data.get("data", res_data.get("bars", res_data.get("results", [])))
-            
+
         if not bars_list:
             return None
-            
+
         records = []
         for bar in bars_list:
             t = bar.get("time") or bar.get("t")
@@ -264,32 +444,36 @@ def _fetch_webull_openapi_one(ticker, days=180, interval="1d", includePrePost="f
             l = bar.get("low") or bar.get("l")
             c = bar.get("close") or bar.get("c")
             v = bar.get("volume") or bar.get("v")
-            
+
             if t is not None and c is not None:
                 records.append({
                     "Date": t,
-                    "Open": float(o) if o is not None else None,
-                    "High": float(h) if h is not None else None,
-                    "Low": float(l) if l is not None else None,
+                    "Open": _safe_float(o),
+                    "High": _safe_float(h),
+                    "Low": _safe_float(l),
                     "Close": float(c),
-                    "Volume": int(float(v)) if v is not None else 0
+                    "Volume": _safe_int(v, 0)
                 })
-                
+
         if not records:
             return None
-            
+
         df = pd.DataFrame(records)
-        df["Date"] = pd.to_datetime(df["Date"], utc=True)
+        if pd.api.types.is_numeric_dtype(df["Date"]):
+            sample_t = float(df["Date"].iloc[0])
+            unit = "ms" if sample_t > 1e11 else "s"
+            df["Date"] = pd.to_datetime(df["Date"], unit=unit, utc=True)
+        else:
+            df["Date"] = pd.to_datetime(df["Date"], utc=True)
         df = df.set_index("Date")
         df.index = df.index.tz_convert("America/New_York")
         df = df.sort_index()
-        
         df["Volume"] = df["Volume"].fillna(0).astype(np.int64)
-        
+
         pre_close = float(df["Close"].iloc[-2]) if len(df) > 1 else float(df["Close"].iloc[0])
         high_52w = float(df["High"].max())
         low_52w = float(df["Low"].min())
-        
+
         try:
             snapshot_resp = client.market_data.get_snapshot([ticker], Category.US_STOCK)
             if snapshot_resp.status_code == 200:
@@ -297,19 +481,24 @@ def _fetch_webull_openapi_one(ticker, days=180, interval="1d", includePrePost="f
                 snap_list = snap_data if isinstance(snap_data, list) else snap_data.get("data", [])
                 if snap_list:
                     snap = snap_list[0]
-                    pre_close = float(snap.get("pre_close", pre_close))
+                    pre_close = _safe_float(snap.get("pre_close"), pre_close)
         except Exception:
             pass
-            
+
         df.attrs["fiftyTwoWeekHigh"] = high_52w
         df.attrs["fiftyTwoWeekLow"] = low_52w
         df.attrs["previousClose"] = pre_close
-        
-        print(f"[Webull OpenAPI] Successfully fetched {ticker} ({len(df)} rows)")
+        df.attrs["quoteSource"] = "Webull_OpenAPI"
+        df.attrs["isRealtime"] = True
+
         return df
-        
+
     except Exception as e:
-        print(f"[Webull OpenAPI] Error fetching {ticker}: {e}")
+        is_not_sub, _, err_msg = _extract_openapi_error(e)
+        if is_not_sub:
+            _mark_openapi_scope_blocked("US_STOCK", err_msg)
+        else:
+            print(f"[Webull OpenAPI] Error fetching {ticker}: {e}")
         return None
 
 
@@ -471,19 +660,36 @@ def _fetch_webull_unofficial_one(ticker, days=180, interval="1d", includePrePost
 def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webull=False):
     """
     Fetch OHLCV data for one ticker using Webull API.
-    1. Try Unofficial Webull account credentials (Option B — inherits user's real-time subscriptions).
-    2. Try Official Webull OpenAPI developer credentials (Option A).
+    1. Try Official Webull OpenAPI developer credentials (Option A — persistent real-time tokens).
+    2. Fall back to Unofficial Webull SDK (Option B) if OpenAPI US_STOCK is unsubscribed or unavailable.
     """
     global _webull_unofficial_failures, _webull_openapi_failures
 
-    # 1. Try Option B (Unofficial Session — Inherits all real-time quotes subscriptions)
+    # 1. Try Option A (Official OpenAPI)
+    if not skip_webull and not _is_openapi_scope_blocked("US_STOCK") and _webull_openapi_failures < _WEBULL_MAX_FAILURES:
+        try:
+            wb_openapi = get_webull_client()
+            if wb_openapi:
+                df = _fetch_webull_openapi_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
+                if df is not None:
+                    _webull_openapi_failures = 0
+                    return df
+                elif not _is_openapi_scope_blocked("US_STOCK"):
+                    _webull_openapi_failures += 1
+        except Exception as e:
+            print(f"[Webull OpenAPI] Error fetching {ticker}: {e}")
+            _webull_openapi_failures += 1
+            if _webull_openapi_failures >= _WEBULL_MAX_FAILURES:
+                print(f"[Circuit Breaker] Webull OpenAPI failed {_WEBULL_MAX_FAILURES}x consecutively — skipping for rest of scan")
+
+    # 2. Fallback to Option B (Unofficial Session — works for stock OHLCV bars even on guest/delayed sessions)
     if not skip_webull and _webull_unofficial_failures < _WEBULL_MAX_FAILURES:
         try:
             wb_un = get_unofficial_client()
             if wb_un:
                 df = _fetch_webull_unofficial_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
                 if df is not None:
-                    _webull_unofficial_failures = 0  # Reset on success
+                    _webull_unofficial_failures = 0
                     return df
                 else:
                     _webull_unofficial_failures += 1
@@ -492,23 +698,6 @@ def fetch_one(ticker, days=180, interval="1d", includePrePost="false", skip_webu
             _webull_unofficial_failures += 1
             if _webull_unofficial_failures >= _WEBULL_MAX_FAILURES:
                 print(f"[Circuit Breaker] Webull Unofficial failed {_WEBULL_MAX_FAILURES}x consecutively — skipping for rest of scan")
-            
-    # 2. Try Option A (Official OpenAPI — Requires separate developer subscription toggles)
-    if not skip_webull and _webull_openapi_failures < _WEBULL_MAX_FAILURES:
-        try:
-            wb_openapi = get_webull_client()
-            if wb_openapi:
-                df = _fetch_webull_openapi_one(ticker, days=days, interval=interval, includePrePost=includePrePost)
-                if df is not None:
-                    _webull_openapi_failures = 0  # Reset on success
-                    return df
-                else:
-                    _webull_openapi_failures += 1
-        except Exception as e:
-            print(f"[Webull OpenAPI] Error fetching {ticker}: {e}")
-            _webull_openapi_failures += 1
-            if _webull_openapi_failures >= _WEBULL_MAX_FAILURES:
-                print(f"[Circuit Breaker] Webull OpenAPI failed {_WEBULL_MAX_FAILURES}x consecutively — skipping for rest of scan")
 
     # 3. Fallback to Yahoo Finance public chart API (disabled by default per instructions)
     disable_yahoo = os.getenv("DISABLE_YAHOO", "true").lower() in ("true", "1", "yes")
@@ -588,8 +777,7 @@ def _fetch_yahoo_options_chain(ticker):
         expirations = []
         for exp_str in t.options:
             try:
-                dt = datetime.strptime(exp_str, "%Y-%m-%d")
-                expirations.append(int(dt.timestamp()))
+                expirations.append(_ny_date_to_ts(exp_str))
             except Exception:
                 continue
 
@@ -629,7 +817,7 @@ def _fetch_yahoo_options_for_expiration(ticker, expiration_ts):
         if not t.options:
             return None
 
-        date_str = datetime.fromtimestamp(expiration_ts).strftime("%Y-%m-%d")
+        date_str = _ts_to_ny_date_str(expiration_ts)
         target_exp = None
         if date_str in t.options:
             target_exp = date_str
@@ -694,7 +882,9 @@ def _fetch_yahoo_options_for_expiration(ticker, expiration_ts):
                     "volume": int(item.get("volume", 0)) if pd.notnull(item.get("volume")) else 0,
                     "openInterest": int(item.get("openInterest", 0)) if pd.notnull(item.get("openInterest")) else 0,
                     "impliedVolatility": float(item.get("impliedVolatility", 0)) if pd.notnull(item.get("impliedVolatility")) else None,
-                    "delta": round(est_delta, 2)
+                    "delta": round(est_delta, 2),
+                    "quote_source": "YahooFinance",
+                    "is_realtime": False,
                 }
                 if side_name == "calls":
                     calls.append(c_data)
@@ -702,106 +892,461 @@ def _fetch_yahoo_options_for_expiration(ticker, expiration_ts):
                     puts.append(c_data)
 
         print(f"[Yahoo Finance Fallback] Fetched {len(calls)} calls & {len(puts)} puts for {ticker} at {target_exp}")
-        return {"calls": calls, "puts": puts}
+        return {"calls": calls, "puts": puts, "source": "YahooFinance", "is_realtime": False}
     except Exception as e:
         print(f"[Yahoo Options Fallback] Error fetching options at exp {expiration_ts} for {ticker}: {e}")
         return None
 
 
-def fetch_options_chain(ticker):
-    """
-    Fetch options chain using Webull API with seamless Yahoo Finance fallback.
-    """
+def _unofficial_source_meta():
+    """Return (source_label, is_realtime) for unofficial Webull options endpoints."""
+    is_rt = is_unofficial_authenticated()
+    return ("Webull_Authenticated" if is_rt else "Webull_Delayed_Guest"), is_rt
+
+
+def _extract_bid_ask_from_unofficial(item, price_key):
+    """Extract top-of-book bid or ask price from an unofficial Webull option item."""
+    list_key = "bidList" if price_key == "bid" else "askList"
+    book = item.get(list_key)
+    if isinstance(book, list) and book:
+        return _safe_float(book[0].get("price"))
+    return _safe_float(item.get(price_key))
+
+
+def _parse_unofficial_option_item(item, src_label, is_rt):
+    """Normalize an unofficial Webull option JSON item to internal contract schema."""
+    return {
+        "contractSymbol": item.get("symbol"),
+        "strike": _safe_float(item.get("strikePrice"), 0.0),
+        "tickerId": item.get("tickerId"),
+        "bid": _extract_bid_ask_from_unofficial(item, "bid"),
+        "ask": _extract_bid_ask_from_unofficial(item, "ask"),
+        "close": _safe_float(item.get("close")),
+        "volume": _safe_int(item.get("volume"), 0),
+        "openInterest": _safe_int(item.get("openInterest"), 0),
+        "impliedVolatility": _safe_float(item.get("impVol")),
+        "delta": _safe_float(item.get("delta")),
+        "quote_source": src_label,
+        "is_realtime": is_rt,
+    }
+
+
+def _openapi_get_spot_price(client, ticker):
+    """Resolve current underlying price via OpenAPI stock snapshot (if subscribed) or unofficial quote."""
+    if client and not _is_openapi_scope_blocked("US_STOCK"):
+        try:
+            from webull.data.common.category import Category
+            resp = client.market_data.get_snapshot([ticker], Category.US_STOCK)
+            if resp.status_code == 200:
+                _clear_openapi_scope_block("US_STOCK")
+                snap_data = resp.json()
+                snap_list = snap_data if isinstance(snap_data, list) else snap_data.get("data", [])
+                if snap_list:
+                    price = _safe_float(snap_list[0].get("price") or snap_list[0].get("close"))
+                    if price and price > 0:
+                        return price
+            else:
+                is_not_sub, _, err_msg = _extract_openapi_error(resp)
+                if is_not_sub:
+                    _mark_openapi_scope_blocked("US_STOCK", err_msg)
+        except Exception as e:
+            is_not_sub, _, err_msg = _extract_openapi_error(e)
+            if is_not_sub:
+                _mark_openapi_scope_blocked("US_STOCK", err_msg)
+
     wb_un = get_unofficial_client()
     if wb_un:
         try:
-            import requests
-            print(f"[Webull Unofficial] Fetching options chain for {ticker}...")
-            
+            q = wb_un.get_quote(stock=ticker)
+            if isinstance(q, dict):
+                return _safe_float(q.get("close") or q.get("pPrice") or q.get("preClose"))
+        except Exception:
+            pass
+    return None
+
+
+def _openapi_list_contracts(client, ticker, start_date, end_date, option_type=None,
+                            strike_gte=None, strike_lte=None, max_pages=5):
+    """Fetch standard option contracts from Webull OpenAPI with pagination."""
+    contracts = []
+    pagination_key = None
+    for _ in range(max_pages):
+        resp = client.instrument.list_option_contracts(
+            category="US_OPTION",
+            underlying_symbols=ticker,
+            status="LISTING",
+            start_date=start_date,
+            end_date=end_date,
+            option_type=option_type,
+            strike_price_gte=strike_gte,
+            strike_price_lte=strike_lte,
+            pagination_key=pagination_key,
+        )
+        if resp.status_code != 200:
+            break
+        payload = resp.json() or {}
+        batch = payload.get("data", [])
+        if not batch:
+            break
+        contracts.extend(batch)
+        pagination_key = payload.get("pagination_key")
+        if not pagination_key:
+            break
+
+    standard = [
+        c for c in contracts
+        if (not c.get("def_type") or c.get("def_type") == "STANDARD")
+        and _safe_float(c.get("multiplier"), 100.0) == 100.0
+    ]
+    return standard if standard else contracts
+
+
+def _openapi_get_option_snapshots(client, symbols):
+    """Batch-query OpenAPI US_OPTION snapshots (up to 20 symbols per request)."""
+    if not symbols or _is_openapi_scope_blocked("US_OPTION"):
+        return None
+
+    snapshots = {}
+    for batch in _chunks(list(dict.fromkeys(symbols)), 20):
+        try:
+            resp = client.option_market_data.get_option_snapshot(batch, category="US_OPTION")
+            if resp.status_code != 200:
+                is_not_sub, _, err_msg = _extract_openapi_error(resp)
+                if is_not_sub:
+                    _mark_openapi_scope_blocked("US_OPTION", err_msg)
+                return None
+            _clear_openapi_scope_block("US_OPTION")
+            raw = resp.json()
+            items = raw if isinstance(raw, list) else raw.get("data", [])
+            for snap in items:
+                sym = snap.get("symbol")
+                if sym:
+                    snapshots[sym] = snap
+        except Exception as e:
+            is_not_sub, _, err_msg = _extract_openapi_error(e)
+            if is_not_sub:
+                _mark_openapi_scope_blocked("US_OPTION", err_msg)
+            else:
+                print(f"[Webull OpenAPI] Option snapshot batch error: {e}")
+            return None
+    return snapshots
+
+
+def _parse_openapi_snapshot_prices(snap):
+    """Extract normalized bid, ask, last/close, mid, volume, oi, delta, iv from an OpenAPI option snapshot."""
+    bid = _safe_float(snap.get("bid") if "bid" in snap else snap.get("bid_price"))
+    ask = _safe_float(snap.get("ask") if "ask" in snap else snap.get("ask_price"))
+    last_p = _safe_float(snap.get("price") if "price" in snap else snap.get("last_price"))
+    close_p = last_p if last_p is not None else _safe_float(snap.get("pre_close"))
+    iv_val = _safe_float(snap.get("implied_volatility") if "implied_volatility" in snap else snap.get("imp_vol"))
+    if bid is not None and bid > 0 and ask is not None and ask > 0:
+        mid = round((bid + ask) / 2.0, 2)
+    else:
+        mid = close_p
+    return {
+        "bid": bid,
+        "ask": ask,
+        "close": close_p,
+        "mid": mid,
+        "volume": _safe_int(snap.get("volume"), 0),
+        "openInterest": _safe_int(snap.get("open_interest"), 0),
+        "impliedVolatility": iv_val,
+        "delta": _safe_float(snap.get("delta")),
+        "quoteTime": snap.get("quote_time"),
+    }
+
+
+def _select_contracts_near_spot(contracts, spot_price, max_per_side=60):
+    """Balance and cap option contracts closest to spot_price so snapshot batching stays fast."""
+    if not spot_price or spot_price <= 0 or len(contracts) <= max_per_side * 2:
+        return contracts
+    calls = [c for c in contracts if str(c.get("option_type", "")).upper() == "CALL"]
+    puts = [c for c in contracts if str(c.get("option_type", "")).upper() == "PUT"]
+    calls.sort(key=lambda c: abs(_safe_float(c.get("strike_price"), 0.0) - spot_price))
+    puts.sort(key=lambda c: abs(_safe_float(c.get("strike_price"), 0.0) - spot_price))
+    return calls[:max_per_side] + puts[:max_per_side]
+
+
+def _fetch_openapi_options_for_expiration(ticker, exp_date_str, spot_price=None):
+    """Fetch live Webull OpenAPI option chain (contracts + snapshots) for one expiration date."""
+    if _is_openapi_scope_blocked("US_OPTION"):
+        return None
+    client = get_webull_client()
+    if not client:
+        return None
+
+    try:
+        if spot_price is None:
+            spot_price = _openapi_get_spot_price(client, ticker)
+
+        s_min = str(round(spot_price * 0.75, 2)) if (spot_price and spot_price > 0) else None
+        s_max = str(round(spot_price * 1.25, 2)) if (spot_price and spot_price > 0) else None
+
+        contracts = _openapi_list_contracts(
+            client, ticker, start_date=exp_date_str, end_date=exp_date_str,
+            strike_gte=s_min, strike_lte=s_max, max_pages=3
+        )
+        if not contracts and (s_min or s_max):
+            contracts = _openapi_list_contracts(
+                client, ticker, start_date=exp_date_str, end_date=exp_date_str, max_pages=3
+            )
+        if not contracts:
+            return None
+
+        selected = _select_contracts_near_spot(contracts, spot_price, max_per_side=60)
+        symbols = [c["symbol"] for c in selected if c.get("symbol")]
+        snapshots = _openapi_get_option_snapshots(client, symbols)
+        if snapshots is None:
+            return None
+
+        calls, puts = [], []
+        for c in selected:
+            snap = snapshots.get(c.get("symbol"))
+            if not snap:
+                continue
+            parsed = _parse_openapi_snapshot_prices(snap)
+            entry = {
+                "contractSymbol": c.get("symbol") or snap.get("symbol"),
+                "strike": _safe_float(c.get("strike_price"), 0.0),
+                "tickerId": str(c.get("instrument_id") or snap.get("instrument_id") or ""),
+                **parsed,
+                "quote_source": "Webull_OpenAPI",
+                "is_realtime": True,
+            }
+            opt_type = str(c.get("option_type", "")).upper()
+            if opt_type == "CALL":
+                calls.append(entry)
+            elif opt_type == "PUT":
+                puts.append(entry)
+
+        if calls or puts:
+            return {
+                "calls": calls,
+                "puts": puts,
+                "source": "Webull_OpenAPI",
+                "is_realtime": True,
+            }
+        return None
+    except Exception as e:
+        is_not_sub, _, err_msg = _extract_openapi_error(e)
+        if is_not_sub:
+            _mark_openapi_scope_blocked("US_OPTION", err_msg)
+        else:
+            print(f"[Webull OpenAPI] Error fetching options for {ticker} at {exp_date_str}: {e}")
+        return None
+
+
+def _fetch_openapi_options_chain(ticker):
+    """Fetch option expirations + front chain from Webull OpenAPI."""
+    if _is_openapi_scope_blocked("US_OPTION"):
+        return None
+    client = get_webull_client()
+    if not client:
+        return None
+
+    try:
+        spot_price = _openapi_get_spot_price(client, ticker)
+        today_ny = datetime.now(_get_ny_tz()).date()
+        start_str = today_ny.strftime("%Y-%m-%d")
+        end_str = (today_ny + timedelta(days=65)).strftime("%Y-%m-%d")
+
+        s_min = str(round(spot_price * 0.85, 2)) if (spot_price and spot_price > 0) else None
+        s_max = str(round(spot_price * 1.15, 2)) if (spot_price and spot_price > 0) else None
+
+        contracts = _openapi_list_contracts(
+            client, ticker, start_date=start_str, end_date=end_str,
+            strike_gte=s_min, strike_lte=s_max, max_pages=3
+        )
+        if not contracts and (s_min or s_max):
+            contracts = _openapi_list_contracts(
+                client, ticker, start_date=start_str, end_date=end_str, max_pages=2
+            )
+        if not contracts:
+            return None
+
+        exp_date_strs = sorted({c.get("expiration_date") for c in contracts if c.get("expiration_date")})
+        if not exp_date_strs:
+            return None
+
+        expirations = [_ny_date_to_ts(d) for d in exp_date_strs]
+
+        # Probe front expiration snapshot (verifies live US_OPTION entitlement and provides firstChain)
+        first_chain = _fetch_openapi_options_for_expiration(ticker, exp_date_strs[0], spot_price=spot_price)
+        if first_chain is None:
+            return None
+
+        print(f"[Webull OpenAPI] Option chain loaded for {ticker} ({len(expirations)} expirations, live=True)")
+        return {
+            "ticker": ticker,
+            "expirations": expirations,
+            "underlyingPrice": spot_price,
+            "firstChain": first_chain,
+            "allChains": {expirations[0]: first_chain},
+            "source": "Webull_OpenAPI",
+            "is_realtime": True,
+        }
+    except Exception as e:
+        is_not_sub, _, err_msg = _extract_openapi_error(e)
+        if is_not_sub:
+            _mark_openapi_scope_blocked("US_OPTION", err_msg)
+        else:
+            print(f"[Webull OpenAPI] Error fetching options chain for {ticker}: {e}")
+        return None
+
+
+def _fetch_openapi_option_live_quote(ticker, strike, option_type, exp_date_str, option_symbol=None):
+    """Fetch single-contract live OPRA quote from Webull OpenAPI."""
+    if _is_openapi_scope_blocked("US_OPTION"):
+        return None
+    client = get_webull_client()
+    if not client:
+        return None
+
+    try:
+        contract = None
+        clean_sym = (option_symbol or "").strip()
+        is_occ_sym = bool(clean_sym and not clean_sym.startswith("SIM_") and len(clean_sym) >= 12)
+
+        snapshots = None
+        if is_occ_sym:
+            snapshots = _openapi_get_option_snapshots(client, [clean_sym])
+            if snapshots is None:
+                return None
+
+        if not snapshots or clean_sym not in snapshots:
+            target_strike = float(strike)
+            contracts = _openapi_list_contracts(
+                client,
+                ticker,
+                start_date=exp_date_str,
+                end_date=exp_date_str,
+                option_type=str(option_type).upper(),
+                strike_gte=str(round(target_strike - 0.05, 2)),
+                strike_lte=str(round(target_strike + 0.05, 2)),
+                max_pages=1,
+            )
+            if not contracts:
+                return None
+            contracts.sort(key=lambda c: abs(_safe_float(c.get("strike_price"), 0.0) - target_strike))
+            contract = contracts[0]
+            clean_sym = contract.get("symbol")
+            if not clean_sym:
+                return None
+            snapshots = _openapi_get_option_snapshots(client, [clean_sym])
+            if not snapshots or clean_sym not in snapshots:
+                return None
+
+        snap = snapshots[clean_sym]
+        parsed = _parse_openapi_snapshot_prices(snap)
+        bid, ask, mid = parsed["bid"], parsed["ask"], parsed["mid"]
+
+        if (bid is not None and bid > 0) or (ask is not None and ask > 0) or (mid is not None and mid > 0):
+            return {
+                "symbol": clean_sym,
+                "tickerId": str((contract or {}).get("instrument_id") or snap.get("instrument_id") or ""),
+                **parsed,
+                "source": "Webull_OpenAPI",
+                "is_realtime": True,
+            }
+        return None
+    except Exception as e:
+        is_not_sub, _, err_msg = _extract_openapi_error(e)
+        if is_not_sub:
+            _mark_openapi_scope_blocked("US_OPTION", err_msg)
+        else:
+            print(f"[Webull OpenAPI] Error fetching live quote for {ticker} ${strike} {option_type}: {e}")
+        return None
+
+
+def fetch_options_chain(ticker):
+    """
+    Fetch options chain prioritizing Webull OpenAPI (real-time US_OPTION),
+    then Webull Unofficial (authenticated real-time or delayed guest), then Yahoo Finance.
+    """
+    openapi_chain = _fetch_openapi_options_chain(ticker)
+    if openapi_chain:
+        return openapi_chain
+
+    wb_un = get_unofficial_client()
+    if wb_un:
+        try:
+            src_label, is_rt = _unofficial_source_meta()
+            print(f"[Webull Unofficial] Fetching options chain for {ticker} ({src_label})...")
+
             headers = wb_un.build_req_headers()
             data = {'count': -1, 'direction': 'all', 'tickerId': get_stock_ticker_id(wb_un, ticker)}
             res = requests.post(wb_un._urls.options_exp_dat_new(), json=data, headers=headers, timeout=wb_un.timeout)
-            
+
             if res.status_code == 200:
                 res_json = res.json()
                 expirations = []
                 all_chains = {}
                 first_chain_data = None
-                
+
                 for entry in res_json.get('expireDateList', []):
                     date_str = str(entry['from']['date'])
                     try:
-                        ts = int(datetime.strptime(date_str, "%Y-%m-%d").timestamp())
+                        ts = _ny_date_to_ts(date_str)
                         expirations.append(ts)
                     except Exception:
                         continue
-                        
-                    t_data = entry.get('data', [])
-                    calls = []
-                    puts = []
-                    for item in t_data:
-                        strike = float(item.get("strikePrice", 0))
+
+                    calls, puts = [], []
+                    for item in entry.get('data', []):
                         direction = item.get("direction")
-                        
-                        bid_val = None
-                        if item.get("bidList") and isinstance(item["bidList"], list) and len(item["bidList"]) > 0:
-                            bid_val = float(item["bidList"][0].get("price", 0))
-                            
-                        ask_val = None
-                        if item.get("askList") and isinstance(item["askList"], list) and len(item["askList"]) > 0:
-                            ask_val = float(item["askList"][0].get("price", 0))
-                            
-                        contract_data = {
-                            "contractSymbol": item.get("symbol"),
-                            "strike": strike,
-                            "bid": bid_val,
-                            "ask": ask_val,
-                            "volume": int(float(item.get("volume", 0))) if item.get("volume") else None,
-                            "openInterest": int(float(item.get("openInterest", 0))) if item.get("openInterest") else None,
-                            "impliedVolatility": float(item.get("impVol", 0)) if item.get("impVol") else None
-                        }
+                        contract_data = _parse_unofficial_option_item(item, src_label, is_rt)
                         if direction == "call":
                             calls.append(contract_data)
                         elif direction == "put":
                             puts.append(contract_data)
-                            
-                    chain = {"calls": calls, "puts": puts}
+
+                    chain = {"calls": calls, "puts": puts, "source": src_label, "is_realtime": is_rt}
                     all_chains[ts] = chain
                     if not first_chain_data:
                         first_chain_data = chain
-                        
+
                 if expirations:
                     underlyingPrice = None
                     try:
                         quote = wb_un.get_quote(stock=ticker)
-                        underlyingPrice = float(quote.get("close")) if quote.get("close") else None
+                        underlyingPrice = _safe_float(quote.get("close"))
                     except Exception:
                         pass
-                        
-                    print(f"[Webull Unofficial] Option chain parsed successfully for {ticker} (got {len(expirations)} expirations)")
+
+                    print(f"[Webull Unofficial] Option chain parsed for {ticker} ({len(expirations)} expirations, source={src_label})")
                     return {
                         "ticker": ticker,
                         "expirations": expirations,
                         "underlyingPrice": underlyingPrice,
                         "firstChain": first_chain_data,
-                        "allChains": all_chains
+                        "allChains": all_chains,
+                        "source": src_label,
+                        "is_realtime": is_rt,
                     }
         except Exception as e:
             print(f"[Webull Unofficial] Error fetching option chain for {ticker}: {e}")
-            
-    # Fallback to Yahoo Finance options chain
-    return _fetch_yahoo_options_chain(ticker)
+
+    yf_chain = _fetch_yahoo_options_chain(ticker)
+    if yf_chain:
+        yf_chain["source"] = "YahooFinance"
+        yf_chain["is_realtime"] = False
+    return yf_chain
 
 
-def fetch_options_for_expiration(ticker, expiration_ts):
-    """Fetch live options chain for a specific expiration timestamp with Yahoo fallback."""
+def fetch_options_for_expiration(ticker, expiration_ts, spot_price=None):
+    """Fetch options chain for a specific expiration timestamp (OpenAPI primary -> Unofficial -> Yahoo)."""
+    date_str = _ts_to_ny_date_str(expiration_ts)
+
+    openapi_exp = _fetch_openapi_options_for_expiration(ticker, date_str, spot_price=spot_price)
+    if openapi_exp:
+        return openapi_exp
+
     wb_un = get_unofficial_client()
     if wb_un:
         try:
-            import requests
-            date_str = datetime.fromtimestamp(expiration_ts).strftime("%Y-%m-%d")
-            print(f"[Webull Unofficial] Fetching live options chain for {ticker} at {date_str}...")
-            
+            src_label, is_rt = _unofficial_source_meta()
+            print(f"[Webull Unofficial] Fetching options chain for {ticker} at {date_str} ({src_label})...")
+
             headers = wb_un.build_req_headers()
             tid = get_stock_ticker_id(wb_un, ticker)
             data = {
@@ -814,57 +1359,19 @@ def fetch_options_for_expiration(ticker, expiration_ts):
             res = requests.post(wb_un._urls.options_exp_dat_new(), json=data, headers=headers, timeout=wb_un.timeout)
             if res.status_code == 200:
                 res_json = res.json()
-                calls = []
-                puts = []
+                calls, puts = [], []
                 for entry in res_json.get('expireDateList', []):
                     if entry.get('from', {}).get('date') == date_str:
                         for item in entry.get('data', []):
-                            strike = float(item.get('strikePrice', 0))
                             direction = item.get('direction')
-                            
-                            bid_val = None
-                            if item.get('bidList') and isinstance(item['bidList'], list) and len(item['bidList']) > 0:
-                                try:
-                                    bid_val = float(item['bidList'][0].get('price', 0))
-                                except (ValueError, TypeError):
-                                    pass
-                            elif item.get('bid'):
-                                try:
-                                    bid_val = float(item['bid'])
-                                except (ValueError, TypeError):
-                                    pass
-
-                            ask_val = None
-                            if item.get('askList') and isinstance(item['askList'], list) and len(item['askList']) > 0:
-                                try:
-                                    ask_val = float(item['askList'][0].get('price', 0))
-                                except (ValueError, TypeError):
-                                    pass
-                            elif item.get('ask'):
-                                try:
-                                    ask_val = float(item['ask'])
-                                except (ValueError, TypeError):
-                                    pass
-                                    
-                            c_data = {
-                                "contractSymbol": item.get("symbol"),
-                                "strike": strike,
-                                "tickerId": item.get("tickerId"),
-                                "bid": bid_val,
-                                "ask": ask_val,
-                                "close": float(item["close"]) if item.get("close") else None,
-                                "volume": int(float(item.get("volume", 0))) if item.get("volume") else 0,
-                                "openInterest": int(float(item.get("openInterest", 0))) if item.get("openInterest") else 0,
-                                "impliedVolatility": float(item.get("impVol", 0)) if item.get("impVol") else None,
-                                "delta": float(item.get("delta", 0)) if item.get("delta") else None
-                            }
+                            c_data = _parse_unofficial_option_item(item, src_label, is_rt)
                             if direction == "call":
                                 calls.append(c_data)
                             elif direction == "put":
                                 puts.append(c_data)
                         break
                 if calls or puts:
-                    return {"calls": calls, "puts": puts}
+                    return {"calls": calls, "puts": puts, "source": src_label, "is_realtime": is_rt}
         except Exception as e:
             print(f"[Webull Unofficial] Error fetching options at expiration timestamp {expiration_ts}: {e}")
 
@@ -937,23 +1444,30 @@ def _fetch_yahoo_option_live_quote(ticker, strike, option_type, exp_date_str):
             "volume": vol,
             "openInterest": oi,
             "delta": None,
-            "source": "YahooFinance"
+            "source": "YahooFinance",
+            "is_realtime": False,
         }
     except Exception as e:
         print(f"[Yahoo Options Fallback] Error fetching live quote for {ticker} ${strike} {option_type}: {e}")
         return None
 
 
-def get_option_live_quote(ticker, strike, option_type, exp_date_str):
+def get_option_live_quote(ticker, strike, option_type, exp_date_str, option_symbol=None):
     """
-    Fetch the exact live bid, ask, mid and details for a specific option contract.
-    Primary: Webull API. Automatic Fallback: Yahoo Finance.
+    Fetch the exact bid, ask, mid and details for a specific option contract.
+    Priority: Webull OpenAPI (real-time US_OPTION) -> Webull Unofficial -> Yahoo Finance.
     exp_date_str format: 'YYYY-MM-DD'
     """
+    openapi_q = _fetch_openapi_option_live_quote(
+        ticker, strike, option_type, exp_date_str, option_symbol=option_symbol
+    )
+    if openapi_q:
+        return openapi_q
+
     wb_un = get_unofficial_client()
     if wb_un:
         try:
-            import requests
+            src_label, is_rt = _unofficial_source_meta()
             headers = wb_un.build_req_headers()
             tid = get_stock_ticker_id(wb_un, ticker)
             data = {
@@ -971,9 +1485,9 @@ def get_option_live_quote(ticker, strike, option_type, exp_date_str):
                             item_strike = float(item.get('strikePrice', 0))
                             item_dir = item.get('direction', '').lower()
                             if abs(item_strike - float(strike)) < 0.01 and item_dir == option_type.lower():
-                                bid = float(item['bidList'][0]['price']) if item.get('bidList') and len(item['bidList']) > 0 else None
-                                ask = float(item['askList'][0]['price']) if item.get('askList') and len(item['askList']) > 0 else None
-                                close_p = float(item.get('close')) if item.get('close') else None
+                                bid = _extract_bid_ask_from_unofficial(item, 'bid')
+                                ask = _extract_bid_ask_from_unofficial(item, 'ask')
+                                close_p = _safe_float(item.get('close'))
                                 mid = round((bid + ask) / 2.0, 2) if (bid is not None and ask is not None) else close_p
                                 if (bid is not None and bid > 0) or (ask is not None and ask > 0):
                                     return {
@@ -983,10 +1497,11 @@ def get_option_live_quote(ticker, strike, option_type, exp_date_str):
                                         'ask': ask,
                                         'mid': mid,
                                         'close': close_p,
-                                        'volume': int(float(item.get('volume', 0))) if item.get('volume') else 0,
-                                        'openInterest': int(float(item.get('openInterest', 0))) if item.get('openInterest') else 0,
-                                        'delta': float(item.get('delta', 0)) if item.get('delta') else None,
-                                        'source': 'Webull'
+                                        'volume': _safe_int(item.get('volume'), 0),
+                                        'openInterest': _safe_int(item.get('openInterest'), 0),
+                                        'delta': _safe_float(item.get('delta')),
+                                        'source': src_label,
+                                        'is_realtime': is_rt,
                                     }
         except Exception as e:
             print(f"[Webull Unofficial] Error fetching live quote for {ticker} ${strike} {option_type}: {e}")
@@ -1197,12 +1712,17 @@ def check_optionable_batch(tickers, max_workers=10):
 # ── Connectivity test ────────────────────────────────────────────────
 
 def test_connection(ticker="AAPL"):
-    """Test connection for Webull API layers (Webull Unofficial and Webull OpenAPI)."""
+    """Test connectivity and real-time entitlements across Webull OpenAPI, Unofficial Webull, and Yahoo."""
+    _clear_openapi_scope_block()
     diag = {"ticker": ticker, "time": datetime.now().isoformat()}
 
     # 1. Test Webull Unofficial (Option B)
     wb_un = get_unofficial_client()
     diag["webull_unofficial_configured"] = wb_un is not None
+    diag["webull_unofficial_authenticated"] = is_unofficial_authenticated()
+    diag["webull_unofficial_options_mode"] = (
+        "Real-Time Authenticated" if is_unofficial_authenticated() else "15-Min Delayed Guest"
+    )
     if wb_un:
         try:
             df = wb_un.get_bars(stock=ticker, interval="d1", count=10)
@@ -1216,31 +1736,92 @@ def test_connection(ticker="AAPL"):
         diag["webull_unofficial_ok"] = False
         diag["webull_unofficial_error"] = "Account credentials not configured in .env"
 
-    # 2. Test Webull OpenAPI (Option A)
+    # 2. Test Webull OpenAPI (Option A: US_STOCK, option contracts, US_OPTION snapshots)
     wb_client = get_webull_client()
     diag["webull_openapi_configured"] = wb_client is not None
     if wb_client:
+        from webull.data.common.category import Category
+        from webull.data.common.timespan import Timespan
+
+        # 2a. US_STOCK historical bar entitlement
         try:
-            from webull.data.common.category import Category
-            from webull.data.common.timespan import Timespan
-            
             resp = wb_client.market_data.get_history_bar(
                 symbol=ticker,
                 category=Category.US_STOCK,
                 timespan=Timespan.D,
                 count="10"
             )
-            diag["webull_openapi_ok"] = resp.status_code == 200
-            diag["webull_openapi_status_code"] = resp.status_code
+            diag["webull_openapi_stock_ok"] = resp.status_code == 200
+            diag["webull_openapi_stock_status"] = resp.status_code
             if resp.status_code == 200:
                 diag["webull_openapi_data_sample"] = str(resp.json()[:2])
             else:
-                diag["webull_openapi_error"] = f"HTTP {resp.status_code}: {resp.text}"
+                is_not_sub, status_c, err_m = _extract_openapi_error(resp)
+                if is_not_sub:
+                    _mark_openapi_scope_blocked("US_STOCK", err_m)
+                diag["webull_openapi_stock_error"] = err_m
         except Exception as e:
-            diag["webull_openapi_ok"] = False
-            diag["webull_openapi_error"] = str(e)
+            diag["webull_openapi_stock_ok"] = False
+            is_not_sub, status_c, err_m = _extract_openapi_error(e)
+            if is_not_sub:
+                _mark_openapi_scope_blocked("US_STOCK", err_m)
+            diag["webull_openapi_stock_status"] = status_c
+            diag["webull_openapi_stock_error"] = err_m
+
+        diag["webull_openapi_ok"] = diag["webull_openapi_stock_ok"]
+        if not diag["webull_openapi_stock_ok"]:
+            diag["webull_openapi_error"] = diag.get("webull_openapi_stock_error")
+
+        # 2b. Option contract catalog (free/included check) + US_OPTION live snapshot entitlement
+        sample_contract_sym = None
+        try:
+            today_ny = datetime.now(_get_ny_tz()).date()
+            contracts = _openapi_list_contracts(
+                wb_client,
+                ticker,
+                start_date=today_ny.strftime("%Y-%m-%d"),
+                end_date=(today_ny + timedelta(days=30)).strftime("%Y-%m-%d"),
+                max_pages=1,
+            )
+            diag["webull_openapi_contracts_ok"] = len(contracts) > 0
+            diag["webull_openapi_contracts_count"] = len(contracts)
+            if contracts:
+                sample_contract_sym = contracts[0].get("symbol")
+        except Exception as e:
+            diag["webull_openapi_contracts_ok"] = False
+            diag["webull_openapi_contracts_error"] = str(e)
+
+        if sample_contract_sym:
+            try:
+                snap_resp = wb_client.option_market_data.get_option_snapshot(
+                    [sample_contract_sym], category="US_OPTION"
+                )
+                diag["webull_openapi_options_ok"] = snap_resp.status_code == 200
+                diag["webull_openapi_options_status"] = snap_resp.status_code
+                diag["webull_openapi_options_sample_symbol"] = sample_contract_sym
+                if snap_resp.status_code == 200:
+                    _clear_openapi_scope_block("US_OPTION")
+                else:
+                    is_not_sub, status_c, err_m = _extract_openapi_error(snap_resp)
+                    if is_not_sub:
+                        _mark_openapi_scope_blocked("US_OPTION", err_m)
+                    diag["webull_openapi_options_error"] = err_m
+            except Exception as e:
+                diag["webull_openapi_options_ok"] = False
+                is_not_sub, status_c, err_m = _extract_openapi_error(e)
+                if is_not_sub:
+                    _mark_openapi_scope_blocked("US_OPTION", err_m)
+                diag["webull_openapi_options_status"] = status_c
+                diag["webull_openapi_options_error"] = err_m
+                diag["webull_openapi_options_sample_symbol"] = sample_contract_sym
+        else:
+            diag["webull_openapi_options_ok"] = False
+            diag["webull_openapi_options_error"] = "No listing option contracts found to probe US_OPTION snapshot"
     else:
         diag["webull_openapi_ok"] = False
+        diag["webull_openapi_stock_ok"] = False
+        diag["webull_openapi_options_ok"] = False
+
     # 3. Test Yahoo Finance Fallback
     try:
         df_yf = _fetch_yahoo_fallback_one(ticker, days=10, interval="1d")
@@ -1251,7 +1832,13 @@ def test_connection(ticker="AAPL"):
         diag["yahoo_fallback_ok"] = False
         diag["yahoo_fallback_error"] = str(e)
 
-    diag["ok"] = diag["webull_unofficial_ok"] or diag["webull_openapi_ok"] or diag.get("yahoo_fallback_ok", False)
+    diag["market_data_status"] = get_market_data_status()
+    diag["realtime_options_ready"] = diag["market_data_status"]["realtime_options_ready"]
+    diag["ok"] = (
+        diag.get("webull_unofficial_ok", False)
+        or diag.get("webull_openapi_ok", False)
+        or diag.get("yahoo_fallback_ok", False)
+    )
     return diag
 
 

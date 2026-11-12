@@ -1314,7 +1314,9 @@ def test_options_api():
             has_data = False
             if chain:
                 calls = chain.get("calls", [])
-                logs.append(f"Webull calls count: {len(calls)}")
+                logs.append(
+                    f"Calls count: {len(calls)} (source={chain.get('source', 'Unknown')}, realtime={chain.get('is_realtime', False)})"
+                )
                 for c in calls[:5]:
                     logs.append(f"  Sample call: strike={c.get('strike')}, bid={c.get('bid')}, ask={c.get('ask')}")
                 for c in calls[:10]:

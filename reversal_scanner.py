@@ -1319,7 +1319,7 @@ def find_best_option(ticker, signal_type, last_price, min_dte=None, max_dte=None
         
         # Scan valid expirations (prioritizing 0-30 DTE for PMB strategy)
         for exp_ts, dte_days in valid_exps[:8]:
-            chain = fetch_options_for_expiration(ticker, exp_ts)
+            chain = fetch_options_for_expiration(ticker, exp_ts, spot_price=last_price)
             if not chain:
                 continue
             
@@ -1392,8 +1392,10 @@ def find_best_option(ticker, signal_type, last_price, min_dte=None, max_dte=None
 
                 if score > best_score:
                     best_score = score
-                    exp_dt = datetime.fromtimestamp(exp_ts)
+                    exp_dt = datetime.fromtimestamp(exp_ts, tz=ny_tz)
                     contract_sym = c.get("contractSymbol") or f"{ticker}{exp_dt.strftime('%y%m%d')}{'C' if signal_type == 'bullish' else 'P'}{int(strike*1000):08d}"
+                    quote_source = c.get("quote_source") or chain.get("source", "Unknown")
+                    is_realtime = bool(c["is_realtime"] if "is_realtime" in c else chain.get("is_realtime", False))
                     best_contract = {
                         "symbol": contract_sym,
                         "tickerId": str(c.get("tickerId", "")),
@@ -1411,7 +1413,9 @@ def find_best_option(ticker, signal_type, last_price, min_dte=None, max_dte=None
                         "volume": vol,
                         "oi": oi,
                         "est_delta": round(est_delta, 2),
-                        "score": round(score, 1)
+                        "score": round(score, 1),
+                        "quote_source": quote_source,
+                        "is_realtime": is_realtime,
                     }
 
         return best_contract
@@ -2330,7 +2334,7 @@ def _analyze_options_setup(sym, df, iv_history):
 
         for exp_ts in valid_exps:
             all_chains = chain_meta.get("allChains", {})
-            chain = all_chains.get(exp_ts)
+            chain = all_chains.get(exp_ts) or fetch_options_for_expiration(sym, exp_ts, spot_price=last_price)
             if not chain:
                 continue
 
