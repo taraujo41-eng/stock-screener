@@ -310,6 +310,11 @@ class TestWebullOpenAPILiveData(unittest.TestCase):
             diag = data_fetcher.test_connection("AAPL")
 
         self.assertFalse(diag["webull_openapi_stock_ok"])
+        call_kwargs = mock_client.market_data.get_history_bar.call_args.kwargs
+        self.assertIsInstance(call_kwargs["category"], str)
+        self.assertEqual(call_kwargs["category"], "US_STOCK")
+        self.assertIsInstance(call_kwargs["timespan"], str)
+        self.assertEqual(call_kwargs["timespan"], "D")
         self.assertTrue(diag["webull_openapi_contracts_ok"])
         self.assertTrue(diag["webull_openapi_options_ok"])
         self.assertTrue(diag["realtime_options_ready"])

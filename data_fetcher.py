@@ -414,8 +414,8 @@ def _fetch_webull_openapi_one(ticker, days=180, interval="1d", includePrePost="f
 
         resp = client.market_data.get_history_bar(
             symbol=ticker,
-            category=Category.US_STOCK,
-            timespan=timespan,
+            category=Category.US_STOCK.name,
+            timespan=timespan.name,
             count=count
         )
 
@@ -475,7 +475,7 @@ def _fetch_webull_openapi_one(ticker, days=180, interval="1d", includePrePost="f
         low_52w = float(df["Low"].min())
 
         try:
-            snapshot_resp = client.market_data.get_snapshot([ticker], Category.US_STOCK)
+            snapshot_resp = client.market_data.get_snapshot([ticker], Category.US_STOCK.name)
             if snapshot_resp.status_code == 200:
                 snap_data = snapshot_resp.json()
                 snap_list = snap_data if isinstance(snap_data, list) else snap_data.get("data", [])
@@ -936,7 +936,7 @@ def _openapi_get_spot_price(client, ticker):
     if client and not _is_openapi_scope_blocked("US_STOCK"):
         try:
             from webull.data.common.category import Category
-            resp = client.market_data.get_snapshot([ticker], Category.US_STOCK)
+            resp = client.market_data.get_snapshot([ticker], Category.US_STOCK.name)
             if resp.status_code == 200:
                 _clear_openapi_scope_block("US_STOCK")
                 snap_data = resp.json()
@@ -1747,8 +1747,8 @@ def test_connection(ticker="AAPL"):
         try:
             resp = wb_client.market_data.get_history_bar(
                 symbol=ticker,
-                category=Category.US_STOCK,
-                timespan=Timespan.D,
+                category=Category.US_STOCK.name,
+                timespan=Timespan.D.name,
                 count="10"
             )
             diag["webull_openapi_stock_ok"] = resp.status_code == 200
