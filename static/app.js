@@ -66,15 +66,26 @@ function updateMarketSentimentUI(sentiment) {
   pill.className = `sentiment-pill sentiment-pill--${(sentiment.sentiment || 'bullish').toLowerCase()}`;
   card.className = `market-sentiment-card sentiment--${(sentiment.sentiment || 'bullish').toLowerCase()}`;
 
+  const timeEl = document.getElementById("sentimentUpdatedTime");
+  if (timeEl) {
+    if (sentiment.timestamp) {
+      timeEl.textContent = `• Updated ${sentiment.timestamp}`;
+    } else {
+      const now = new Date();
+      timeEl.textContent = `• Updated ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    }
+  }
+
   // SPY
   if (sentiment.spy) {
     const spyP = document.getElementById("spyPrice");
     const spyC = document.getElementById("spyChange");
     const spyR = document.getElementById("spyRegime");
-    if (spyP && sentiment.spy.close) spyP.textContent = `$${sentiment.spy.close.toFixed(2)}`;
+    if (spyP && sentiment.spy.close) spyP.textContent = `$${Number(sentiment.spy.close).toFixed(2)}`;
     if (spyC && sentiment.spy.change_pct !== undefined) {
-      spyC.textContent = `${sentiment.spy.change_pct > 0 ? '+' : ''}${sentiment.spy.change_pct.toFixed(2)}%`;
-      spyC.className = `sentiment-index-change ${sentiment.spy.change_pct >= 0 ? 'sentiment-up' : 'sentiment-down'}`;
+      const val = Number(sentiment.spy.change_pct);
+      spyC.textContent = `${val > 0 ? '+' : ''}${val.toFixed(2)}%`;
+      spyC.className = `sentiment-index-change ${val >= 0 ? 'sentiment-up' : 'sentiment-down'}`;
     }
     if (spyR) spyR.textContent = sentiment.spy.regime || (sentiment.spy.above_sma50 ? "Above 50 SMA" : "Below 50 SMA");
   }
@@ -84,10 +95,11 @@ function updateMarketSentimentUI(sentiment) {
     const qqqP = document.getElementById("qqqPrice");
     const qqqC = document.getElementById("qqqChange");
     const qqqR = document.getElementById("qqqRegime");
-    if (qqqP && sentiment.qqq.close) qqqP.textContent = `$${sentiment.qqq.close.toFixed(2)}`;
+    if (qqqP && sentiment.qqq.close) qqqP.textContent = `$${Number(sentiment.qqq.close).toFixed(2)}`;
     if (qqqC && sentiment.qqq.change_pct !== undefined) {
-      qqqC.textContent = `${sentiment.qqq.change_pct > 0 ? '+' : ''}${sentiment.qqq.change_pct.toFixed(2)}%`;
-      qqqC.className = `sentiment-index-change ${sentiment.qqq.change_pct >= 0 ? 'sentiment-up' : 'sentiment-down'}`;
+      const val = Number(sentiment.qqq.change_pct);
+      qqqC.textContent = `${val > 0 ? '+' : ''}${val.toFixed(2)}%`;
+      qqqC.className = `sentiment-index-change ${val >= 0 ? 'sentiment-up' : 'sentiment-down'}`;
     }
     if (qqqR) qqqR.textContent = sentiment.qqq.regime || (sentiment.qqq.above_sma50 ? "Above 50 SMA" : "Below 50 SMA");
   }
@@ -96,7 +108,7 @@ function updateMarketSentimentUI(sentiment) {
   if (sentiment.vix) {
     const vixP = document.getElementById("vixPrice");
     const vixS = document.getElementById("vixState");
-    if (vixP && sentiment.vix.close) vixP.textContent = sentiment.vix.close.toFixed(2);
+    if (vixP && sentiment.vix.close) vixP.textContent = Number(sentiment.vix.close).toFixed(2);
     if (vixS && sentiment.vix.risk_state) {
       vixS.textContent = sentiment.vix.risk_state;
       vixS.className = `sentiment-index-risk ${sentiment.vix.close < 20 ? 'sentiment-risk--on' : 'sentiment-risk--off'}`;
@@ -110,11 +122,15 @@ function updateMarketSentimentUI(sentiment) {
   }
 }
 
-async function fetchLiveMarketSentiment() {
+async function fetchLiveMarketSentiment(force = false) {
   const btn = document.getElementById("sentimentRefreshBtn");
-  if (btn) btn.textContent = "⏳...";
+  if (btn) {
+    btn.textContent = "⏳...";
+    btn.classList.add("sentiment-refresh-btn--loading");
+  }
   try {
-    const res = await fetch("/api/market-sentiment");
+    const url = force ? `/api/market-sentiment?force=true&t=${Date.now()}` : `/api/market-sentiment?t=${Date.now()}`;
+    const res = await fetch(url);
     if (res.ok) {
       const data = await res.json();
       if (data.ok && data.sentiment) {
@@ -124,7 +140,10 @@ async function fetchLiveMarketSentiment() {
   } catch (e) {
     console.error("Failed to fetch market sentiment:", e);
   } finally {
-    if (btn) btn.textContent = "🔄 Live";
+    if (btn) {
+      btn.textContent = "🔄 Live";
+      btn.classList.remove("sentiment-refresh-btn--loading");
+    }
   }
 }
 
@@ -1053,6 +1072,8 @@ function displayResults(data) {
 
   if (data.market_sentiment) {
     updateMarketSentimentUI(data.market_sentiment);
+  } else {
+    fetchLiveMarketSentiment(true);
   }
 
   updateStats();
@@ -1222,6 +1243,10 @@ function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
       const res = await fetch(`/api/scan/progress?t=${Date.now()}`);
       const p = await res.json();
 
+      if (p.market_sentiment) {
+        updateMarketSentimentUI(p.market_sentiment);
+      }
+
       // Check if this progress update matches our requested scan mode
       const isOurMode = !p.mode || p.mode === scanType || (scanType === "watchlist" && p.mode === "watchlist") || (scanType === "top50" && p.mode === "top50");
 
@@ -1351,6 +1376,9 @@ async function runScan(scanType = "watchlist") {
     btn.disabled = true;
   }
 
+  // Immediately refresh live market sentiment card when scan starts
+  fetchLiveMarketSentiment(true);
+
   document.getElementById("emptyState")?.classList.add("hidden");
   document.getElementById("results").innerHTML = "";
 
@@ -1441,6 +1469,9 @@ async function runUnusualOptionsScan() {
     btn.classList.add("scan-btn--loading");
     btn.disabled = true;
   }
+
+  // Immediately refresh live market sentiment card when scan starts
+  fetchLiveMarketSentiment(true);
 
   document.getElementById("emptyState")?.classList.add("hidden");
   document.getElementById("results").innerHTML = "";
@@ -2875,6 +2906,7 @@ async function triggerMoversRefresh() {
   if (spinner) spinner.classList.remove("hidden");
   if (btnText) btnText.textContent = "Scanning...";
   if (progressWrap) progressWrap.classList.remove("hidden");
+  fetchLiveMarketSentiment(true);
 
   try {
     const res = await fetch("/api/movers/refresh", { method: "POST" });
@@ -3297,6 +3329,7 @@ async function triggerPremarketRefresh() {
   if (spinner) spinner.classList.remove("hidden");
   if (btnText) btnText.textContent = "Scanning...";
   if (progressWrap) progressWrap.classList.remove("hidden");
+  fetchLiveMarketSentiment(true);
 
   try {
     const res = await fetch("/api/premarket/refresh", { method: "POST" });

@@ -431,7 +431,7 @@ def prefilter_liquid_optionable(tickers, MIN_PRICE=10.0, MIN_AVG_VOLUME=500_000)
 _market_sentiment_cache = None
 _market_sentiment_cache_ts = 0
 
-def get_market_sentiment(max_age_seconds=180):
+def get_market_sentiment(max_age_seconds=180, force=False):
     """
     Evaluates comprehensive Market Sentiment (SPY, QQQ, VIX).
     Returns a dict with:
@@ -447,7 +447,7 @@ def get_market_sentiment(max_age_seconds=180):
     """
     global _market_sentiment_cache, _market_sentiment_cache_ts
     now = time.time()
-    if _market_sentiment_cache is not None and (now - _market_sentiment_cache_ts) < max_age_seconds:
+    if not force and _market_sentiment_cache is not None and (now - _market_sentiment_cache_ts) < max_age_seconds:
         return _market_sentiment_cache
 
     try:
@@ -582,6 +582,12 @@ def get_market_sentiment(max_age_seconds=180):
 
         summary = f"Market Sentiment is {sentiment} ({score}/100) — SPY (${spy_info.get('close', '—')}) & QQQ (${qqq_info.get('close', '—')}) | VIX: {vix_val} ({vix_state})"
 
+        try:
+            ny_tz = get_ny_timezone()
+            ts_str = datetime.now(ny_tz).strftime("%I:%M %p ET")
+        except Exception:
+            ts_str = datetime.now().strftime("%I:%M %p")
+
         res = {
             "sentiment": sentiment,
             "score": score,
@@ -591,7 +597,7 @@ def get_market_sentiment(max_age_seconds=180):
             "qqq": qqq_info,
             "vix": vix_info,
             "summary": summary,
-            "timestamp": datetime.now().strftime("%I:%M %p")
+            "timestamp": ts_str
         }
         _market_sentiment_cache = res
         _market_sentiment_cache_ts = now
@@ -600,6 +606,11 @@ def get_market_sentiment(max_age_seconds=180):
 
     except Exception as e:
         print(f"  [Market Sentiment] Error: {e}")
+        try:
+            ny_tz = get_ny_timezone()
+            ts_fallback = datetime.now(ny_tz).strftime("%I:%M %p ET")
+        except Exception:
+            ts_fallback = datetime.now().strftime("%I:%M %p")
         return {
             "sentiment": "Bullish",
             "score": 65,
@@ -609,7 +620,7 @@ def get_market_sentiment(max_age_seconds=180):
             "qqq": {"close": 0, "change_pct": 0, "regime": "Above 50 SMA"},
             "vix": {"close": 16.5, "risk_state": "Risk-On (Low Vol)"},
             "summary": "Market Sentiment is Bullish",
-            "timestamp": datetime.now().strftime("%I:%M %p")
+            "timestamp": ts_fallback
         }
 
 
@@ -3367,11 +3378,13 @@ def rsi_divergence_full_market_scan(tickers=None, extended_hours=False):
             continue
 
     total_time = time.time() - start_time
+    market_sentiment = get_market_sentiment(force=True)
     scan_progress.update({
         "status": "done", "phase": "complete", "mode": "rsidiv",
         "phase_label": f"Done — {len(results)} RSI divergence signals found",
         "current": total, "total": total,
         "found": len(results), "pct": 100, "eta_seconds": 0,
+        "market_sentiment": market_sentiment
     })
 
     print(f"[Done] RSI divergence full market scan: {len(results)} signals in {total_time:.0f}s")
@@ -4875,7 +4888,8 @@ def watchlist_scan(tickers, extended_hours=False, mode="watchlist"):
             on_progress=_on_dl_progress, delay=0.01, interval="5m", includePrePost="true"
         )
 
-        market_sentiment = get_market_sentiment()
+        market_sentiment = get_market_sentiment(force=True)
+        scan_progress.update({"market_sentiment": market_sentiment})
         results = []
 
         for i, sym in enumerate(tickers):
@@ -4913,7 +4927,8 @@ def watchlist_scan(tickers, extended_hours=False, mode="watchlist"):
             print(f"Error batch fetching quotes: {e}")
 
         # 3. Market sentiment
-        market_sentiment = get_market_sentiment()
+        market_sentiment = get_market_sentiment(force=True)
+        scan_progress.update({"market_sentiment": market_sentiment})
         results = []
 
         for i, sym in enumerate(tickers):

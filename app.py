@@ -565,12 +565,14 @@ def scan_rsidiv():
             et_tz = get_ny_timezone()
             tickers = load_watchlist()
             df = rsi_divergence_full_market_scan(tickers=tickers, extended_hours=extended_hours)
+            mkt_sentiment = get_market_sentiment(force=True)
             results_data = {
                 "ok": True,
                 "mode": "rsidiv",
                 "scan_id": scan_id,
                 "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
                 "count": len(df) if not df.empty else 0,
+                "market_sentiment": mkt_sentiment,
                 "results": df.to_dict(orient="records") if not df.empty else [],
             }
             app.config["LAST_RSIDIV_RESULTS"] = results_data
@@ -593,7 +595,9 @@ def scan_rsidiv():
 def scan_rsidiv_results():
     results = get_fresh_scan_results("LAST_RSIDIV_RESULTS", RSIDIV_RESULTS_FILE)
     if results is None or not isinstance(results, dict):
-        return jsonify({"ok": True, "mode": "rsidiv", "count": 0, "results": [], "timestamp": "Ready"}), 200
+        return jsonify({"ok": True, "mode": "rsidiv", "count": 0, "results": [], "timestamp": "Ready", "market_sentiment": get_market_sentiment()}), 200
+    if "market_sentiment" not in results:
+        results["market_sentiment"] = get_market_sentiment()
     return jsonify(results)
 
 # ── API: Watchlist Scan ─────────────────────────────────────────────
@@ -621,7 +625,7 @@ def scan_watchlist():
                 df = df[df["Ticker"].isin(current_watchlist)]
             raw_records = df.to_dict(orient="records") if not df.empty else []
             clean_records = sanitize_for_json(raw_records)
-            mkt_sentiment = get_market_sentiment()
+            mkt_sentiment = get_market_sentiment(force=True)
             results_data = {
                 "ok": True,
                 "mode": "watchlist",
@@ -727,7 +731,8 @@ def scan_watchlist_results():
 def api_market_sentiment():
     """Returns real-time broad market sentiment (SPY, QQQ, VIX)."""
     try:
-        sentiment = get_market_sentiment()
+        force = request.args.get("force", "false").lower() in ("true", "1", "yes")
+        sentiment = get_market_sentiment(force=force)
         return jsonify({"ok": True, "sentiment": sentiment})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
@@ -757,7 +762,7 @@ def scan_top50():
                 df = df[df["Ticker"].isin(tickers)]
             raw_records = df.to_dict(orient="records") if not df.empty else []
             clean_records = sanitize_for_json(raw_records)
-            mkt_sentiment = get_market_sentiment()
+            mkt_sentiment = get_market_sentiment(force=True)
             results_data = {
                 "ok": True,
                 "mode": "top50",
@@ -793,7 +798,9 @@ def scan_top50():
 def scan_top50_results():
     results = get_fresh_scan_results("LAST_TOP50_RESULTS", TOP_50_RESULTS_FILE)
     if not results or not isinstance(results, dict):
-        return jsonify({"ok": True, "mode": "top50", "count": 0, "results": [], "timestamp": "Ready"}), 200
+        return jsonify({"ok": True, "mode": "top50", "count": 0, "results": [], "timestamp": "Ready", "market_sentiment": get_market_sentiment()}), 200
+    if "market_sentiment" not in results:
+        results["market_sentiment"] = get_market_sentiment()
     return jsonify(results)
 
 @app.route("/api/top50/tickers", methods=["GET"])
@@ -935,12 +942,14 @@ def scan_unusual_options():
             et_tz = get_ny_timezone()
             tickers = load_watchlist()
             df = unusual_options_full_market_scan(tickers=tickers, extended_hours=extended_hours)
+            mkt_sentiment = get_market_sentiment(force=True)
             results_data = {
                 "ok": True,
                 "mode": "unusual_options",
                 "scan_id": scan_id,
                 "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
                 "count": len(df) if not df.empty else 0,
+                "market_sentiment": mkt_sentiment,
                 "results": df.to_dict(orient="records") if not df.empty else [],
             }
             app.config["LAST_UNUSUAL_OPTIONS_RESULTS"] = results_data
@@ -963,7 +972,9 @@ def scan_unusual_options():
 def scan_unusual_options_results():
     results = get_fresh_scan_results("LAST_UNUSUAL_OPTIONS_RESULTS", UNUSUAL_OPTIONS_RESULTS_FILE)
     if results is None or not isinstance(results, dict):
-        return jsonify({"ok": True, "mode": "unusual_options", "count": 0, "results": [], "timestamp": "Ready"}), 200
+        return jsonify({"ok": True, "mode": "unusual_options", "count": 0, "results": [], "timestamp": "Ready", "market_sentiment": get_market_sentiment()}), 200
+    if "market_sentiment" not in results:
+        results["market_sentiment"] = get_market_sentiment()
     return jsonify(results)
 
 # ── API: Watchlist CRUD ─────────────────────────────────────────────

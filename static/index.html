@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="/icon.png">
   <link rel="icon" href="/icon.png">
-  <link rel="stylesheet" href="/style.css?v=6.1">
+  <link rel="stylesheet" href="/style.css?v=6.2">
   <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body>
@@ -64,8 +64,9 @@
             <span class="sentiment-icon">🌐</span>
             <span class="sentiment-title">MARKET SENTIMENT</span>
             <span class="sentiment-pill sentiment-pill--bullish" id="marketSentimentPill">BULLISH 🟢</span>
+            <span class="sentiment-updated-time" id="sentimentUpdatedTime" style="font-size:0.68rem; color:var(--text-muted); margin-left:6px; font-weight:500;"></span>
           </div>
-          <button class="sentiment-refresh-btn" id="sentimentRefreshBtn" onclick="fetchLiveMarketSentiment()" title="Refresh live market sentiment">🔄 Live</button>
+          <button class="sentiment-refresh-btn" id="sentimentRefreshBtn" onclick="fetchLiveMarketSentiment(true)" title="Refresh live market sentiment">🔄 Live</button>
         </div>
         <div class="sentiment-indices-grid">
           <div class="sentiment-index-item">
@@ -812,6 +813,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=8.1"></script>
+  <script src="/app.js?v=8.2"></script>
 </body>
 </html>
