@@ -4311,6 +4311,130 @@ def format_market_cap(mcap):
     except Exception:
         return "—"
 
+def _positive_float(val):
+    """Return positive float or None when missing/invalid/non-positive."""
+    if val is None or val == "":
+        return None
+    try:
+        parsed = float(val)
+        return parsed if parsed > 0 and not np.isnan(parsed) else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _resolve_52w_range(df_daily, quote=None):
+    """Resolve 52-week high and low from quote metadata, DataFrame attrs, or trailing 252 daily bars."""
+    tail_252 = df_daily.tail(252)
+    bar_highs = tail_252["High"][tail_252["High"] > 0]
+    bar_lows = tail_252["Low"][tail_252["Low"] > 0]
+    fallback_high = float(bar_highs.max()) if not bar_highs.empty else float(df_daily["High"].iloc[-1])
+    fallback_low = float(bar_lows.min()) if not bar_lows.empty else float(df_daily["Low"].iloc[-1])
+
+    q_high = _positive_float((quote or {}).get("fiftyTwoWeekHigh") or (quote or {}).get("fiftyTwoWkHigh"))
+    q_low = _positive_float((quote or {}).get("fiftyTwoWeekLow") or (quote or {}).get("fiftyTwoWkLow"))
+    attr_high = _positive_float(df_daily.attrs.get("fiftyTwoWeekHigh"))
+    attr_low = _positive_float(df_daily.attrs.get("fiftyTwoWeekLow"))
+
+    high_52w = q_high or attr_high or fallback_high
+    low_52w = q_low or attr_low or fallback_low
+
+    today_high = _positive_float(df_daily["High"].iloc[-1])
+    today_low = _positive_float(df_daily["Low"].iloc[-1])
+    if today_high and high_52w:
+        high_52w = max(high_52w, today_high)
+    if today_low and low_52w:
+        low_52w = min(low_52w, today_low)
+
+    return high_52w, low_52w
+
+
+def _evaluate_52w_proximity(close_price, high_val, low_val, high_52w, low_52w):
+    """Classify Hits (0% / wick touch), At (<=3%), or Near (<=5%) proximity to 52-week High/Low."""
+    dist_high_pct = ((close_price - high_52w) / high_52w) * 100.0 if high_52w else 0.0
+    dist_low_pct = ((close_price - low_52w) / low_52w) * 100.0 if low_52w else 0.0
+
+    hits_high = bool(high_52w and (close_price >= high_52w * 0.998 or (high_val >= high_52w * 0.998 and close_price >= high_52w * 0.985)))
+    at_high = bool(high_52w and close_price >= high_52w * 0.97)
+    near_high = bool(high_52w and close_price >= high_52w * 0.95)
+
+    hits_low = bool(low_52w and (close_price <= low_52w * 1.002 or (low_val <= low_52w * 1.002 and close_price <= low_52w * 1.015)))
+    at_low = bool(low_52w and close_price <= low_52w * 1.03)
+    near_low = bool(low_52w and close_price <= low_52w * 1.05)
+
+    side = None
+    if near_high and near_low:
+        side = "high" if abs(dist_high_pct) <= abs(dist_low_pct) else "low"
+    elif near_high:
+        side = "high"
+    elif near_low:
+        side = "low"
+
+    tier = None
+    status_label = "Mid-Range"
+    points = 0
+    active_dist_pct = dist_high_pct if abs(dist_high_pct) <= abs(dist_low_pct) else dist_low_pct
+
+    if side == "high":
+        active_dist_pct = dist_high_pct
+        if hits_high:
+            tier, status_label, points = "hits", "Hits 52w High", 3
+        elif at_high:
+            tier, status_label, points = "at", "At 52w High", 2
+        else:
+            tier, status_label, points = "near", "Near 52w High", 1
+    elif side == "low":
+        active_dist_pct = dist_low_pct
+        if hits_low:
+            tier, status_label, points = "hits", "Hits 52w Low", 3
+        elif at_low:
+            tier, status_label, points = "at", "At 52w Low", 2
+        else:
+            tier, status_label, points = "near", "Near 52w Low", 1
+
+    return {
+        "high_52w": high_52w,
+        "low_52w": low_52w,
+        "dist_high_pct": dist_high_pct,
+        "dist_low_pct": dist_low_pct,
+        "active_dist_pct": active_dist_pct,
+        "near_high": near_high,
+        "near_low": near_low,
+        "side": side,
+        "tier": tier,
+        "status_label": status_label,
+        "points": points,
+    }
+
+
+def _classify_52w_swing_setup(df_daily, close_price, low_val, high_val, is_above_50, rsi_s, rsi_val, bull_div, bear_div, prox_52w):
+    """Determine trend/candle-aware swing setup and direction when trading at/near 52-week High or Low."""
+    side = prox_52w.get("side")
+    if side not in ("high", "low"):
+        return None, None
+
+    open_val = float(df_daily["Open"].iloc[-1]) if "Open" in df_daily.columns else close_price
+    prev_close = float(df_daily["Close"].iloc[-2]) if len(df_daily) > 1 else close_price
+    prev_rsi = float(rsi_s.iloc[-2]) if len(rsi_s) > 1 and not np.isnan(rsi_s.iloc[-2]) else rsi_val
+    day_range = max(0.0, high_val - low_val)
+    close_pos = (close_price - low_val) / day_range if day_range > 0 else 0.5
+
+    if side == "low":
+        is_green = close_price > open_val
+        is_hammer = close_pos >= 0.55 and (min(open_val, close_price) - low_val) >= 0.35 * day_range
+        is_rsi_turn_up = (rsi_val <= 38.0 and rsi_val >= prev_rsi) or (prev_rsi < 30.0 <= rsi_val)
+        is_bounce = bull_div or is_hammer or (is_green and close_pos >= 0.55) or is_rsi_turn_up or (close_price > prev_close and close_pos >= 0.50)
+        return ("52w Low Reversal", "Bullish") if is_bounce else ("52w Low Breakdown", "Bearish")
+
+    is_red = close_price < open_val
+    is_upper_rejection = (high_val - max(open_val, close_price)) >= 0.35 * day_range and close_pos <= 0.45
+    is_rsi_exhausted = rsi_val >= 68.0 and (rsi_val < prev_rsi or is_red)
+    if bear_div or is_upper_rejection or is_rsi_exhausted or (is_red and close_pos <= 0.45):
+        return "52w High Rejection", "Bearish"
+    if is_above_50:
+        return "52w High Breakout", "Bullish"
+    return "52w High Reversal", "Bearish"
+
+
 def _analyze_swing_trade_setup(ticker, df_daily, quote=None, earnings_map=None, market_sentiment=None):
     """
     Evaluates ticker against A+ SWING TRADE SCANNER CRITERIA (Watchlist Only):
@@ -4321,13 +4445,16 @@ def _analyze_swing_trade_setup(ticker, df_daily, quote=None, earnings_map=None, 
       • Option Chain Liquidity: Tight spread (<= $0.10 near ATM), Open Interest >= 500 across target strikes
     [2] MULTI-TIMEFRAME TREND & MOMENTUM ALIGNMENT (DAILY CHART)
       • Primary Trend: Daily Close > 50 SMA (Longs) / < 50 SMA (Shorts)
-      • Short-Term Momentum:
+      • Short-Term Momentum & 52-Week Levels:
         - Pullback Setup: Price touches or closes near 8 EMA while 8 EMA is sloped in trend direction. RSI 45-60.
         - Breakout Setup: Daily close breaks out from consolidation with 8 EMA > 21 EMA.
         - 3SD Bollinger Band Reversal: Price touching 3SD BB with confirmed RSI divergence.
+        - 52-Week High / Low Setup: Price Hits (0%), At (<=3%), or Near (<=5%) its 52w High or 52w Low
+          (trend/candle-aware Breakouts/Bounces = Bullish, Rejections/Breakdowns = Bearish).
       • Trend Strength: ADX(14) >= 20 and rising
     [3] VOLUME & CATALYST CONFLUENCE
       • RVOL >= 1.2x to 1.5x on setup day / breakout candle
+      • Confluence scoring for 52-week High/Low proximity
       • NO earnings or major corporate catalysts within next 14 calendar days
     [4] EXECUTION & SIZING TEMPLATE
       • Pre-trade log with Entry, Stop Loss below 8 EMA / 20 SMA / pivot, Target 1 (2:1 R:R), Target 2 (Runner),
@@ -4415,6 +4542,11 @@ def _analyze_swing_trade_setup(ticker, df_daily, quote=None, earnings_map=None, 
         low_val = float(df_daily["Low"].iloc[-1])
         high_val = float(df_daily["High"].iloc[-1])
 
+        # 52-Week High / Low levels & RSI divergence
+        high_52w, low_52w = _resolve_52w_range(df_daily, quote=quote)
+        prox_52w = _evaluate_52w_proximity(close_price, high_val, low_val, high_52w, low_52w)
+        bull_div, bear_div = detect_rsi_divergence(df_daily["Close"], rsi_s, lookback=10, max_anchor_age=8)
+
         # Consolidation box (previous 5-15 days)
         consol_window = df_daily.iloc[-16:-1] if len(df_daily) >= 16 else df_daily.iloc[:-1]
         consol_high = float(consol_window["High"].max()) if not consol_window.empty else high_val
@@ -4475,19 +4607,45 @@ def _analyze_swing_trade_setup(ticker, df_daily, quote=None, earnings_map=None, 
         elif is_3sd_short:
             setup_name = "3SD Bollinger Band Reversal"
             direction = "Bearish"
+        elif prox_52w["side"] in ("high", "low"):
+            setup_name, direction = _classify_52w_swing_setup(
+                df_daily, close_price, low_val, high_val,
+                is_above_50, rsi_s, rsi_val, bull_div, bear_div, prox_52w
+            )
 
         if not setup_name:
             return None
 
         is_long = (direction == "Bullish")
+        is_52w_setup = setup_name.startswith("52w ")
+        is_reversal_setup = ("3SD" in setup_name) or ("Reversal" in setup_name) or ("Rejection" in setup_name)
 
         # Risk / Reward Plan
-        # Long Stop: Daily close below 8 EMA / 20 SMA / swing pivot low
-        # Short Stop: Daily close above 8 EMA / 20 SMA / swing pivot high
+        # Long Stop: Daily close below 8 EMA / 20 SMA / swing pivot low (and 52w low when bouncing off it)
+        # Short Stop: Daily close above 8 EMA / 20 SMA / swing pivot high (and 52w high when rejecting off it)
+        long_entry_descs = {
+            "8 EMA Trend Pullback": "8 EMA Retest Entry",
+            "Key Level Breakout": "Breakout Close Entry",
+            "3SD Bollinger Band Reversal": "3SD Reversal Pivot",
+            "52w Low Reversal": "52w Low Support Bounce",
+            "52w High Breakout": "52w High Breakout Close",
+        }
+        short_entry_descs = {
+            "8 EMA Trend Pullback": "8 EMA Breakdown Retest",
+            "Key Level Breakout": "Breakdown Close Entry",
+            "3SD Bollinger Band Reversal": "3SD Upper Band Reversal",
+            "52w High Rejection": "52w High Rejection Short",
+            "52w High Reversal": "52w High Reversal Short",
+            "52w Low Breakdown": "52w Low Breakdown Short",
+        }
+
         if is_long:
             entry = close_price
             swing_low = float(df_daily["Low"].tail(5).min())
-            stop_ref = min(ema8_val, mid_sma20, swing_low)
+            stop_candidates = [ema8_val, mid_sma20, swing_low]
+            if prox_52w["side"] == "low" and low_52w:
+                stop_candidates.append(low_52w)
+            stop_ref = min(stop_candidates)
             stop_loss = round(min(entry * 0.985, stop_ref - 0.25 * atr_val), 2)
             if entry - stop_loss > 3.0 * atr_val:
                 stop_loss = round(entry - 2.0 * atr_val, 2)
@@ -4497,12 +4655,15 @@ def _analyze_swing_trade_setup(ticker, df_daily, quote=None, earnings_map=None, 
             risk = round(entry - stop_loss, 2)
             target_1 = round(entry + 2.0 * risk, 2)
             target_2 = round(entry + 3.2 * risk, 2)
-            entry_desc = "8 EMA Retest Entry" if "Pullback" in setup_name else ("Breakout Close Entry" if "Breakout" in setup_name else "3SD Reversal Pivot")
-            stop_desc = "Daily close below 8 EMA / 20 SMA pivot"
+            entry_desc = long_entry_descs.get(setup_name, "Swing Long Entry")
+            stop_desc = "Daily close below 52-week low / swing low" if setup_name == "52w Low Reversal" else "Daily close below 8 EMA / 20 SMA pivot"
         else:
             entry = close_price
             swing_high = float(df_daily["High"].tail(5).max())
-            stop_ref = max(ema8_val, mid_sma20, swing_high)
+            stop_candidates = [ema8_val, mid_sma20, swing_high]
+            if prox_52w["side"] == "high" and high_52w:
+                stop_candidates.append(high_52w)
+            stop_ref = max(stop_candidates)
             stop_loss = round(max(entry * 1.015, stop_ref + 0.25 * atr_val), 2)
             if stop_loss - entry > 3.0 * atr_val:
                 stop_loss = round(entry + 2.0 * atr_val, 2)
@@ -4512,8 +4673,8 @@ def _analyze_swing_trade_setup(ticker, df_daily, quote=None, earnings_map=None, 
             risk = round(stop_loss - entry, 2)
             target_1 = round(entry - 2.0 * risk, 2)
             target_2 = round(entry - 3.2 * risk, 2)
-            entry_desc = "8 EMA Breakdown Retest" if "Pullback" in setup_name else ("Breakdown Close Entry" if "Breakout" in setup_name else "3SD Upper Band Reversal")
-            stop_desc = "Daily close above 8 EMA / 20 SMA pivot"
+            entry_desc = short_entry_descs.get(setup_name, "Swing Short Entry")
+            stop_desc = "Daily close above 52-week high resistance" if ("52w High" in setup_name) else "Daily close above 8 EMA / 20 SMA pivot"
 
         # Option Execution (30 to 60 DTE, Delta 0.45 to 0.60, OI >= 500, tight spread)
         opt = None
@@ -4565,6 +4726,9 @@ def _analyze_swing_trade_setup(ticker, df_daily, quote=None, earnings_map=None, 
         if adx_val >= 20 and adx_rising: score += 3
         if rvol >= 1.2: score += 3
         if (45 <= rsi_val <= 60 if is_long else 40 <= rsi_val <= 55): score += 3
+        if is_reversal_setup and ((is_long and rsi_val <= 35) or (not is_long and rsi_val >= 65)): score += 2
+        if is_reversal_setup and ((is_long and bull_div) or (not is_long and bear_div)): score += 3
+        score += prox_52w["points"]
         if opt and opt.get("oi", 0) >= 500: score += 3
         if market_sentiment and market_sentiment.get("is_bullish") == is_long: score += 2
 
@@ -4573,17 +4737,23 @@ def _analyze_swing_trade_setup(ticker, df_daily, quote=None, earnings_map=None, 
         sector = SECTOR_MAP.get(ticker, "Mega/Large-Cap Equities")
         mcap_str = format_market_cap(mcap) if mcap else ">= $10B"
 
+        status_52w = prox_52w["status_label"]
+        dist_high_pct = round(prox_52w["dist_high_pct"], 1)
+        dist_low_pct = round(prox_52w["dist_low_pct"], 1)
+        near_52w_any = bool(prox_52w["side"])
+
         pre_trade_log = f"""================================================================================
                      A+ SWING TRADE SCANNER CRITERIA & TEMPLATE
 ================================================================================
 TICKER:                     {ticker}
 SECTOR / MARKET CAP:        {sector} / {mcap_str}
 SETUP TYPE:                 [{'X' if 'Pullback' in setup_name else ' '}] 8 EMA Trend Pullback   [{'X' if 'Breakout' in setup_name else ' '}] Key Level Breakout
-                            [{'X' if '3SD' in setup_name else ' '}] 3SD Bollinger Band Reversal
+                            [{'X' if '3SD' in setup_name else ' '}] 3SD Bollinger Band Reversal   [{'X' if is_52w_setup else ' '}] 52w High/Low Setup
 
 DAILY TECHNICAL CONTEXT:
 • 50 SMA Alignment:         [{'X' if is_above_50 else ' '}] Bullish (Above)        [{'X' if not is_above_50 else ' '}] Bearish (Below)
 • 8 EMA vs 21 EMA:          [{'X' if is_ema_bull else ' '}] Bullish Cross/Slope    [{'X' if not is_ema_bull else ' '}] Bearish Cross/Slope
+• 52-Week Range:            Low: ${low_52w:.2f} ({dist_low_pct:+.1f}%) | High: ${high_52w:.2f} ({dist_high_pct:+.1f}%) [{status_52w}]
 • Daily RSI(14):            {rsi_val:.1f}
 • Volume vs 20-day Avg:     {rvol:.2f}x (ADX: {adx_val:.1f}{' Rising' if adx_rising else ''})
 
@@ -4604,16 +4774,21 @@ RISK / REWARD PLAN:
 
         bull_signals = []
         bear_signals = []
+        signal_52w_tag = f"{status_52w} ({prox_52w['active_dist_pct']:+.1f}%)" if near_52w_any else None
         if is_long:
             bull_signals.append(f"{setup_name} ({direction})")
+            if signal_52w_tag: bull_signals.append(signal_52w_tag)
             if is_above_50: bull_signals.append("Above 50 SMA")
             if is_ema_bull: bull_signals.append("8 EMA > 21 EMA Sloping Up")
+            if bull_div: bull_signals.append("RSI Divergence")
             if adx_val >= 20: bull_signals.append(f"ADX {adx_val:.1f}{' Rising' if adx_rising else ''}")
             if rvol >= 1.2: bull_signals.append(f"RVOL {rvol:.1f}x")
         else:
             bear_signals.append(f"{setup_name} ({direction})")
+            if signal_52w_tag: bear_signals.append(signal_52w_tag)
             if is_below_50: bear_signals.append("Below 50 SMA")
             if is_ema_bear: bear_signals.append("8 EMA < 21 EMA Sloping Down")
+            if bear_div: bear_signals.append("RSI Divergence")
             if adx_val >= 20: bear_signals.append(f"ADX {adx_val:.1f}{' Rising' if adx_rising else ''}")
             if rvol >= 1.2: bear_signals.append(f"RVOL {rvol:.1f}x")
 
@@ -4623,6 +4798,8 @@ RISK / REWARD PLAN:
             comp_name = COMPANY_NAMES.get(ticker, ticker)
         except Exception:
             comp_name = ticker
+
+        patterns_str = f"{setup_name} | {status_52w}" if (near_52w_any and not is_52w_setup) else setup_name
 
         return {
             "Ticker": ticker,
@@ -4635,6 +4812,14 @@ RISK / REWARD PLAN:
             "Grade": grade,
             "Score": score,
             "Last Price": round(close_price, 2),
+            "52W High": round(high_52w, 2),
+            "52W Low": round(low_52w, 2),
+            "Dist_52W_High": dist_high_pct,
+            "Dist_52W_Low": dist_low_pct,
+            "52W Status": status_52w,
+            "Near_52W": near_52w_any,
+            "Near_52W_High": bool(prox_52w["near_high"]),
+            "Near_52W_Low": bool(prox_52w["near_low"]),
             "Volume": int(today_vol),
             "Avg Volume 20D": int(vol_20d),
             "RVOL": rvol,
@@ -4645,7 +4830,7 @@ RISK / REWARD PLAN:
             "EMA8_vs_EMA21": "Bullish (8 > 21 EMA)" if is_ema_bull else "Bearish (8 < 21 EMA)",
             "Bullish Signals": " | ".join(bull_signals) if bull_signals else "—",
             "Bearish Signals": " | ".join(bear_signals) if bear_signals else "—",
-            "Patterns": f"{setup_name}",
+            "Patterns": patterns_str,
             "Entry": round(entry, 2),
             "Stop Loss": round(stop_loss, 2),
             "Profit Target": round(target_1, 2),
@@ -4712,9 +4897,9 @@ def watchlist_scan(tickers, extended_hours=False, mode="watchlist"):
             pct = int((i / tot) * 30) if tot else 0
             _update_progress("downloading", f"Downloading {prefix}: {sym} (Daily candles)...", i, tot, ticker=sym, found=0, pct=pct)
 
-        # 1. Download daily candles (180 days)
+        # 1. Download daily candles (~52 weeks = 260 trading bars)
         candle_data = fetch_batch_concurrent(
-            tickers, days=180, max_workers=20,
+            tickers, days=260, max_workers=20,
             on_progress=_on_dl_progress, delay=0.01, interval="1d", includePrePost="false"
         )
 

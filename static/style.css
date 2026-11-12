@@ -3679,6 +3679,29 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+.swing-52w-pill {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 5px;
+}
+
+.swing-52w-pill--high {
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #fbbf24;
+}
+
+.swing-52w-pill--low {
+  background: rgba(16, 185, 129, 0.14);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #34d399;
+}
+
+.tech-chip__value--amber {
+  color: #fbbf24;
+}
+
 .btn-copy-pretrade {
   display: flex;
   align-items: center;

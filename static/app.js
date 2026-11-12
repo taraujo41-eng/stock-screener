@@ -149,7 +149,7 @@ async function loadLastWatchlistScan() {
     <div class="empty-state">
       <div class="empty-state__icon">🎯</div>
       <div class="empty-state__title">A+ Swing Trade Scanner Ready</div>
-      <div class="empty-state__text">Tap <b>Scan Watchlist (Swing A+)</b> to screen for Mega/Large-Cap swing trade setups<br>(8 EMA Pullbacks, Breakouts, 3SD Reversals with 30-60 DTE Options)</div>
+      <div class="empty-state__text">Tap <b>Scan Watchlist (Swing A+)</b> to screen for Mega/Large-Cap swing trade setups<br>(8 EMA Pullbacks, Breakouts, 3SD Reversals &amp; 52w High/Low Setups with 30-60 DTE Options)</div>
     </div>
   `;
   hideAuxUI();
@@ -284,10 +284,20 @@ function buildCard(item, index) {
     </div>
   `;
 
+  const format52wChipValue = (level, distPct) => {
+    if (level === undefined || level === null) return "—";
+    const pctStr = (distPct !== undefined && distPct !== null)
+      ? ` (${distPct > 0 ? '+' : ''}${Number(distPct).toFixed(1)}%)`
+      : "";
+    return `$${Number(level).toFixed(2)}${pctStr}`;
+  };
+
   let techGridHtml = "";
   if (isSwingTrade) {
     const is50Bull = item["SMA50 Alignment"] && item["SMA50 Alignment"].includes("Bullish");
     const isEmaBull = item["EMA8_vs_EMA21"] && item["EMA8_vs_EMA21"].includes("Bullish");
+    const high52wCls = item["Near_52W_High"] ? "tech-chip__value--amber" : "";
+    const low52wCls = item["Near_52W_Low"] ? "tech-chip__value--green" : "";
     techGridHtml = `
       <div class="card__tech-grid">
         <div class="tech-chip">
@@ -305,6 +315,14 @@ function buildCard(item, index) {
         <div class="tech-chip">
           <span class="tech-chip__label">RVOL</span>
           <span class="tech-chip__value ${rvolClass}">${rvolVal}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">52w High</span>
+          <span class="tech-chip__value ${high52wCls}">${format52wChipValue(item["52W High"], item["Dist_52W_High"])}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">52w Low</span>
+          <span class="tech-chip__value ${low52wCls}">${format52wChipValue(item["52W Low"], item["Dist_52W_Low"])}</span>
         </div>
         <div class="tech-chip">
           <span class="tech-chip__label">20D Avg Vol</span>
@@ -351,9 +369,15 @@ function buildCard(item, index) {
     `;
   }
 
+  const status52w = item["52W Status"];
+  const pill52w = (status52w && status52w !== "Mid-Range")
+    ? `<span class="swing-52w-pill ${status52w.includes('High') ? 'swing-52w-pill--high' : 'swing-52w-pill--low'}">📏 ${status52w} (${(status52w.includes('High') ? item["Dist_52W_High"] : item["Dist_52W_Low"]) > 0 ? '+' : ''}${(status52w.includes('High') ? item["Dist_52W_High"] : item["Dist_52W_Low"])?.toFixed?.(1) ?? '0.0'}%)</span>`
+    : "";
+
   const swingMetaLine = isSwingTrade ? `
     <div class="swing-card-meta-line">
       <span class="swing-setup-badge">⚡ ${item["Setup Type"]}</span>
+      ${pill52w}
       <span class="swing-sector-pill">🏢 ${item.Sector || 'Equities'}</span>
       <span class="swing-mcap-pill">💰 ${item["Market Cap"] || '>= $10B'}</span>
     </div>
@@ -839,6 +863,16 @@ function buildUnusualOptionsCard(item, index) {
 
 // ── Render results ─────────────────────────────────────────
 
+function matches52wFilter(d, side) {
+  const status = (d["52W Status"] || "").toLowerCase();
+  const bull = (d["Bullish Signals"] || "").toLowerCase();
+  const bear = (d["Bearish Signals"] || "").toLowerCase();
+  const hasToken = (token) => status.includes(token) || bull.includes(token) || bear.includes(token);
+  if (side === "high") return Boolean(d["Near_52W_High"]) || hasToken("52w high");
+  if (side === "low") return Boolean(d["Near_52W_Low"]) || hasToken("52w low");
+  return Boolean(d["Near_52W"]) || matches52wFilter(d, "high") || matches52wFilter(d, "low");
+}
+
 function renderResults() {
   const el = document.getElementById("results");
   const isOptionsSpreads = (currentResultMode === "options_spreads");
@@ -881,6 +915,12 @@ function renderResults() {
   } else {
     if (currentFilter === "aplus") {
       filtered = scanData.filter(d => (d.Grade === "A+" || (d.Score && d.Score >= 19)));
+    } else if (currentFilter === "near52w") {
+      filtered = scanData.filter(d => matches52wFilter(d, "any"));
+    } else if (currentFilter === "near52w_high") {
+      filtered = scanData.filter(d => matches52wFilter(d, "high"));
+    } else if (currentFilter === "near52w_low") {
+      filtered = scanData.filter(d => matches52wFilter(d, "low"));
     } else if (currentFilter === "bullish") {
       filtered = scanData.filter(d =>
         d["Bullish Signals"] && d["Bullish Signals"] !== "—");
@@ -1057,11 +1097,15 @@ function displayResults(data) {
   document.querySelector('[data-filter="bearish"]').textContent = bearLabel;
 
   const bothBtn = document.querySelector('[data-filter="both"]');
-  if (isUnusualOptions || isOptionsSpreads || isOptions) {
+  const isOptionsMode = isUnusualOptions || isOptionsSpreads || isOptions;
+  if (isOptionsMode) {
     bothBtn.classList.add("hidden");
   } else {
     bothBtn.classList.remove("hidden");
   }
+  document.querySelectorAll(".filter-btn--52w").forEach(btn => {
+    btn.classList.toggle("hidden", isOptionsMode);
+  });
 
   if (scanData.length === 0) {
     if (data.timestamp === "Ready" || !data.timestamp) {

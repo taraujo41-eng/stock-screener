@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="/icon.png">
   <link rel="icon" href="/icon.png">
-  <link rel="stylesheet" href="/style.css?v=6.0">
+  <link rel="stylesheet" href="/style.css?v=6.1">
   <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body>
@@ -114,7 +114,7 @@
 
       <!-- Scan Buttons Grid -->
       <div class="scan-grid">
-        <button class="scan-btn" id="scanBtn" onclick="runScan('watchlist')" title="A+ Swing Trade Scanner: 8 EMA Pullback, Breakout &amp; 3SD Reversals (30-60 DTE Options)">
+        <button class="scan-btn" id="scanBtn" onclick="runScan('watchlist')" title="A+ Swing Trade Scanner: 8 EMA Pullback, Breakout, 3SD Reversals &amp; 52w High/Low Setups (30-60 DTE Options)">
           <div class="scan-btn__spinner"></div>
           <span class="scan-btn__text">📋 Scan Watchlist (Swing A+)</span>
         </button>
@@ -175,6 +175,9 @@
       <div class="filters hidden" id="filters">
         <button class="filter-btn filter-btn--active" data-filter="all" onclick="setFilter('all', this)">All</button>
         <button class="filter-btn" data-filter="aplus" onclick="setFilter('aplus', this)">⭐️ A+ Only</button>
+        <button class="filter-btn filter-btn--52w" data-filter="near52w" onclick="setFilter('near52w', this)">🏔️ At/Near 52w H/L</button>
+        <button class="filter-btn filter-btn--52w" data-filter="near52w_high" onclick="setFilter('near52w_high', this)">📈 At/Near 52w High</button>
+        <button class="filter-btn filter-btn--52w" data-filter="near52w_low" onclick="setFilter('near52w_low', this)">📉 At/Near 52w Low</button>
         <button class="filter-btn" data-filter="bullish" onclick="setFilter('bullish', this)">🟢 Bullish</button>
         <button class="filter-btn" data-filter="bearish" onclick="setFilter('bearish', this)">🔴 Bearish</button>
         <button class="filter-btn" data-filter="zone" onclick="setFilter('zone', this)">🧱 S/D Zone</button>
@@ -702,16 +705,17 @@
         <div class="criteria-sec">
           <div class="criteria-sec__title">📈 [2] Multi-Timeframe Trend &amp; Momentum (Daily Chart)</div>
           <ul class="criteria-sec__list">
-            <li><strong>Primary Trend:</strong> Daily Close &gt; 50-day SMA (Longs) / Daily Close &lt; 50-day SMA (Shorts)</li>
-            <li><strong>Short-Term Momentum:</strong>
+            <li><strong>Primary Trend:</strong> Daily Close &gt; 50-day SMA (Longs) / Daily Close &lt; 50-day SMA (Shorts), plus extreme reversals at 3SD BB or 52-Week High/Low</li>
+            <li><strong>Short-Term Momentum &amp; 52-Week Levels:</strong>
               <div class="criteria-subbox">
                 • <em>8 EMA Trend Pullback:</em> Price touches or closes near 8 EMA while 8 EMA is sloped in trend direction.<br>
                 • <em>Key Level Breakout:</em> Daily close breaks out from consolidation with 8 EMA &gt; 21 EMA.<br>
-                • <em>3SD Bollinger Band Reversal:</em> Daily price touching 3-Standard-Deviation Bollinger Band with confirmed RSI divergence.
+                • <em>3SD Bollinger Band Reversal:</em> Daily price touching 3-Standard-Deviation Bollinger Band with confirmed RSI divergence.<br>
+                • <em>52-Week High / Low Setup:</em> Stock is <strong>Hits (0%)</strong>, <strong>At (≤ 3%)</strong>, or <strong>Near (≤ 5%)</strong> its 52-Week High or 52-Week Low (trend &amp; candle-aware: bounces/breakouts = Bullish, rejections/breakdowns = Bearish).
               </div>
             </li>
             <li><strong>Trend Strength:</strong> ADX(14) ≥ 20 and rising (confirms non-choppy regime)</li>
-            <li><strong>Overextension / Reversal:</strong> Daily RSI(14) between 45–60 on trend pullbacks; OR touching 3SD band with RSI divergence</li>
+            <li><strong>Overextension / Reversal:</strong> Daily RSI(14) between 45–60 on trend pullbacks; OR touching 3SD band / 52-Week High or Low with divergence or reversal candle</li>
           </ul>
         </div>
 
@@ -719,6 +723,7 @@
           <div class="criteria-sec__title">📊 [3] Volume &amp; Catalyst Confluence</div>
           <ul class="criteria-sec__list">
             <li><strong>Relative Volume (RVOL):</strong> ≥ 1.2x to 1.5x on setup day / breakout candle</li>
+            <li><strong>52-Week High / Low Confluence:</strong> Score boost &amp; badge when price is Hits (+3), At ≤ 3% (+2), or Near ≤ 5% (+1) of 52-Week High or 52-Week Low</li>
             <li><strong>Earnings / Binary Event:</strong> 🛡️ Safe: NO earnings or major corporate catalysts within next 14 calendar days (avoids IV crush &amp; gap risk)</li>
           </ul>
         </div>
@@ -807,6 +812,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=8.0"></script>
+  <script src="/app.js?v=8.1"></script>
 </body>
 </html>

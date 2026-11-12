@@ -615,15 +615,23 @@ def _fetch_webull_unofficial_one(ticker, days=180, interval="1d", includePrePost
             
             df["Volume"] = df["Volume"].fillna(0).astype(np.int64)
             
-            # Fetch 52-week metrics
-            high_52w = float(df["High"].max())
-            low_52w = float(df["Low"].min())
+            # Fetch 52-week metrics (fallback to trailing 252 trading bars when quote lacks 52w fields)
+            tail_252 = df.tail(252)
+            high_52w = float(tail_252["High"].max())
+            low_52w = float(tail_252["Low"].min())
             pre_close = float(df["Close"].iloc[-2]) if len(df) > 1 else float(df["Close"].iloc[0])
             
             try:
                 quote = wb_un.get_quote(stock=ticker)
                 if quote:
                     pre_close = float(quote.get("close", pre_close))
+                    q_52w_high = _safe_float(quote.get("fiftyTwoWkHigh") or quote.get("fiftyTwoWeekHigh"))
+                    q_52w_low = _safe_float(quote.get("fiftyTwoWkLow") or quote.get("fiftyTwoWeekLow"))
+                    if q_52w_high and q_52w_high > 0:
+                        high_52w = max(q_52w_high, float(df["High"].iloc[-1]))
+                    if q_52w_low and q_52w_low > 0:
+                        bar_low = float(df["Low"].iloc[-1])
+                        low_52w = min(q_52w_low, bar_low) if bar_low > 0 else q_52w_low
                     p_price = quote.get("pPrice")
                     if p_price and float(p_price) > 0 and includePrePost == "true":
                         ext_price = float(p_price)
@@ -632,6 +640,8 @@ def _fetch_webull_unofficial_one(ticker, days=180, interval="1d", includePrePost
                             df.loc[df.index[-1], "High"] = ext_price
                         if ext_price < df.loc[df.index[-1], "Low"]:
                             df.loc[df.index[-1], "Low"] = ext_price
+                        high_52w = max(high_52w, ext_price)
+                        low_52w = min(low_52w, ext_price)
                         print(f"  🌙 [Extended Hours] {ticker} live price updated to ${ext_price:.2f}")
             except Exception:
                 pass
@@ -1615,11 +1625,13 @@ def fetch_quotes_batch(tickers, max_workers=10, on_progress=None):
         try:
             q = wb_un.get_quote(stock=sym)
             if q and isinstance(q, dict):
-                price = float(q["close"]) if q.get("close") else None
-                pre_close = float(q["preClose"]) if q.get("preClose") else None
-                mcap = float(q["marketValue"]) if q.get("marketValue") else None
+                price = _safe_float(q.get("close"))
+                pre_close = _safe_float(q.get("preClose"))
+                mcap = _safe_float(q.get("marketValue"))
                 vol = int(float(q["volume"])) if q.get("volume") else None
                 avg_vol = int(float(q["avgVol3M"])) if q.get("avgVol3M") else (int(float(q["avgVol10D"])) if q.get("avgVol10D") else None)
+                high_52w = _safe_float(q.get("fiftyTwoWkHigh") or q.get("fiftyTwoWeekHigh"))
+                low_52w = _safe_float(q.get("fiftyTwoWkLow") or q.get("fiftyTwoWeekLow"))
                 name = q.get("name")
                 earnings = q.get("nextEarningDay") or q.get("estimateEarningsDate") or q.get("latestEarningsDate")
                 return sym, {
@@ -1628,6 +1640,8 @@ def fetch_quotes_batch(tickers, max_workers=10, on_progress=None):
                     "marketCap": mcap,
                     "avgVolume": avg_vol,
                     "volume": vol,
+                    "fiftyTwoWeekHigh": high_52w if high_52w and high_52w > 0 else None,
+                    "fiftyTwoWeekLow": low_52w if low_52w and low_52w > 0 else None,
                     "name": name,
                     "earnings": earnings,
                 }
