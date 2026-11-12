@@ -1097,7 +1097,9 @@ class PaperTrader:
                     f"<b>Reason:</b> {reason_clean}"
                 )
                 send_telegram_notification(exit_msg)
-                send_sms_notification(f"{exit_icon} POSITION CLOSED: {trade_record['ticker']} | P&L: {pnl_str} ({pnl_pct_val:+.1f}%) | {reason_clean}")
+                alert_method = os.getenv("ALERT_METHOD", "TELEGRAM").upper()
+                if alert_method in ("SMS", "BOTH"):
+                    send_sms_notification(f"{exit_icon} POSITION CLOSED: {trade_record['ticker']} | P&L: {pnl_str} ({pnl_pct_val:+.1f}%) | {reason_clean}")
             except Exception as notify_err:
                 logger.warning(f"Failed to send exit notification: {notify_err}")
 
@@ -1593,7 +1595,9 @@ class PaperTrader:
                     f"<b>Mode:</b> {mode_str}"
                 )
                 send_telegram_notification(tg_msg)
-                send_sms_notification(f"⚡ TEST TRADE EXECUTED: {ticker} {opt_type} ${strike} @ ${entry_px:.2f} (Verified Working)")
+                alert_method = os.getenv("ALERT_METHOD", "TELEGRAM").upper()
+                if alert_method in ("SMS", "BOTH"):
+                    send_sms_notification(f"⚡ TEST TRADE EXECUTED: {ticker} {opt_type} ${strike} @ ${entry_px:.2f} (Verified Working)")
                 logger.info(f"[PaperTrader] 🚀 Test trade executed successfully for {ticker}: {opt_sym} @ ${entry_px:.2f}")
             except Exception as notify_err:
                 logger.warning(f"[PaperTrader] Test trade notification error: {notify_err}")

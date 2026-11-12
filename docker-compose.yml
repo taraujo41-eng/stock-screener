@@ -10,6 +10,7 @@ services:
       - SCAN_DATA_DIR=/app/scan_data
       - SKIP_BOT_THREAD=true
       - ALLOW_DELAYED_OPTIONS_TRADING=true
+      - ALERT_METHOD=TELEGRAM
     ports:
       - "127.0.0.1:5000:5000"
     volumes:
@@ -30,6 +31,7 @@ services:
       - ALLOW_DELAYED_OPTIONS_TRADING=true
       - EXECUTE_TEST_TRADE_ON_START=true
       - TEST_TRADE_AUTO_CLOSE_SECS=60
+      - ALERT_METHOD=TELEGRAM
     volumes:
       - ./conf:/app/conf
       - scan_data:/app/scan_data

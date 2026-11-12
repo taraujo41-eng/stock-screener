@@ -228,6 +228,10 @@ _load_alerted_today()
 
 def send_sms_notification(message):
     """Sends a text message alert using Yahoo SMTP and mobile carrier SMS gateway."""
+    alert_method = os.getenv("ALERT_METHOD", "TELEGRAM").upper()
+    if alert_method not in ("SMS", "BOTH"):
+        return
+
     gateway = os.getenv("SMS_GATEWAY_EMAIL")
     yahoo_pwd = os.getenv("YAHOO_APP_PASSWORD")
     if not gateway or not yahoo_pwd:
