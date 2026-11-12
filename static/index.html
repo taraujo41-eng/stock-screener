@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.json">
   <link rel="apple-touch-icon" href="/icon.png">
   <link rel="icon" href="/icon.png">
-  <link rel="stylesheet" href="/style.css?v=6.2">
+  <link rel="stylesheet" href="/style.css?v=6.3">
   <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body>
@@ -63,7 +63,7 @@
           <div class="sentiment-title-wrap">
             <span class="sentiment-icon">🌐</span>
             <span class="sentiment-title">MARKET SENTIMENT</span>
-            <span class="sentiment-pill sentiment-pill--bullish" id="marketSentimentPill">BULLISH 🟢</span>
+            <span class="sentiment-pill sentiment-pill--neutral" id="marketSentimentPill">UPDATING ⚪</span>
             <span class="sentiment-updated-time" id="sentimentUpdatedTime" style="font-size:0.68rem; color:var(--text-muted); margin-left:6px; font-weight:500;"></span>
           </div>
           <button class="sentiment-refresh-btn" id="sentimentRefreshBtn" onclick="fetchLiveMarketSentiment(true)" title="Refresh live market sentiment">🔄 Live</button>
@@ -72,35 +72,35 @@
           <div class="sentiment-index-item">
             <div class="sentiment-index-head">
               <span class="sentiment-index-symbol">SPY</span>
-              <span class="sentiment-index-price" id="spyPrice">$771.35</span>
+              <span class="sentiment-index-price" id="spyPrice">—</span>
             </div>
             <div class="sentiment-index-sub">
-              <span class="sentiment-index-change sentiment-up" id="spyChange">+0.54%</span>
-              <span class="sentiment-index-regime" id="spyRegime">Above 50 SMA</span>
+              <span class="sentiment-index-change" id="spyChange">—</span>
+              <span class="sentiment-index-regime" id="spyRegime">Loading...</span>
             </div>
           </div>
           <div class="sentiment-index-item">
             <div class="sentiment-index-head">
               <span class="sentiment-index-symbol">QQQ</span>
-              <span class="sentiment-index-price" id="qqqPrice">$744.50</span>
+              <span class="sentiment-index-price" id="qqqPrice">—</span>
             </div>
             <div class="sentiment-index-sub">
-              <span class="sentiment-index-change sentiment-up" id="qqqChange">+0.46%</span>
-              <span class="sentiment-index-regime" id="qqqRegime">Above 50 SMA</span>
+              <span class="sentiment-index-change" id="qqqChange">—</span>
+              <span class="sentiment-index-regime" id="qqqRegime">Loading...</span>
             </div>
           </div>
           <div class="sentiment-index-item">
             <div class="sentiment-index-head">
               <span class="sentiment-index-symbol">VIX</span>
-              <span class="sentiment-index-price" id="vixPrice">16.85</span>
+              <span class="sentiment-index-price" id="vixPrice">—</span>
             </div>
             <div class="sentiment-index-sub">
-              <span class="sentiment-index-risk sentiment-risk--on" id="vixState">Risk-On (Low Vol)</span>
+              <span class="sentiment-index-risk sentiment-risk--on" id="vixState">Loading...</span>
             </div>
           </div>
         </div>
         <div class="sentiment-summary" id="sentimentSummary">
-          SPY &amp; QQQ trading above key moving averages with low volatility regime.
+          Fetching live market sentiment...
         </div>
       </div>
 
@@ -813,6 +813,6 @@
     </div>
   </div>
 
-  <script src="/app.js?v=8.2"></script>
+  <script src="/app.js?v=8.3"></script>
 </body>
 </html>

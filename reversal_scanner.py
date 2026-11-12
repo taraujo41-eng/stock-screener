@@ -431,6 +431,91 @@ def prefilter_liquid_optionable(tickers, MIN_PRICE=10.0, MIN_AVG_VOLUME=500_000)
 _market_sentiment_cache = None
 _market_sentiment_cache_ts = 0
 
+def _fetch_sentiment_index_data(symbol):
+    """
+    Fetches real-time price, previous close, and historical daily bars for SPY/QQQ.
+    Uses Webull and yfinance to guarantee fresh data in all market sessions.
+    """
+    price = None
+    prev_close = None
+    df = None
+
+    # 1. Try Webull quote if available
+    try:
+        from data_fetcher import get_unofficial_client
+        wb_un = get_unofficial_client()
+        if wb_un:
+            q = wb_un.get_quote(stock=symbol)
+            if q and isinstance(q, dict):
+                p_cur = _safe_float(q.get("pPrice"))
+                cur = _safe_float(q.get("close"))
+                pre = _safe_float(q.get("preClose"))
+                if p_cur and p_cur > 0:
+                    price = p_cur
+                elif cur and cur > 0:
+                    price = cur
+                if pre and pre > 0:
+                    prev_close = pre
+    except Exception:
+        pass
+
+    # 2. Try yfinance for real-time fast_info and history
+    try:
+        import yfinance as yf
+        t = yf.Ticker(symbol)
+        fi = getattr(t, "fast_info", None)
+        if fi:
+            if not price and getattr(fi, "last_price", None):
+                price = float(fi.last_price)
+            if not prev_close and getattr(fi, "previous_close", None):
+                prev_close = float(fi.previous_close)
+        
+        hist = t.history(period="1y", interval="1d")
+        if hist is not None and len(hist) >= 20:
+            df = hist
+            if not price and len(df) > 0:
+                price = float(df['Close'].iloc[-1])
+            if not prev_close and len(df) > 1:
+                prev_close = float(df['Close'].iloc[-2])
+    except Exception:
+        pass
+
+    # 3. Fallback to data_fetcher fetch_one if historical df still needed
+    if df is None:
+        try:
+            from data_fetcher import fetch_one
+            df = fetch_one(symbol, days=250, interval="1d")
+            if df is not None and len(df) >= 20:
+                if not price and len(df) > 0:
+                    price = float(df['Close'].iloc[-1])
+                if not prev_close and len(df) > 1:
+                    prev_close = float(df['Close'].iloc[-2])
+        except Exception:
+            pass
+
+    return price, prev_close, df
+
+
+def _fetch_sentiment_vix_data():
+    """Fetches real-time CBOE Volatility Index (^VIX)."""
+    try:
+        import yfinance as yf
+        t = yf.Ticker("^VIX")
+        fi = getattr(t, "fast_info", None)
+        if fi and getattr(fi, "last_price", None):
+            val = float(fi.last_price)
+            if val > 0:
+                return round(val, 2)
+        hist = t.history(period="5d", interval="1d")
+        if hist is not None and len(hist) > 0:
+            val = float(hist['Close'].iloc[-1])
+            if val > 0:
+                return round(val, 2)
+    except Exception:
+        pass
+    return 18.5
+
+
 def get_market_sentiment(max_age_seconds=180, force=False):
     """
     Evaluates comprehensive Market Sentiment (SPY, QQQ, VIX).
@@ -451,104 +536,106 @@ def get_market_sentiment(max_age_seconds=180, force=False):
         return _market_sentiment_cache
 
     try:
-        from data_fetcher import fetch_one
-        spy_df = fetch_one("SPY", days=250, interval="1d")
-        qqq_df = fetch_one("QQQ", days=250, interval="1d")
-        vix_df = fetch_one("^VIX", days=30, interval="1d")
-        if vix_df is None or len(vix_df) == 0:
-            vix_df = fetch_one("VIX", days=30, interval="1d")
-
         score = 50  # Neutral base
         details = []
 
         # 1. SPY Analysis
-        spy_info = {"close": 0, "change_pct": 0, "regime": "Above 50 SMA"}
+        spy_price, spy_prev, spy_df = _fetch_sentiment_index_data("SPY")
+        spy_c = round(float(spy_price), 2) if spy_price else 0.0
+        spy_prev = float(spy_prev) if spy_prev else spy_c
+        spy_chg = round(((spy_c - spy_prev) / spy_prev) * 100, 2) if spy_prev > 0 else 0.0
+
+        spy_above_ema20 = True
+        spy_above_sma50 = True
+        spy_above_sma200 = True
+
         if spy_df is not None and len(spy_df) >= 20:
-            c = float(spy_df['Close'].iloc[-1])
-            prev = float(spy_df['Close'].iloc[-2]) if len(spy_df) > 1 else c
-            chg_pct = round(((c - prev) / prev) * 100, 2)
-            ema20 = float(compute_ema(spy_df['Close'], 20).iloc[-1]) if len(spy_df) >= 20 else c
-            sma50 = float(compute_sma(spy_df['Close'], 50).iloc[-1]) if len(spy_df) >= 50 else c
-            sma200 = float(compute_sma(spy_df['Close'], 200).iloc[-1]) if len(spy_df) >= 200 else c
+            ema20 = float(compute_ema(spy_df['Close'], 20).iloc[-1])
+            sma50 = float(compute_sma(spy_df['Close'], 50).iloc[-1]) if len(spy_df) >= 50 else ema20
+            sma200 = float(compute_sma(spy_df['Close'], 200).iloc[-1]) if len(spy_df) >= 200 else ema20
 
-            above_ema20 = c >= ema20
-            above_sma50 = c >= sma50
-            above_sma200 = c >= sma200
+            spy_above_ema20 = spy_c >= ema20
+            spy_above_sma50 = spy_c >= sma50
+            spy_above_sma200 = spy_c >= sma200
 
-            if above_sma50:
-                score += 15
-                details.append("SPY > 50 SMA")
-            else:
-                score -= 15
-                details.append("SPY < 50 SMA")
+        if spy_above_sma50:
+            score += 15
+            details.append("SPY > 50 SMA")
+        else:
+            score -= 15
+            details.append("SPY < 50 SMA")
 
-            if above_ema20:
-                score += 10
-            else:
-                score -= 10
+        if spy_above_ema20:
+            score += 10
+        else:
+            score -= 10
 
-            if above_sma200:
-                score += 10
-            else:
-                score -= 10
+        if spy_above_sma200:
+            score += 10
+        else:
+            score -= 10
 
-            if chg_pct > 0:
-                score += 5
-            elif chg_pct < 0:
-                score -= 5
+        if spy_chg > 0:
+            score += 5
+        elif spy_chg < 0:
+            score -= 5
 
-            spy_info = {
-                "close": round(c, 2),
-                "change_pct": chg_pct,
-                "above_ema20": above_ema20,
-                "above_sma50": above_sma50,
-                "above_sma200": above_sma200,
-                "regime": "Above 50 SMA" if above_sma50 else "Below 50 SMA"
-            }
+        spy_info = {
+            "close": spy_c,
+            "change_pct": spy_chg,
+            "above_ema20": spy_above_ema20,
+            "above_sma50": spy_above_sma50,
+            "above_sma200": spy_above_sma200,
+            "regime": "Above 50 SMA" if spy_above_sma50 else "Below 50 SMA"
+        }
 
         # 2. QQQ Analysis
-        qqq_info = {"close": 0, "change_pct": 0, "regime": "Above 50 SMA"}
+        qqq_price, qqq_prev, qqq_df = _fetch_sentiment_index_data("QQQ")
+        qqq_c = round(float(qqq_price), 2) if qqq_price else 0.0
+        qqq_prev = float(qqq_prev) if qqq_prev else qqq_c
+        qqq_chg = round(((qqq_c - qqq_prev) / qqq_prev) * 100, 2) if qqq_prev > 0 else 0.0
+
+        qqq_above_ema20 = True
+        qqq_above_sma50 = True
+        qqq_above_sma200 = True
+
         if qqq_df is not None and len(qqq_df) >= 20:
-            c = float(qqq_df['Close'].iloc[-1])
-            prev = float(qqq_df['Close'].iloc[-2]) if len(qqq_df) > 1 else c
-            chg_pct = round(((c - prev) / prev) * 100, 2)
-            ema20 = float(compute_ema(qqq_df['Close'], 20).iloc[-1]) if len(qqq_df) >= 20 else c
-            sma50 = float(compute_sma(qqq_df['Close'], 50).iloc[-1]) if len(qqq_df) >= 50 else c
-            sma200 = float(compute_sma(qqq_df['Close'], 200).iloc[-1]) if len(qqq_df) >= 200 else c
+            ema20 = float(compute_ema(qqq_df['Close'], 20).iloc[-1])
+            sma50 = float(compute_sma(qqq_df['Close'], 50).iloc[-1]) if len(qqq_df) >= 50 else ema20
+            sma200 = float(compute_sma(qqq_df['Close'], 200).iloc[-1]) if len(qqq_df) >= 200 else ema20
 
-            above_ema20 = c >= ema20
-            above_sma50 = c >= sma50
-            above_sma200 = c >= sma200
+            qqq_above_ema20 = qqq_c >= ema20
+            qqq_above_sma50 = qqq_c >= sma50
+            qqq_above_sma200 = qqq_c >= sma200
 
-            if above_sma50:
-                score += 10
-                details.append("QQQ > 50 SMA")
-            else:
-                score -= 10
-                details.append("QQQ < 50 SMA")
+        if qqq_above_sma50:
+            score += 10
+            details.append("QQQ > 50 SMA")
+        else:
+            score -= 10
+            details.append("QQQ < 50 SMA")
 
-            if above_ema20:
-                score += 5
-            else:
-                score -= 5
+        if qqq_above_ema20:
+            score += 5
+        else:
+            score -= 5
 
-            if chg_pct > 0:
-                score += 5
-            elif chg_pct < 0:
-                score -= 5
+        if qqq_chg > 0:
+            score += 5
+        elif qqq_chg < 0:
+            score -= 5
 
-            qqq_info = {
-                "close": round(c, 2),
-                "change_pct": chg_pct,
-                "above_ema20": above_ema20,
-                "above_sma50": above_sma50,
-                "above_sma200": above_sma200,
-                "regime": "Above 50 SMA" if above_sma50 else "Below 50 SMA"
-            }
+        qqq_info = {
+            "close": qqq_c,
+            "change_pct": qqq_chg,
+            "above_ema20": qqq_above_ema20,
+            "above_sma50": qqq_above_sma50,
+            "above_sma200": qqq_above_sma200,
+            "regime": "Above 50 SMA" if qqq_above_sma50 else "Below 50 SMA"
+        }
 
         # 3. VIX Analysis
-        vix_val = float(vix_df['Close'].iloc[-1]) if vix_df is not None and len(vix_df) > 0 else 16.5
-        vix_val = round(vix_val, 2)
+        vix_val = _fetch_sentiment_vix_data()
         if vix_val < 18.0:
             vix_state = "Risk-On (Low Vol)"
             score += 10
@@ -612,14 +699,14 @@ def get_market_sentiment(max_age_seconds=180, force=False):
         except Exception:
             ts_fallback = datetime.now().strftime("%I:%M %p")
         return {
-            "sentiment": "Bullish",
-            "score": 65,
-            "label": "BULLISH 🟢",
-            "is_bullish": True,
+            "sentiment": "Neutral",
+            "score": 50,
+            "label": "NEUTRAL ⚪",
+            "is_bullish": False,
             "spy": {"close": 0, "change_pct": 0, "regime": "Above 50 SMA"},
             "qqq": {"close": 0, "change_pct": 0, "regime": "Above 50 SMA"},
-            "vix": {"close": 16.5, "risk_state": "Risk-On (Low Vol)"},
-            "summary": "Market Sentiment is Bullish",
+            "vix": {"close": 18.5, "risk_state": "Moderate Vol"},
+            "summary": "Market Sentiment is Neutral",
             "timestamp": ts_fallback
         }
 

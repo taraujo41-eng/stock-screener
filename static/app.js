@@ -157,6 +157,7 @@ async function loadLastWatchlistScan() {
       const data = await res.json();
       if (data.ok && data.results && data.results.length > 0) {
         displayResults(data);
+        fetchLiveMarketSentiment(true);
         return;
       }
     }
@@ -1580,7 +1581,7 @@ checkActiveScan().then(running => {
 
 // Fetch user watchlist from server on app load
 fetchWatchlist();
-fetchLiveMarketSentiment();
+fetchLiveMarketSentiment(true);
 
 // ── Watchlist Manager Functions ───────────────────────────────────
 

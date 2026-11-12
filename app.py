@@ -596,8 +596,7 @@ def scan_rsidiv_results():
     results = get_fresh_scan_results("LAST_RSIDIV_RESULTS", RSIDIV_RESULTS_FILE)
     if results is None or not isinstance(results, dict):
         return jsonify({"ok": True, "mode": "rsidiv", "count": 0, "results": [], "timestamp": "Ready", "market_sentiment": get_market_sentiment()}), 200
-    if "market_sentiment" not in results:
-        results["market_sentiment"] = get_market_sentiment()
+    results["market_sentiment"] = get_market_sentiment()
     return jsonify(results)
 
 # ── API: Watchlist Scan ─────────────────────────────────────────────
@@ -722,9 +721,8 @@ def debug_files():
 def scan_watchlist_results():
     results = get_fresh_scan_results("LAST_WATCHLIST_RESULTS", WATCHLIST_RESULTS_FILE)
     if not results or not isinstance(results, dict):
-        return jsonify({"ok": True, "mode": "watchlist", "count": 0, "results": [], "timestamp": "Ready"}), 200
-    if "market_sentiment" not in results:
-        results["market_sentiment"] = get_market_sentiment()
+        return jsonify({"ok": True, "mode": "watchlist", "count": 0, "results": [], "timestamp": "Ready", "market_sentiment": get_market_sentiment()}), 200
+    results["market_sentiment"] = get_market_sentiment()
     return jsonify(results)
 
 @app.route("/api/market-sentiment", methods=["GET"])
@@ -799,8 +797,7 @@ def scan_top50_results():
     results = get_fresh_scan_results("LAST_TOP50_RESULTS", TOP_50_RESULTS_FILE)
     if not results or not isinstance(results, dict):
         return jsonify({"ok": True, "mode": "top50", "count": 0, "results": [], "timestamp": "Ready", "market_sentiment": get_market_sentiment()}), 200
-    if "market_sentiment" not in results:
-        results["market_sentiment"] = get_market_sentiment()
+    results["market_sentiment"] = get_market_sentiment()
     return jsonify(results)
 
 @app.route("/api/top50/tickers", methods=["GET"])
@@ -973,8 +970,7 @@ def scan_unusual_options_results():
     results = get_fresh_scan_results("LAST_UNUSUAL_OPTIONS_RESULTS", UNUSUAL_OPTIONS_RESULTS_FILE)
     if results is None or not isinstance(results, dict):
         return jsonify({"ok": True, "mode": "unusual_options", "count": 0, "results": [], "timestamp": "Ready", "market_sentiment": get_market_sentiment()}), 200
-    if "market_sentiment" not in results:
-        results["market_sentiment"] = get_market_sentiment()
+    results["market_sentiment"] = get_market_sentiment()
     return jsonify(results)
 
 # ── API: Watchlist CRUD ─────────────────────────────────────────────
