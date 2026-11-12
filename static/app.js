@@ -3466,6 +3466,45 @@ function _fallbackCopy(text, ticker) {
   showToast(`✓ Copied ${ticker} Pre-Trade Log to Clipboard!`);
 }
 
+// ── Test Trade Execution Action ──
+async function executeTestTrade() {
+  const btn = document.getElementById("btnExecuteTestTrade");
+  const ticker = document.getElementById("testTradeTicker")?.value || "SPY";
+  const signal_type = document.getElementById("testTradeDirection")?.value || "bullish";
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳ Placing Trade...";
+  }
+
+  showToast(`⚡ Submitting test order: ${ticker} ${signal_type.toUpperCase()}...`);
+
+  try {
+    const res = await fetch("/api/paper/test-trade", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker, signal_type })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast(`✅ Test Trade Placed: ${ticker} ${signal_type.toUpperCase()} filled!`);
+      if (typeof fetchPaperData === "function") {
+        await fetchPaperData();
+      }
+    } else {
+      showToast(`❌ Trade Failed: ${data.error || 'Check server logs'}`);
+    }
+  } catch (err) {
+    console.error("Test trade request failed:", err);
+    showToast(`❌ Error: ${err.message}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "⚡ Execute Test Trade";
+    }
+  }
+}
+
 
 
 

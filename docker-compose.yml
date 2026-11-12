@@ -9,6 +9,7 @@ services:
     environment:
       - SCAN_DATA_DIR=/app/scan_data
       - SKIP_BOT_THREAD=true
+      - ALLOW_DELAYED_OPTIONS_TRADING=true
     ports:
       - "127.0.0.1:5000:5000"
     volumes:
@@ -26,6 +27,8 @@ services:
       - SCAN_DATA_DIR=/app/scan_data
       - EARLIEST_TRADE_TIME_MINS=580
       - LATEST_TRADE_TIME_MINS=930
+      - ALLOW_DELAYED_OPTIONS_TRADING=true
+      - EXECUTE_TEST_TRADE_ON_START=true
     volumes:
       - ./conf:/app/conf
       - scan_data:/app/scan_data

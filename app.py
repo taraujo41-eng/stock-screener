@@ -1555,6 +1555,31 @@ def paper_reset():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/paper/test-trade", methods=["POST"])
+def paper_test_trade():
+    """Trigger an immediate test paper trade for system verification."""
+    try:
+        from paper_trader import get_paper_trader
+        pt = get_paper_trader()
+        data = request.get_json(silent=True) or {}
+        ticker = (data.get("ticker") or "SPY").strip().upper()
+        signal_type = (data.get("signal_type") or "bullish").strip().lower()
+
+        trade = pt.execute_test_trade(ticker=ticker, signal_type=signal_type)
+        if trade:
+            return jsonify({
+                "ok": True,
+                "message": f"Test trade placed successfully for {ticker} ({signal_type.upper()})!",
+                "trade": trade
+            }), 200
+        else:
+            return jsonify({
+                "ok": False,
+                "error": "Failed to place test trade. Check server logs for details."
+            }), 500
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 # ── Start ────────────────────────────────────────────────────────────
 
 def get_local_ip():

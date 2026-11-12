@@ -259,6 +259,34 @@
         </div>
       </div>
 
+      <!-- Test Trade / Operational Verification Action Bar -->
+      <div class="test-trade-bar">
+        <div class="test-trade-info">
+          <span class="test-trade-icon">⚡</span>
+          <div>
+            <div class="test-trade-title">Test Bot Trading & Telegram Alerts</div>
+            <div class="test-trade-subtitle">Place an immediate test paper trade to verify order execution, phone/Telegram notifications, and position management.</div>
+          </div>
+        </div>
+        <div class="test-trade-controls">
+          <select id="testTradeTicker" class="test-trade-select" title="Select stock ticker">
+            <option value="SPY">SPY (S&P 500)</option>
+            <option value="QQQ">QQQ (Nasdaq 100)</option>
+            <option value="AAPL">AAPL (Apple)</option>
+            <option value="NVDA">NVDA (Nvidia)</option>
+            <option value="TSLA">TSLA (Tesla)</option>
+            <option value="AMD">AMD (AMD)</option>
+          </select>
+          <select id="testTradeDirection" class="test-trade-select" title="Select trade direction">
+            <option value="bullish">🟢 Bullish (Call)</option>
+            <option value="bearish">🔴 Bearish (Put)</option>
+          </select>
+          <button class="test-trade-btn" id="btnExecuteTestTrade" onclick="executeTestTrade()">
+            ⚡ Execute Test Trade
+          </button>
+        </div>
+      </div>
+
       <!-- Section: Open Positions -->
       <div class="paper-section">
         <div class="paper-section-title">

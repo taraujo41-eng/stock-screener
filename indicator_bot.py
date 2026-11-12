@@ -1029,6 +1029,17 @@ def start_bot_thread():
                             pt._notify_delayed_data_once("Bot startup check (SPY)", str(opt_err))
                 except Exception as diag_err:
                     logger.warning(f"Startup market-data check failed: {diag_err}")
+
+                # If requested, trigger a test trade on startup to verify execution and alert pipelines
+                if os.getenv("EXECUTE_TEST_TRADE_ON_START", "false").lower() in ("true", "1", "yes"):
+                    def _delayed_test_trade():
+                        time.sleep(5)
+                        try:
+                            logger.info("⚡ Executing automatic startup test trade on SPY to verify bot is operational...")
+                            pt.execute_test_trade(ticker="SPY", signal_type="bullish")
+                        except Exception as ex:
+                            logger.error(f"Error executing startup test trade: {ex}")
+                    threading.Thread(target=_delayed_test_trade, daemon=True).start()
             else:
                 logger.warning("Paper trader login failed — auto-trading disabled.")
         else:
