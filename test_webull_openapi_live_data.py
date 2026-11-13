@@ -390,11 +390,14 @@ class TestWebullOpenAPILiveData(unittest.TestCase):
             self.assertEqual(order_valid["status"], "open")
 
         # 4. Exits allowed ANYTIME (e.g. 1:30 PM = 810 mins, well after 11:30 AM entry cutoff)
-        with patch.object(paper_trader, "_save_trade_log"):
+        with patch.object(paper_trader, "_save_trade_log"), \
+             patch("indicator_bot.send_telegram_notification") as mock_tg_exit, \
+             patch("indicator_bot.send_sms_notification"):
             closed = trader.close_position(order_valid, exit_price=6.0, reason="Take profit 2:1")
             self.assertTrue(closed)
             self.assertEqual(order_valid["status"], "closed")
             self.assertEqual(order_valid["exit_reason"], "Take profit 2:1")
+            self.assertEqual(mock_tg_exit.call_count, 1)
 
 
 if __name__ == "__main__":
