@@ -5,6 +5,7 @@ unofficial session verification, and PaperTrader real-time entry guards.
 
 import os
 import unittest
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -319,6 +320,81 @@ class TestWebullOpenAPILiveData(unittest.TestCase):
         self.assertTrue(diag["webull_openapi_options_ok"])
         self.assertTrue(diag["realtime_options_ready"])
         self.assertFalse(data_fetcher._is_openapi_scope_blocked("US_OPTION"))
+
+    def test_trading_window_entry_restrictions_and_anytime_exit(self):
+        """PaperTrader strictly allows entries only 9:30-11:30 AM ET while allowing exits anytime."""
+        with patch.object(paper_trader, "_load_trade_log", return_value={"trades": []}), \
+             patch.object(paper_trader, "_save_trade_log"):
+            trader = paper_trader.PaperTrader()
+
+        # Default configured window is 9:30 AM (570) to 11:30 AM (690)
+        self.assertEqual(trader.earliest_trade_mins, 570)
+        self.assertEqual(trader.latest_trade_mins, 690)
+
+        trader.allow_delayed_options = True
+        trader._logged_in = True
+        trader._is_real_paper_account = False
+
+        live_contract = {
+            "symbol": "AMD261120C00150000",
+            "tickerId": "1043714005",
+            "strike": 150.0,
+            "type": "CALL",
+            "exp": "Nov 20",
+            "exp_date": "2026-11-20",
+            "dte": 9,
+            "mid": 5.0,
+            "bid": 4.9,
+            "ask": 5.1,
+            "spread": 0.2,
+            "spread_pct": 4.0,
+            "quote_source": "Webull_OpenAPI",
+            "is_realtime": True,
+        }
+
+        ny_tz = paper_trader.get_ny_timezone()
+
+        # 1. Blocked before 9:30 AM (e.g. 9:15 AM = 555 mins)
+        time_915 = datetime(2026, 11, 13, 9, 15, tzinfo=ny_tz)
+        with patch("paper_trader.datetime") as mock_dt, \
+             patch.object(trader, "_check_risk_limits", return_value=(True, "")), \
+             patch.object(trader, "get_available_funds", return_value=3000.0), \
+             patch("reversal_scanner.find_best_option", return_value=live_contract):
+            mock_dt.now.return_value = time_915
+            mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+            order_early = trader.place_option_order("AMD", "bullish", 150.0, 149.0)
+            self.assertIsNone(order_early)
+
+        # 2. Blocked after 11:30 AM (e.g. 11:45 AM = 705 mins)
+        time_1145 = datetime(2026, 11, 13, 11, 45, tzinfo=ny_tz)
+        with patch("paper_trader.datetime") as mock_dt, \
+             patch.object(trader, "_check_risk_limits", return_value=(True, "")), \
+             patch.object(trader, "get_available_funds", return_value=3000.0), \
+             patch("reversal_scanner.find_best_option", return_value=live_contract):
+            mock_dt.now.return_value = time_1145
+            mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+            order_late = trader.place_option_order("AMD", "bullish", 150.0, 149.0)
+            self.assertIsNone(order_late)
+
+        # 3. Permitted inside window (e.g. 10:15 AM = 615 mins)
+        time_1015 = datetime(2026, 11, 13, 10, 15, tzinfo=ny_tz)
+        with patch("paper_trader.datetime") as mock_dt, \
+             patch.object(trader, "_check_risk_limits", return_value=(True, "")), \
+             patch.object(trader, "get_available_funds", return_value=3000.0), \
+             patch("reversal_scanner.find_best_option", return_value=live_contract), \
+             patch.object(paper_trader, "_save_trade_log"):
+            mock_dt.now.return_value = time_1015
+            mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
+            order_valid = trader.place_option_order("AMD", "bullish", 150.0, 149.0)
+            self.assertIsNotNone(order_valid)
+            self.assertEqual(order_valid["status"], "open")
+
+        # 4. Exits allowed ANYTIME (e.g. 1:30 PM = 810 mins, well after 11:30 AM entry cutoff)
+        with patch.object(paper_trader, "_save_trade_log"):
+            closed = trader.close_position(order_valid, exit_price=6.0, reason="Take profit 2:1")
+            self.assertTrue(closed)
+            self.assertEqual(order_valid["status"], "closed")
+            self.assertEqual(order_valid["exit_reason"], "Take profit 2:1")
 
 
 if __name__ == "__main__":

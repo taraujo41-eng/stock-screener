@@ -140,8 +140,8 @@ class PaperTrader:
         self.trailing_stop_callback_pct = _cfg("PAPER_TRAILING_STOP_CALLBACK_PCT", "2.5", float)
         self.breakeven_stop_pct = _cfg("PAPER_BREAKEVEN_STOP_PCT", "0.0", float)
         self.max_hold_minutes = _cfg("PAPER_MAX_HOLD_MINUTES", "0", int)
-        self.earliest_trade_mins = _cfg("EARLIEST_TRADE_TIME_MINS", "580", int)
-        self.latest_trade_mins = _cfg("LATEST_TRADE_TIME_MINS", "930", int)
+        self.earliest_trade_mins = _cfg("EARLIEST_TRADE_TIME_MINS", "570", int)
+        self.latest_trade_mins = _cfg("LATEST_TRADE_TIME_MINS", "690", int)
         self.close_before_eod = _cfg("PAPER_CLOSE_BEFORE_MARKET_CLOSE", "true", bool)
         self.allow_delayed_options = _cfg("ALLOW_DELAYED_OPTIONS_TRADING", "false", bool)
         self._last_delayed_alert_date = None
@@ -606,7 +606,7 @@ class PaperTrader:
                 logger.error("[PaperTrader] Cannot place order — not logged in")
                 return None
 
-        # Guard: Trading window check (allow trades only from 9:30 AM to 11:00 AM ET)
+        # Guard: Trading window check (allow trade entries only from 9:30 AM to 11:30 AM ET)
         if not force and (self.earliest_trade_mins > 0 or self.latest_trade_mins > 0):
             ny_tz = get_ny_timezone()
             now = datetime.now(ny_tz)
