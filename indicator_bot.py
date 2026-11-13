@@ -472,7 +472,7 @@ def evaluate_ticker_process(ticker, df):
        - Asset Class: Large-Cap / High Liquidity Equities & Directional Options (Market Cap >= $10B)
        - Execution Timeframe: 5-Minute Chart
        - Session Reference Window: 04:00 - 09:30 ET (Premarket High / Low)
-       - Active Trading Window: 09:30 - 11:30 ET
+       - Active Trading Window: 09:40 - 11:30 ET (Locks out initial 10-minute whipsaw)
        - Edge: Opening expansion momentum outside established premarket balance area.
     
     2. Key Levels & Parameters:
@@ -484,7 +484,7 @@ def evaluate_ticker_process(ticker, df):
     
     3. Entry Rules:
        - Long Setup:
-         1. Time: 09:30 - 11:30 ET.
+         1. Time: 09:40 - 11:30 ET.
          2. Trigger: 5m candle closes strictly above PMH (Close > PMH).
          3. Confirmations:
             - Breakout volume >= 1.5x 20-period Volume SMA.
@@ -492,7 +492,7 @@ def evaluate_ticker_process(ticker, df):
             - Broad market (SPY/QQQ) trading above session VWAP.
          4. Execution: Enter at close of confirming 5m candle.
        - Short Setup:
-         1. Time: 09:30 - 11:30 ET.
+         1. Time: 09:40 - 11:30 ET.
          2. Trigger: 5m candle closes strictly below PML (Close < PML).
          3. Confirmations:
             - Breakout volume >= 1.5x 20-period Volume SMA.
@@ -519,7 +519,7 @@ def evaluate_ticker_process(ticker, df):
         pm_bars = today_df.between_time("04:00", "09:29:59")
         rth_bars = today_df.between_time("09:30", "16:00")
 
-        if pm_bars.empty or len(rth_bars) < 1:
+        if pm_bars.empty or len(rth_bars) < 2:
             return None
 
         pm_high = float(pm_bars["High"].max())
@@ -533,7 +533,7 @@ def evaluate_ticker_process(ticker, df):
         if pm_range_pct < 0.25:
             return None
 
-        # 1. Active Trading Window: 09:30 - 11:30 ET
+        # 1. Active Trading Window: 09:40 - 11:30 ET (10m whipsaw lockout)
         last_dt = rth_bars.index[-1]
         ny_tz = get_ny_timezone()
         if hasattr(last_dt, "tzinfo") and last_dt.tzinfo is not None:
@@ -541,7 +541,7 @@ def evaluate_ticker_process(ticker, df):
         else:
             dt_ny = last_dt
         mins_from_midnight = dt_ny.hour * 60 + dt_ny.minute
-        earliest_mins = int(os.getenv("EARLIEST_TRADE_TIME_MINS", "570"))  # 09:30 AM ET
+        earliest_mins = int(os.getenv("EARLIEST_TRADE_TIME_MINS", "580"))  # 09:40 AM ET
         latest_mins = int(os.getenv("LATEST_TRADE_TIME_MINS", "690"))      # 11:30 AM ET
         if mins_from_midnight < earliest_mins or mins_from_midnight > latest_mins:
             return None
@@ -820,11 +820,11 @@ def bot_loop():
                 time.sleep(300)
                 continue
 
-            # Trading window check: 9:30 AM to 11:30 AM ET (scans & trade entries only within window)
+            # Trading window check: 9:40 AM to 11:30 AM ET (10m whipsaw filter, scans & trade entries only within window)
             ny_tz = get_ny_timezone()
             now = datetime.now(ny_tz)
             current_mins = now.hour * 60 + now.minute
-            earliest_trade_mins = int(os.getenv("EARLIEST_TRADE_TIME_MINS", "570"))  # 9:30 AM ET
+            earliest_trade_mins = int(os.getenv("EARLIEST_TRADE_TIME_MINS", "580"))  # 9:40 AM ET
             if current_mins < earliest_trade_mins:
                 open_hr = earliest_trade_mins // 60
                 open_mn = earliest_trade_mins % 60
@@ -855,7 +855,7 @@ def bot_loop():
                 disp_hr = close_hr if close_hr <= 12 else close_hr - 12
                 if disp_hr == 0:
                     disp_hr = 12
-                logger.info(f"Trading window closed for new entries (PMB trades permitted 9:30 AM - {disp_hr}:{close_mn:02d} {suffix} ET). Monitoring open positions only. Sleeping 60s...")
+                logger.info(f"Trading window closed for new entries (PMB trades permitted 9:40 AM - {disp_hr}:{close_mn:02d} {suffix} ET). Monitoring open positions only. Sleeping 60s...")
                 time.sleep(60)
                 continue
 

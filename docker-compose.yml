@@ -11,7 +11,7 @@ services:
       - SKIP_BOT_THREAD=true
       - ALLOW_DELAYED_OPTIONS_TRADING=true
       - ALERT_METHOD=TELEGRAM
-      - EARLIEST_TRADE_TIME_MINS=570
+      - EARLIEST_TRADE_TIME_MINS=580
       - LATEST_TRADE_TIME_MINS=690
     ports:
       - "127.0.0.1:5000:5000"
@@ -28,7 +28,7 @@ services:
       - .env
     environment:
       - SCAN_DATA_DIR=/app/scan_data
-      - EARLIEST_TRADE_TIME_MINS=570
+      - EARLIEST_TRADE_TIME_MINS=580
       - LATEST_TRADE_TIME_MINS=690
       - ALLOW_DELAYED_OPTIONS_TRADING=true
       - TEST_TRADE_AUTO_CLOSE_SECS=60

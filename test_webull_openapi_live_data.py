@@ -322,13 +322,13 @@ class TestWebullOpenAPILiveData(unittest.TestCase):
         self.assertFalse(data_fetcher._is_openapi_scope_blocked("US_OPTION"))
 
     def test_trading_window_entry_restrictions_and_anytime_exit(self):
-        """PaperTrader strictly allows entries only 9:30-11:30 AM ET while allowing exits anytime."""
+        """PaperTrader strictly allows entries only 9:40-11:30 AM ET while allowing exits anytime."""
         with patch.object(paper_trader, "_load_trade_log", return_value={"trades": []}), \
              patch.object(paper_trader, "_save_trade_log"):
             trader = paper_trader.PaperTrader()
 
-        # Default configured window is 9:30 AM (570) to 11:30 AM (690)
-        self.assertEqual(trader.earliest_trade_mins, 570)
+        # Default configured window is 9:40 AM (580) to 11:30 AM (690)
+        self.assertEqual(trader.earliest_trade_mins, 580)
         self.assertEqual(trader.latest_trade_mins, 690)
 
         trader.allow_delayed_options = True
@@ -354,13 +354,13 @@ class TestWebullOpenAPILiveData(unittest.TestCase):
 
         ny_tz = paper_trader.get_ny_timezone()
 
-        # 1. Blocked before 9:30 AM (e.g. 9:15 AM = 555 mins)
-        time_915 = datetime(2026, 11, 13, 9, 15, tzinfo=ny_tz)
+        # 1. Blocked before 9:40 AM (e.g. 9:35 AM = 575 mins)
+        time_935 = datetime(2026, 11, 13, 9, 35, tzinfo=ny_tz)
         with patch("paper_trader.datetime") as mock_dt, \
              patch.object(trader, "_check_risk_limits", return_value=(True, "")), \
              patch.object(trader, "get_available_funds", return_value=3000.0), \
              patch("reversal_scanner.find_best_option", return_value=live_contract):
-            mock_dt.now.return_value = time_915
+            mock_dt.now.return_value = time_935
             mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
             order_early = trader.place_option_order("AMD", "bullish", 150.0, 149.0)
             self.assertIsNone(order_early)
