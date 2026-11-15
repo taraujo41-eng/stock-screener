@@ -399,6 +399,65 @@ class TestWebullOpenAPILiveData(unittest.TestCase):
             self.assertEqual(order_valid["exit_reason"], "Take profit 2:1")
             self.assertEqual(mock_tg_exit.call_count, 1)
 
+    def test_t1_cash_settlement_locks_closed_proceeds_until_next_day(self):
+        """PaperTrader enforces T+1 cash settlement: closed trade proceeds stay unsettled until next day."""
+        ny_tz = paper_trader.get_ny_timezone()
+        day1_10am = datetime(2026, 11, 13, 10, 0, tzinfo=ny_tz)
+        day2_10am = datetime(2026, 11, 14, 10, 0, tzinfo=ny_tz)
+
+        trades_data = {
+            "trades": [
+                {
+                    "id": 1,
+                    "ticker": "ARM",
+                    "entry_price": 10.98,
+                    "quantity": 2,
+                    "entry_time": "2026-11-13T09:41:05-05:00",
+                    "exit_time": "2026-11-13T09:50:21-05:00",
+                    "exit_price": 14.95,
+                    "pnl": 794.0,
+                    "status": "closed",
+                },
+                {
+                    "id": 2,
+                    "ticker": "ORCL",
+                    "entry_price": 1.16,
+                    "quantity": 2,
+                    "entry_time": "2026-11-13T09:48:22-05:00",
+                    "status": "open",
+                },
+            ]
+        }
+
+        with patch.object(paper_trader, "_load_trade_log", return_value=trades_data):
+            trader = paper_trader.PaperTrader()
+            trader.starting_balance = 3000.0
+            trader._logged_in = True
+            trader._is_real_paper_account = False
+
+        # On Day 1 (2026-11-13): ARM ($2,196 cost + $794 profit = $2,990 proceeds) is unsettled;
+        # ORCL ($232 cost) is open; settled buying power is strictly $3,000 - $2,196 - $232 = $572.00
+        with patch("paper_trader.datetime") as mock_dt:
+            mock_dt.now.return_value = day1_10am
+            acc_day1 = trader.get_account()
+            avail_day1 = trader.get_available_funds()
+
+        self.assertAlmostEqual(float(acc_day1["total_net_liquidation_value"]), 3794.00, places=2)
+        self.assertAlmostEqual(float(acc_day1["total_cash_balance"]), 3562.00, places=2)
+        self.assertAlmostEqual(float(acc_day1["unsettled_cash"]), 2990.00, places=2)
+        self.assertAlmostEqual(float(acc_day1["settled_cash"]), 572.00, places=2)
+        self.assertAlmostEqual(avail_day1, 572.00, places=2)
+
+        # On Day 2 (2026-11-14): ARM proceeds have settled! Settled cash is now $3,562.00
+        with patch("paper_trader.datetime") as mock_dt:
+            mock_dt.now.return_value = day2_10am
+            acc_day2 = trader.get_account()
+            avail_day2 = trader.get_available_funds()
+
+        self.assertAlmostEqual(float(acc_day2["unsettled_cash"]), 0.00, places=2)
+        self.assertAlmostEqual(float(acc_day2["settled_cash"]), 3562.00, places=2)
+        self.assertAlmostEqual(avail_day2, 3562.00, places=2)
+
 
 if __name__ == "__main__":
     unittest.main()

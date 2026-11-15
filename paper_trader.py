@@ -143,6 +143,7 @@ class PaperTrader:
         self.earliest_trade_mins = _cfg("EARLIEST_TRADE_TIME_MINS", "580", int)
         self.latest_trade_mins = _cfg("LATEST_TRADE_TIME_MINS", "690", int)
         self.close_before_eod = _cfg("PAPER_CLOSE_BEFORE_MARKET_CLOSE", "true", bool)
+        self.cash_settlement_t1 = _cfg("PAPER_CASH_SETTLEMENT_T1", "true", bool)
         self.allow_delayed_options = _cfg("ALLOW_DELAYED_OPTIONS_TRADING", "false", bool)
         self._last_delayed_alert_date = None
 
@@ -345,24 +346,64 @@ class PaperTrader:
             if not self.login():
                 return None
         if not getattr(self, "_is_real_paper_account", False):
-            # Simulated paper account balance ($100,000 virtual balance)
             trades = self._trade_log.get("trades", [])
             closed = [t for t in trades if t.get("status") == "closed" and t.get("pnl") is not None]
-            total_pnl = sum(t["pnl"] for t in closed)
-            open_cost = sum(p.get("entry_price", 0) * 100 * p.get("quantity", 1) for p in self._open_positions if p.get("status") == "open")
-            
+            total_pnl = sum(float(t.get("pnl") or 0.0) for t in closed)
+            # Also include realized PnL from partial exits on still-open positions
+            for p in trades:
+                if p.get("status") == "open" and p.get("pnl") is not None:
+                    total_pnl += float(p.get("pnl") or 0.0)
+
+            open_cost = sum(
+                float(p.get("entry_price") or 0.0) * 100.0 * int(p.get("quantity") or 1)
+                for p in self._open_positions if p.get("status") == "open"
+            )
+
             starting_balance = getattr(self, "starting_balance", 3000.0)
             net_liq = starting_balance + total_pnl
-            cash_bal = net_liq - open_cost
-            
+            total_cash_bal = net_liq - open_cost
+
+            # T+1 Cash Account Settlement:
+            # Proceeds (original cost + realized P&L) from any option trade or partial exit
+            # closed today remain unsettled until the next trading day (T+1).
+            ny_tz = get_ny_timezone()
+            today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
+            unsettled_cash = 0.0
+            if getattr(self, "cash_settlement_t1", True):
+                for t in trades:
+                    entry_px = float(t.get("entry_price") or 0.0)
+                    # Check partial exits on this trade
+                    partial_exits = t.get("partial_exits", [])
+                    partial_pnl_total = 0.0
+                    for pe in partial_exits:
+                        pe_qty = int(pe.get("quantity") or 0)
+                        pe_pnl = float(pe.get("pnl") or 0.0)
+                        partial_pnl_total += pe_pnl
+                        pe_time = str(pe.get("exit_time") or "")
+                        if pe_time.startswith(today_str):
+                            unsettled_cash += max(0.0, (entry_px * 100.0 * pe_qty) + pe_pnl)
+
+                    # Check final close on this trade
+                    if t.get("status") == "closed":
+                        exit_time_str = str(t.get("exit_time") or "")
+                        if exit_time_str.startswith(today_str):
+                            rem_qty = int(t.get("quantity") or 1)
+                            rem_pnl = float(t.get("pnl") or 0.0) - partial_pnl_total
+                            unsettled_cash += max(0.0, (entry_px * 100.0 * rem_qty) + rem_pnl)
+
+            settled_cash = max(0.0, total_cash_bal - unsettled_cash)
+            buying_power = settled_cash if getattr(self, "cash_settlement_t1", True) else total_cash_bal
+
             return {
                 "account_id": "SIMULATED_PAPER_ACCOUNT",
                 "account_type": "PAPER_SIMULATION",
                 "total_net_liquidation_value": f"{net_liq:.2f}",
-                "total_cash_balance": f"{cash_bal:.2f}",
+                "total_cash_balance": f"{total_cash_bal:.2f}",
+                "settled_cash": f"{settled_cash:.2f}",
+                "unsettled_cash": f"{unsettled_cash:.2f}",
                 "total_unrealized_profit_loss": "0.00",
                 "total_day_profit_loss": f"{total_pnl:.2f}",
-                "buying_power": f"{cash_bal:.2f}",
+                "buying_power": f"{buying_power:.2f}",
                 "mode": "100% Safe Local Simulation"
             }
 
@@ -470,12 +511,12 @@ class PaperTrader:
         return len([p for p in self.get_open_positions() if p.get("status") == "open"])
 
     def get_available_funds(self):
-        """Returns the current available cash / buying power in the account."""
+        """Returns the current available settled cash / buying power in the account."""
         acc = self.get_account()
         if not acc:
             return getattr(self, "starting_balance", 3000.0)
         
-        for field in ["total_cash_balance", "buying_power", "usable_cash", "day_buying_power", "cash_balance"]:
+        for field in ["buying_power", "settled_cash", "usable_cash", "day_buying_power", "total_cash_balance", "cash_balance"]:
             val = acc.get(field)
             if val is not None:
                 try:
@@ -484,7 +525,7 @@ class PaperTrader:
                     pass
         if isinstance(acc, dict) and "account_members" in acc:
             for member in acc.get("account_members", []):
-                if member.get("key") in ("usable_cash", "day_buying_power", "total_cash_balance"):
+                if member.get("key") in ("usable_cash", "settled_cash", "day_buying_power", "total_cash_balance"):
                     try:
                         return float(member.get("value", 0))
                     except (ValueError, TypeError):
