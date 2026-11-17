@@ -752,6 +752,16 @@ class PaperTrader:
                 logger.warning(f"[PaperTrader] No suitable option contract found for {ticker} ({signal_type})")
                 return None
 
+            # Hard Spread Gate: enforce maximum spread limit ($0.10)
+            opt_spread = float(best.get("spread", 0))
+            max_allowed_spread = float(os.getenv("OPTIONS_MAX_SPREAD_DOLLARS", "0.10"))
+            if opt_spread > max_allowed_spread and not force:
+                logger.warning(
+                    f"[PaperTrader] ⛔ Blocked entry on {ticker}: Option {best.get('symbol')} "
+                    f"spread ${opt_spread:.2f} exceeds max spread limit ${max_allowed_spread:.2f}."
+                )
+                return None
+
             is_realtime = bool(best.get("is_realtime", False))
             quote_source = best.get("quote_source", "Unknown")
             rt_tag = "LIVE" if is_realtime else "DELAYED"
@@ -1271,59 +1281,61 @@ class PaperTrader:
                                 curr_stock_price = float(rth_bars["Close"].iloc[-1])
 
                                 if sig == "bullish":
-                                    # 1. Hard Emergency Stop (Max Loss Protection: candle low <= hard_sl OR current stock <= hard_sl)
-                                    if hard_sl and (c_low <= hard_sl or curr_stock_price <= hard_sl):
+                                    # 1. Profit Target (2:1 Asymmetry / 2R) — Evaluated FIRST!
+                                    # If the 5m candle high reached the 2R target OR live price reached it, lock in profit!
+                                    if tp_2r and (c_high >= tp_2r or curr_stock_price >= tp_2r):
+                                        logger.info(
+                                            f"[PaperTrader] 🎯 2:1 PROFIT TARGET HIT on {trade['ticker']} | "
+                                            f"Target=${tp_2r:.2f} reached (Candle High=${c_high:.2f}, Current=${curr_stock_price:.2f})"
+                                        )
+                                        positions_to_close.append((trade, "profit_target_2r", current_price))
+                                        continue
+
+                                    # 2. Hard Emergency Stop (Max Loss Protection: current stock breaches hard SL OR candle closed below hard SL)
+                                    if hard_sl and (curr_stock_price <= hard_sl or c_close <= hard_sl):
                                         logger.info(
                                             f"[PaperTrader] 🛑 HARD EMERGENCY STOP on {trade['ticker']} | "
-                                            f"Stock=${curr_stock_price:.2f} <= Hard SL=${hard_sl:.2f}"
+                                            f"Stock Current=${curr_stock_price:.2f}, Close=${c_close:.2f} <= Hard SL=${hard_sl:.2f}"
                                         )
                                         positions_to_close.append((trade, "hard_emergency_stop", current_price))
                                         continue
 
-                                    # 2. Structural Stop (Early Invalidation: candle closes below PMH OR current stock below PMH)
-                                    if pmh and (c_close < pmh or curr_stock_price < pmh):
+                                    # 3. Structural Stop (Confirmed Invalidation: 5m candle CLOSES below PMH)
+                                    if pmh and (c_close < pmh):
                                         logger.info(
                                             f"[PaperTrader] 🛑 STRUCTURAL STOP (PMH Invalidation) on {trade['ticker']} | "
-                                            f"Stock Below PMH (Close=${c_close:.2f}, Current=${curr_stock_price:.2f} < PMH=${pmh:.2f})"
+                                            f"5m Candle Closed Below PMH (Close=${c_close:.2f} < PMH=${pmh:.2f})"
                                         )
                                         positions_to_close.append((trade, "structural_stop_pmh", current_price))
                                         continue
 
-                                    # 3. Profit Target (2:1 Asymmetry / 2R) — Strictly requires stock trading ABOVE entry price!
-                                    if tp_2r and (c_high >= tp_2r or curr_stock_price >= tp_2r) and (curr_stock_price >= entry_stock):
+                                elif sig == "bearish":
+                                    # 1. Profit Target (2:1 Asymmetry / 2R) — Evaluated FIRST!
+                                    # If the 5m candle low reached the 2R target OR live price reached it, lock in profit!
+                                    if tp_2r and (c_low <= tp_2r or curr_stock_price <= tp_2r):
                                         logger.info(
                                             f"[PaperTrader] 🎯 2:1 PROFIT TARGET HIT on {trade['ticker']} | "
-                                            f"Stock High=${c_high:.2f} >= 2R Target=${tp_2r:.2f}"
+                                            f"Target=${tp_2r:.2f} reached (Candle Low=${c_low:.2f}, Current=${curr_stock_price:.2f})"
                                         )
                                         positions_to_close.append((trade, "profit_target_2r", current_price))
                                         continue
 
-                                elif sig == "bearish":
-                                    # 1. Hard Emergency Stop (Max Loss Protection: candle high >= hard_sl OR current stock >= hard_sl)
-                                    if hard_sl and (c_high >= hard_sl or curr_stock_price >= hard_sl):
+                                    # 2. Hard Emergency Stop (Max Loss Protection: current stock breaches hard SL OR candle closed above hard SL)
+                                    if hard_sl and (curr_stock_price >= hard_sl or c_close >= hard_sl):
                                         logger.info(
                                             f"[PaperTrader] 🛑 HARD EMERGENCY STOP on {trade['ticker']} | "
-                                            f"Stock=${curr_stock_price:.2f} >= Hard SL=${hard_sl:.2f}"
+                                            f"Stock Current=${curr_stock_price:.2f}, Close=${c_close:.2f} >= Hard SL=${hard_sl:.2f}"
                                         )
                                         positions_to_close.append((trade, "hard_emergency_stop", current_price))
                                         continue
 
-                                    # 2. Structural Stop (Early Invalidation: candle closes above PML OR current stock above PML)
-                                    if pml and (c_close > pml or curr_stock_price > pml):
+                                    # 3. Structural Stop (Confirmed Invalidation: 5m candle CLOSES above PML)
+                                    if pml and (c_close > pml):
                                         logger.info(
                                             f"[PaperTrader] 🛑 STRUCTURAL STOP (PML Invalidation) on {trade['ticker']} | "
-                                            f"Stock Above PML (Close=${c_close:.2f}, Current=${curr_stock_price:.2f} > PML=${pml:.2f})"
+                                            f"5m Candle Closed Above PML (Close=${c_close:.2f} > PML=${pml:.2f})"
                                         )
                                         positions_to_close.append((trade, "structural_stop_pml", current_price))
-                                        continue
-
-                                    # 3. Profit Target (2:1 Asymmetry / 2R) — Strictly requires stock trading BELOW entry price!
-                                    if tp_2r and (c_low <= tp_2r or curr_stock_price <= tp_2r) and (curr_stock_price <= entry_stock):
-                                        logger.info(
-                                            f"[PaperTrader] 🎯 2:1 PROFIT TARGET HIT on {trade['ticker']} | "
-                                            f"Stock Low=${c_low:.2f} <= 2R Target=${tp_2r:.2f}"
-                                        )
-                                        positions_to_close.append((trade, "profit_target_2r", current_price))
                                         continue
                     except Exception as ex:
                         logger.debug(f"[PaperTrader] 5m strategy exit check error for {trade['ticker']}: {ex}")

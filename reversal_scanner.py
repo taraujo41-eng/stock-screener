@@ -1464,10 +1464,11 @@ def find_best_option(ticker, signal_type, last_price, min_dte=None, max_dte=None
                 iv_val = (c.get("impliedVolatility") or 0.35)
                 iv_pct = iv_val * 100.0 if iv_val < 5.0 else iv_val
 
-                # Spread filter: Bid-Ask Spread <= $0.10 OR <= 2% of contract premium (or max_spread_pct)
-                spread_ok = (spread <= max_spread_dollars) or (spread_pct <= max_spread_pct)
-                if not spread_ok and spread_pct > 8.0:
+                # Strict Spread filter: Bid-Ask Spread MUST be <= max_spread_dollars (strictly <= $0.10)
+                # Reject ANY contract with a spread wider than max_spread_dollars (no exceptions / no 8% loophole)
+                if spread > max_spread_dollars:
                     continue
+                spread_ok = True
 
                 # Tier-1 PMB Criteria Check
                 is_pmb_tier1 = (

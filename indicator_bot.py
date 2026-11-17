@@ -129,24 +129,45 @@ def get_market_index_alignment(max_age_seconds=45):
         spy_above, spy_c, spy_vwap = _check_vwap(spy_df)
         qqq_above, qqq_c, qqq_vwap = _check_vwap(qqq_df)
 
-        if spy_above is None and qqq_above is None:
-            long_ok = True
-            short_ok = True
-        else:
-            long_ok = (spy_above is True) or (qqq_above is True)
-            short_ok = (spy_above is False) or (qqq_above is False)
+        # Macro Market Sentiment Check (SPY, QQQ, VIX regime)
+        macro_sent = get_cached_market_sentiment()
+        sent_label = macro_sent.get("sentiment", "Neutral")
+        sent_score = macro_sent.get("score", 50)
 
-        summary_parts = []
+        # Combine Intraday Index VWAP + Macro Daily Sentiment:
+        # 1. If Macro Sentiment is Bearish (score < 40), BLOCK CALLS!
+        # 2. If Macro Sentiment is Bullish (score > 60), BLOCK PUTS!
+        # 3. For Neutral macro, require both SPY and QQQ to not contradict the trade.
+        if sent_score < 40 or sent_label == "Bearish":
+            long_ok = False
+            # Puts allowed if indexes are not rallying above VWAP
+            short_ok = (spy_above is not True) and (qqq_above is not True)
+        elif sent_score > 60 or sent_label == "Bullish":
+            # Calls allowed if indexes are not dumping below VWAP
+            long_ok = (spy_above is not False) and (qqq_above is not False)
+            short_ok = False
+        else:
+            # Neutral macro: require intraday alignment
+            long_ok = (spy_above is True) and (qqq_above is True)
+            short_ok = (spy_above is False) and (qqq_above is False)
+
+        summary_parts = [f"Macro: {sent_label} ({sent_score}/100)"]
         if spy_above is not None:
             summary_parts.append(f"SPY {'Above' if spy_above else 'Below'} VWAP (${spy_c:.2f}/${spy_vwap:.2f})")
         if qqq_above is not None:
             summary_parts.append(f"QQQ {'Above' if qqq_above else 'Below'} VWAP (${qqq_c:.2f}/${qqq_vwap:.2f})")
+        if not long_ok and short_ok:
+            summary_parts.append("[CALLS BLOCKED - BEARISH]")
+        elif long_ok and not short_ok:
+            summary_parts.append("[PUTS BLOCKED - BULLISH]")
 
         _index_vwap_cache = {
             "spy_above_vwap": spy_above,
             "qqq_above_vwap": qqq_above,
             "long_aligned": long_ok,
             "short_aligned": short_ok,
+            "sentiment_label": sent_label,
+            "sentiment_score": sent_score,
             "summary": " | ".join(summary_parts) if summary_parts else "Index VWAP: Neutral"
         }
         _index_vwap_last_time = now
@@ -583,7 +604,7 @@ def evaluate_ticker_process(ticker, df):
         hod = float(rth_bars["High"].max())
         lod = float(rth_bars["Low"].min())
 
-        # 5. Market Filter: SPY or QQQ trend alignment
+        # 5. Market Filter: SPY / QQQ trend alignment and Macro Market Sentiment
         market_align = get_market_index_alignment()
         long_market_ok = market_align.get("long_aligned", True)
         short_market_ok = market_align.get("short_aligned", True)
@@ -594,24 +615,37 @@ def evaluate_ticker_process(ticker, df):
         target_2r_px = 0.0
         r_risk = 0.0
 
+        # Minimum risk cushion: at least 0.8% of stock price or $0.25 (prevents micro-stops like 3 cents on UBER)
+        min_risk_cushion = max(0.25, close_price * 0.008)
+
         # Long Setup Evaluation (Monday Rules)
-        if (close_price > pm_high) and (rvol >= 1.5) and (close_price > current_vwap) and (close_price > current_ema8) and long_market_ok:
+        if (close_price > pm_high) and (rvol >= 1.5) and (close_price > current_vwap) and (close_price > current_ema8):
+            if not long_market_ok:
+                logger.info(f"[{ticker}] ⚠️ Skipping Bullish PMB: Market sentiment/trend is not aligned for CALLS ({market_align.get('summary')})")
+                return None
             is_long = True
+            # Proper structural stop: PMH must hold. Place stop below PMH with an ATR buffer, or full 1 ATR drop
+            structural_stop = pm_high - (0.3 * current_atr)
             atr_stop = close_price - (1.0 * current_atr)
-            hard_stop_px = max(low_price, atr_stop)
-            if hard_stop_px >= close_price:
-                hard_stop_px = close_price - (0.5 * current_atr)
-            r_risk = max(0.05, close_price - hard_stop_px)
+            hard_stop_px = min(structural_stop, atr_stop)
+            # Ensure risk is at least min_risk_cushion so normal market noise doesn't trigger stop
+            if (close_price - hard_stop_px) < min_risk_cushion:
+                hard_stop_px = close_price - min_risk_cushion
+            r_risk = close_price - hard_stop_px
             target_2r_px = close_price + (2.0 * r_risk)
 
         # Short Setup Evaluation (Monday Rules)
-        elif (close_price < pm_low) and (rvol >= 1.5) and (close_price < current_vwap) and (close_price < current_ema8) and short_market_ok:
+        elif (close_price < pm_low) and (rvol >= 1.5) and (close_price < current_vwap) and (close_price < current_ema8):
+            if not short_market_ok:
+                logger.info(f"[{ticker}] ⚠️ Skipping Bearish PMB: Market sentiment/trend is not aligned for PUTS ({market_align.get('summary')})")
+                return None
             is_short = True
+            structural_stop = pm_low + (0.3 * current_atr)
             atr_stop = close_price + (1.0 * current_atr)
-            hard_stop_px = min(high_price, atr_stop)
-            if hard_stop_px <= close_price:
-                hard_stop_px = close_price + (0.5 * current_atr)
-            r_risk = max(0.05, hard_stop_px - close_price)
+            hard_stop_px = max(structural_stop, atr_stop)
+            if (hard_stop_px - close_price) < min_risk_cushion:
+                hard_stop_px = close_price + min_risk_cushion
+            r_risk = hard_stop_px - close_price
             target_2r_px = close_price - (2.0 * r_risk)
 
         if not (is_long or is_short):
