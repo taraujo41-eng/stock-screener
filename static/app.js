@@ -36,7 +36,7 @@ function fmtEta(seconds) {
 function updateModeDesc() {
   const desc = document.getElementById("modeDesc");
   const subtitle = document.getElementById("headerSubtitle");
-  if (desc) desc.textContent = "📋 Watchlist: A+ Swing Trade Scanner (Daily Chart, 30-60 DTE Options) • 🤖 Bot Tickers: Premarket Breakouts";
+  if (desc) desc.textContent = "📋 Watchlist: A+ Swing (Daily) • 🤖 Bot Tickers: PM Breakouts • 🎯 Intraday Retest: 5m VWAP / 8 EMA Above PMH & Below PML";
   if (subtitle) subtitle.textContent = "A+ Swing Trade & Trend Scanner (Daily Chart • 30–60 DTE Options)";
 }
 
@@ -354,6 +354,50 @@ function buildCard(item, index) {
         </div>
       </div>
     `;
+  } else if (item["Retest Type"]) {
+    const isBullRetest = item.Direction === "Bullish";
+    const retestCls = item["Retest Type"] === "VWAP + 8 EMA" ? "tech-chip__value--amber" : (isBullRetest ? "tech-chip__value--green" : "tech-chip__value--red");
+    const pmHighVal = item["PM High"] !== undefined ? `$${Number(item["PM High"]).toFixed(2)}` : "—";
+    const pmLowVal = item["PM Low"] !== undefined ? `$${Number(item["PM Low"]).toFixed(2)}` : "—";
+    const vwapChipVal = item["VWAP Level"] !== undefined ? `$${Number(item["VWAP Level"]).toFixed(2)}` : "—";
+    const ema8ChipVal = item["EMA8 Level"] !== undefined ? `$${Number(item["EMA8 Level"]).toFixed(2)}` : "—";
+    const freshVal = item["Retest Freshness"] ? `${item["Retest Freshness"]}${item["Setup Time"] ? " (" + item["Setup Time"] + ")" : ""}` : (item["Setup Time"] || "—");
+    techGridHtml = `
+      <div class="card__tech-grid">
+        <div class="tech-chip">
+          <span class="tech-chip__label">Retest Level</span>
+          <span class="tech-chip__value ${retestCls}">${item["Retest Type"]}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">PM High</span>
+          <span class="tech-chip__value ${isBullRetest ? 'tech-chip__value--green' : ''}">${pmHighVal}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">PM Low</span>
+          <span class="tech-chip__value ${!isBullRetest ? 'tech-chip__value--red' : ''}">${pmLowVal}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">VWAP (5m)</span>
+          <span class="tech-chip__value ${isBullRetest ? 'tech-chip__value--green' : 'tech-chip__value--red'}">${vwapChipVal}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">8 EMA (5m)</span>
+          <span class="tech-chip__value ${isBullRetest ? 'tech-chip__value--green' : 'tech-chip__value--red'}">${ema8ChipVal}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">RVOL</span>
+          <span class="tech-chip__value ${rvolClass}">${rvolVal}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">Freshness</span>
+          <span class="tech-chip__value ${item["Bars Ago"] === 0 ? 'tech-chip__value--amber' : ''}">${freshVal}</span>
+        </div>
+        <div class="tech-chip">
+          <span class="tech-chip__label">Universe</span>
+          <span class="tech-chip__value">${item["Ticker Source"] || "Combined"}</span>
+        </div>
+      </div>
+    `;
   } else {
     techGridHtml = `
       <div class="card__tech-grid">
@@ -467,7 +511,7 @@ function buildCard(item, index) {
         ` : ""}
         ${item["VWAP Level"] ? `
           <div style="margin-top: 0.35rem; font-size: 0.75rem; color: #facc15; font-weight: 600;">
-            ⚡ VWAP Retest Entry: $${typeof item["VWAP Level"] === 'number' ? item["VWAP Level"].toFixed(2) : item["VWAP Level"]}
+            ⚡ ${item["EMA8 Level"] ? `VWAP: $${Number(item["VWAP Level"]).toFixed(2)} • 8 EMA: $${Number(item["EMA8 Level"]).toFixed(2)}` : `VWAP Retest Entry: $${typeof item["VWAP Level"] === 'number' ? item["VWAP Level"].toFixed(2) : item["VWAP Level"]}`}
           </div>
         ` : ""}
       ` : ""}
@@ -700,7 +744,7 @@ function buildOptionsCard(item, index) {
         </div>
         ${item["VWAP Level"] ? `
           <div style="margin-top: 0.35rem; font-size: 0.75rem; color: #facc15; font-weight: 600;">
-            ⚡ VWAP Retest Entry: $${typeof item["VWAP Level"] === 'number' ? item["VWAP Level"].toFixed(2) : item["VWAP Level"]}
+            ⚡ ${item["EMA8 Level"] ? `VWAP: $${Number(item["VWAP Level"]).toFixed(2)} • 8 EMA: $${Number(item["EMA8 Level"]).toFixed(2)}` : `VWAP Retest Entry: $${typeof item["VWAP Level"] === 'number' ? item["VWAP Level"].toFixed(2) : item["VWAP Level"]}`}
           </div>
         ` : ""}
       ` : ""}
@@ -1058,6 +1102,9 @@ function displayResults(data) {
   } else if (data.mode === "top50") {
     badge.textContent = `🔥 Top 50 Stocks — PM Breakouts (${data.count || 0} setups)`;
     badge.classList.remove("hidden");
+  } else if (data.mode === "intraday_retest") {
+    badge.textContent = `🎯 Intraday 5m VWAP / 8 EMA Retest — Above PMH & Below PML (${data.count || 0} setups)`;
+    badge.classList.remove("hidden");
   } else if (data.mode === "rsidiv") {
     badge.textContent = `📊 Daily RSI Divergence — Watchlist (${data.count || 0} setups)`;
     badge.classList.remove("hidden");
@@ -1212,11 +1259,12 @@ function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
   document.getElementById("progressPhase").textContent = "Initiating scan...";
   document.getElementById("progressDetail").textContent = "";
 
-  const allBtnIds = ["scanBtn", "scanTop50Btn", "scanRsiDivBtn", "scanUnusualOptsBtn"];
+  const allBtnIds = ["scanBtn", "scanTop50Btn", "scanRsiDivBtn", "scanUnusualOptsBtn", "scanIntradayRetestBtn"];
   let activeBtnId = "scanBtn";
   if (scanType === "unusual_options") activeBtnId = "scanUnusualOptsBtn";
   else if (scanType === "rsidiv") activeBtnId = "scanRsiDivBtn";
   else if (scanType === "top50") activeBtnId = "scanTop50Btn";
+  else if (scanType === "intraday_retest") activeBtnId = "scanIntradayRetestBtn";
 
   allBtnIds.forEach(id => {
     const b = document.getElementById(id);
@@ -1285,6 +1333,8 @@ function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
             resultsUrl = "/api/scan/rsidiv/results";
           } else if (scanType === "top50") {
             resultsUrl = "/api/scan/top50/results";
+          } else if (scanType === "intraday_retest") {
+            resultsUrl = "/api/scan/intraday-retest/results";
           }
           const resData = await fetch(`${resultsUrl}?t=${Date.now()}`);
           const data = await resData.json();
@@ -1322,6 +1372,10 @@ function startProgressPolling(scanType = "watchlist", expectedScanId = null) {
         if (document.getElementById("scanUnusualOptsBtn")) {
           document.getElementById("scanUnusualOptsBtn").classList.remove("scan-btn--loading");
           document.getElementById("scanUnusualOptsBtn").disabled = false;
+        }
+        if (document.getElementById("scanIntradayRetestBtn")) {
+          document.getElementById("scanIntradayRetestBtn").classList.remove("scan-btn--loading");
+          document.getElementById("scanIntradayRetestBtn").disabled = false;
         }
         return;
       }
@@ -1371,6 +1425,7 @@ async function runScan(scanType = "watchlist") {
   let btnId = "scanBtn";
   if (scanType === "rsidiv") btnId = "scanRsiDivBtn";
   else if (scanType === "top50") btnId = "scanTop50Btn";
+  else if (scanType === "intraday_retest") btnId = "scanIntradayRetestBtn";
   const btn = document.getElementById(btnId) || document.getElementById("scanBtn");
   if (btn) {
     btn.classList.add("scan-btn--loading");
@@ -1397,6 +1452,9 @@ async function runScan(scanType = "watchlist") {
     payload = { extended_hours: extHours, use_watchlist: false };
   } else if (scanType === "top50") {
     endpoint = "/api/scan/top50";
+    payload = { extended_hours: extHours };
+  } else if (scanType === "intraday_retest") {
+    endpoint = "/api/scan/intraday-retest";
     payload = { extended_hours: extHours };
   }
 

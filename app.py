@@ -18,6 +18,7 @@ from reversal_scanner import (
     options_directional_exhaustion_scan,
     tight_spread_options_scan,
     watchlist_scan,
+    intraday_retest_scan,
     options_watchlist_scan,
     unusual_options_full_market_scan,
     scan_progress, _reset_progress,
@@ -93,6 +94,7 @@ OPTIONS_WATCHLIST_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_options_watch
 UNUSUAL_OPTIONS_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_unusual_options_scan.json")
 TOP_50_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_top50_scan.json")
 TOP_50_STOCKS_FILE = os.path.join(SCAN_DATA_DIR, "top50_stocks.json")
+INTRADAY_RETEST_RESULTS_FILE = os.path.join(SCAN_DATA_DIR, "last_intraday_retest_scan.json")
 
 def load_top50_stocks():
     """Load top 50 / bot tickers with rank, ticker, and company name."""
@@ -797,6 +799,82 @@ def scan_top50_results():
     results = get_fresh_scan_results("LAST_TOP50_RESULTS", TOP_50_RESULTS_FILE)
     if not results or not isinstance(results, dict):
         return jsonify({"ok": True, "mode": "top50", "count": 0, "results": [], "timestamp": "Ready", "market_sentiment": get_market_sentiment()}), 200
+    results["market_sentiment"] = get_market_sentiment()
+    return jsonify(results)
+
+
+# ── API: Intraday VWAP / 8 EMA Retest Scan (Above PMH & Below PML) ──
+
+@app.route("/api/scan/intraday-retest", methods=["POST"])
+def scan_intraday_retest():
+    """Start an intraday 5m VWAP / 8 EMA retest scan (Above PMH & Below PML) on Watchlist + Bot Tickers."""
+    if not _acquire_scan("IntradayRetest-User"):
+        return _scan_conflict_response()
+    scan_id = str(int(time.time() * 1000))
+    _reset_progress(status="running", mode="intraday_retest", scan_id=scan_id)
+    scan_progress["phase_label"] = "Initiating Intraday VWAP / 8 EMA Retest scan..."
+
+    def _run():
+        try:
+            et_tz = get_ny_timezone()
+            wl_tickers = [t.strip().upper() for t in load_watchlist() if isinstance(t, str) and t.strip()]
+            top50_tickers = [t.strip().upper() for t in load_top50_tickers() if isinstance(t, str) and t.strip()]
+            combined_tickers = sorted(set(wl_tickers).union(set(top50_tickers)))
+
+            with open("/tmp/scan_debug.log", "a") as f:
+                f.write(f"[{datetime.now()}] Intraday Retest scan started for {len(combined_tickers)} combined tickers\n")
+
+            df = intraday_retest_scan(
+                combined_tickers,
+                watchlist_set=set(wl_tickers),
+                top50_set=set(top50_tickers),
+            )
+            raw_records = df.to_dict(orient="records") if not df.empty else []
+            clean_records = sanitize_for_json(raw_records)
+            mkt_sentiment = get_market_sentiment(force=True)
+            results_data = {
+                "ok": True,
+                "mode": "intraday_retest",
+                "scan_id": scan_id,
+                "timestamp": datetime.now(et_tz).strftime("%b %d, %Y  %I:%M %p"),
+                "count": len(clean_records),
+                "tickers_scanned": len(combined_tickers),
+                "market_sentiment": mkt_sentiment,
+                "results": clean_records,
+            }
+            app.config["LAST_INTRADAY_RETEST_RESULTS"] = results_data
+            save_last_scan(results_data, INTRADAY_RETEST_RESULTS_FILE)
+            scan_progress["status"] = "done"
+            scan_progress["mode"] = "intraday_retest"
+            with open("/tmp/scan_debug.log", "a") as f:
+                f.write(f"[{datetime.now()}] Intraday Retest scan completed with {len(clean_records)} signals\n")
+        except BaseException as e:
+            tb_str = traceback.format_exc()
+            print(f"[Intraday Retest Scan Error] {e}\n{tb_str}")
+            with open("/tmp/scan_debug.log", "a") as f:
+                f.write(f"[{datetime.now()}] ERROR: {e}\n{tb_str}\n")
+            app.config["LAST_INTRADAY_RETEST_RESULTS"] = {"ok": False, "error": str(e), "traceback": tb_str}
+            scan_progress["status"] = "error"
+            scan_progress["phase_label"] = str(e)
+        finally:
+            _release_scan()
+
+    threading.Thread(target=_run, daemon=False).start()
+    return jsonify({"ok": True, "scan_id": scan_id, "message": "Intraday VWAP / 8 EMA Retest scan started"})
+
+
+@app.route("/api/scan/intraday-retest/results", methods=["GET"])
+def scan_intraday_retest_results():
+    results = get_fresh_scan_results("LAST_INTRADAY_RETEST_RESULTS", INTRADAY_RETEST_RESULTS_FILE)
+    if not results or not isinstance(results, dict):
+        return jsonify({
+            "ok": True,
+            "mode": "intraday_retest",
+            "count": 0,
+            "results": [],
+            "timestamp": "Ready",
+            "market_sentiment": get_market_sentiment(),
+        }), 200
     results["market_sentiment"] = get_market_sentiment()
     return jsonify(results)
 

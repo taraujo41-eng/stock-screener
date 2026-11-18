@@ -2622,6 +2622,17 @@ body {
   transform: translateY(-2px);
 }
 
+.scan-btn--retest {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, #059669, #10b981, #14b8a6) !important;
+  box-shadow: 0 4px 20px rgba(16, 185, 129, 0.35) !important;
+}
+
+.scan-btn--retest:hover {
+  box-shadow: 0 6px 30px rgba(16, 185, 129, 0.55) !important;
+  transform: translateY(-2px);
+}
+
 /* Modal Top 50 */
 .modal--top50 {
   max-width: 540px;

@@ -4348,6 +4348,306 @@ def _analyze_pm_breakout(ticker, df):
         print(f"Error analyzing {ticker} for PM breakout: {e}")
         return None
 
+
+def _analyze_intraday_vwap_ema8_retest(ticker, df, source_tag=None, market_sentiment=None):
+    """
+    Intraday 5-Minute VWAP / 8 EMA Retest Scanner (Above PMH & Below PML).
+    Finds active/recent setups (within the latest 3 RTH 5m candles) where:
+      - Bullish: Price is holding above Premarket High (PMH) and retests VWAP
+        and/or 8 EMA (with the retested level above PMH).
+      - Bearish: Price is holding below Premarket Low (PML) and retests VWAP
+        and/or 8 EMA (with the retested level below PML).
+    """
+    if df is None or len(df) < 5:
+        return None
+
+    try:
+        today_date = df.index[-1].date()
+        today_df = df[df.index.date == today_date]
+
+        pm_bars = today_df.between_time("04:00", "09:29:59")
+        rth_bars = today_df.between_time("09:30", "16:00").copy()
+
+        if pm_bars.empty or len(rth_bars) < 3:
+            return None
+
+        pm_high = float(pm_bars["High"].max())
+        pm_low = float(pm_bars["Low"].min())
+        if pm_high <= 0 or pm_low <= 0 or pm_high <= pm_low:
+            return None
+
+        # RTH VWAP strictly from 09:30 AM ET open
+        typical_price_rth = (rth_bars["High"] + rth_bars["Low"] + rth_bars["Close"]) / 3.0
+        cum_vol_rth = rth_bars["Volume"].cumsum().replace(0, 1)
+        rth_bars["vwap"] = (typical_price_rth * rth_bars["Volume"]).cumsum() / cum_vol_rth
+
+        # 8 EMA on 5m RTH candles
+        rth_bars["ema8"] = rth_bars["Close"].ewm(span=8, adjust=False).mean()
+
+        hod = float(rth_bars["High"].max())
+        lod = float(rth_bars["Low"].min())
+        total_rth_vol = int(rth_bars["Volume"].sum())
+
+        last_bar = rth_bars.iloc[-1]
+        last_close = float(last_bar["Close"])
+        last_vwap = float(last_bar["vwap"])
+        last_ema8 = float(last_bar["ema8"])
+
+        is_above_pmh = last_close > pm_high
+        is_below_pml = last_close < pm_low
+        if not (is_above_pmh or is_below_pml):
+            return None
+
+        # Inspect latest 3 RTH candles (freshest first)
+        start_idx = max(1, len(rth_bars) - 3)
+        eval_indices = list(range(start_idx, len(rth_bars)))
+
+        touch_tol = 0.0015   # 0.15% touch proximity tolerance
+        hold_tol = 0.0010    # 0.10% hold/reclaim tolerance
+        pm_flush_tol = 0.003 # 0.30% max wick overshoot past PMH/PML
+
+        matched = None
+        for idx in reversed(eval_indices):
+            bar = rth_bars.iloc[idx]
+            b_open = float(bar["Open"])
+            b_high = float(bar["High"])
+            b_low = float(bar["Low"])
+            b_close = float(bar["Close"])
+            b_vwap = float(bar["vwap"])
+            b_ema8 = float(bar["ema8"])
+            b_range = b_high - b_low
+
+            if is_above_pmh:
+                if b_close <= pm_high or b_low < pm_high * (1.0 - pm_flush_tol):
+                    continue
+
+                tested_vwap = (
+                    (b_vwap > pm_high) and
+                    (b_low <= b_vwap * (1.0 + touch_tol)) and
+                    (b_high > b_vwap) and
+                    (b_close >= b_vwap * (1.0 - hold_tol)) and
+                    (last_close >= last_vwap * (1.0 - hold_tol))
+                )
+                tested_ema8 = (
+                    (b_ema8 > pm_high) and
+                    (b_low <= b_ema8 * (1.0 + touch_tol)) and
+                    (b_high > b_ema8) and
+                    (b_close >= b_ema8 * (1.0 - hold_tol)) and
+                    (last_close >= last_ema8 * (1.0 - hold_tol))
+                )
+
+                if tested_vwap or tested_ema8:
+                    lower_wick = min(b_open, b_close) - b_low
+                    is_rejection = (b_close > b_open) or (b_range > 0 and (lower_wick / b_range) >= 0.35)
+                    matched = {
+                        "idx": idx,
+                        "bars_ago": (len(rth_bars) - 1) - idx,
+                        "is_long": True,
+                        "tested_vwap": tested_vwap,
+                        "tested_ema8": tested_ema8,
+                        "is_rejection": is_rejection,
+                        "bar": bar,
+                        "b_low": b_low,
+                        "b_high": b_high,
+                        "b_vwap": b_vwap,
+                        "b_ema8": b_ema8,
+                    }
+                    break
+
+            elif is_below_pml:
+                if b_close >= pm_low or b_high > pm_low * (1.0 + pm_flush_tol):
+                    continue
+
+                tested_vwap = (
+                    (b_vwap < pm_low) and
+                    (b_high >= b_vwap * (1.0 - touch_tol)) and
+                    (b_low < b_vwap) and
+                    (b_close <= b_vwap * (1.0 + hold_tol)) and
+                    (last_close <= last_vwap * (1.0 + hold_tol))
+                )
+                tested_ema8 = (
+                    (b_ema8 < pm_low) and
+                    (b_high >= b_ema8 * (1.0 - touch_tol)) and
+                    (b_low < b_ema8) and
+                    (b_close <= b_ema8 * (1.0 + hold_tol)) and
+                    (last_close <= last_ema8 * (1.0 + hold_tol))
+                )
+
+                if tested_vwap or tested_ema8:
+                    upper_wick = b_high - max(b_open, b_close)
+                    is_rejection = (b_close < b_open) or (b_range > 0 and (upper_wick / b_range) >= 0.35)
+                    matched = {
+                        "idx": idx,
+                        "bars_ago": (len(rth_bars) - 1) - idx,
+                        "is_long": False,
+                        "tested_vwap": tested_vwap,
+                        "tested_ema8": tested_ema8,
+                        "is_rejection": is_rejection,
+                        "bar": bar,
+                        "b_low": b_low,
+                        "b_high": b_high,
+                        "b_vwap": b_vwap,
+                        "b_ema8": b_ema8,
+                    }
+                    break
+
+        if not matched:
+            return None
+
+        is_long = matched["is_long"]
+        tested_vwap = matched["tested_vwap"]
+        tested_ema8 = matched["tested_ema8"]
+        bars_ago = matched["bars_ago"]
+        is_rejection = matched["is_rejection"]
+
+        direction = "Bullish" if is_long else "Bearish"
+        signal_type = "bullish" if is_long else "bearish"
+
+        if tested_vwap and tested_ema8:
+            retest_type = "VWAP + 8 EMA"
+            retest_icon = "🎯"
+        elif tested_vwap:
+            retest_type = "VWAP"
+            retest_icon = "📍"
+        else:
+            retest_type = "8 EMA"
+            retest_icon = "⚡"
+
+        freshness_label = "Live Candle" if bars_ago == 0 else (f"{bars_ago} bar ago" if bars_ago == 1 else f"{bars_ago} bars ago")
+
+        ny_tz = get_ny_timezone()
+        bar_dt = matched["bar"].name
+        bar_ny = bar_dt.tz_convert(ny_tz) if hasattr(bar_dt, "tzinfo") and bar_dt.tzinfo is not None else bar_dt
+        time_display = bar_ny.strftime('%I:%M %p')
+
+        # Market sentiment
+        sentiment_data = market_sentiment if isinstance(market_sentiment, dict) else get_market_sentiment()
+        m_sentiment = sentiment_data.get('sentiment', 'Neutral')
+        m_score = sentiment_data.get('score', 50)
+        is_market_aligned = (
+            (is_long and m_sentiment == "Bullish") or (not is_long and m_sentiment == "Bearish")
+        )
+        sentiment_align = "Market Aligned 🎯" if is_market_aligned else "Counter-Trend 🔄"
+
+        # Relative volume & RSI
+        rvol = compute_rvol(rth_bars)
+        rsi_val = 50.0
+        try:
+            from indicator import compute_rsi
+            rsi_s = compute_rsi(rth_bars["Close"], 14)
+            if len(rsi_s) > 0 and not np.isnan(rsi_s.iloc[-1]):
+                rsi_val = float(rsi_s.iloc[-1])
+        except Exception:
+            pass
+
+        # Confluence Scoring (Base 10, Max 25)
+        score = 10
+        if tested_vwap and tested_ema8:
+            score += 4
+        if (is_long and last_close > last_vwap and last_close > last_ema8) or (not is_long and last_close < last_vwap and last_close < last_ema8):
+            score += 2
+        if (is_long and last_ema8 > last_vwap) or (not is_long and last_ema8 < last_vwap):
+            score += 2
+        if is_rejection:
+            score += 2
+        if is_market_aligned:
+            score += 3
+        if rvol > 1.2:
+            score += 1
+        if bars_ago == 0:
+            score += 1
+
+        if score >= 19 and is_market_aligned and ((tested_vwap and tested_ema8) or is_rejection):
+            grade = "A+"
+        elif score >= 15:
+            grade = "A"
+        elif score >= 12:
+            grade = "B"
+        else:
+            grade = "C"
+
+        # Stop Loss & Target Levels
+        if is_long:
+            anchor_lvl = min(last_vwap, last_ema8) if (tested_vwap and tested_ema8) else (last_vwap if tested_vwap else last_ema8)
+            stop_loss_px = min(matched["b_low"], anchor_lvl) - 0.05
+            target_1_px = hod if last_close < hod * 0.998 else hod + (pm_high - pm_low) * 0.5
+            target_label = "HOD" if last_close < hod * 0.998 else "+0.5x PM Ext"
+            pm_ext_pct = ((last_close - pm_high) / pm_high) * 100
+            zone_side = f"Above PMH (${pm_high:.2f}, +{pm_ext_pct:.1f}%)"
+            bull_signal = f"{retest_type} Retest Above PMH ({freshness_label})"
+            bear_signal = "—"
+        else:
+            anchor_lvl = max(last_vwap, last_ema8) if (tested_vwap and tested_ema8) else (last_vwap if tested_vwap else last_ema8)
+            stop_loss_px = max(matched["b_high"], anchor_lvl) + 0.05
+            target_1_px = lod if last_close > lod * 1.002 else lod - (pm_high - pm_low) * 0.5
+            target_label = "LOD" if last_close > lod * 1.002 else "-0.5x PM Ext"
+            pm_ext_pct = ((pm_low - last_close) / pm_low) * 100
+            zone_side = f"Below PML (${pm_low:.2f}, -{pm_ext_pct:.1f}%)"
+            bull_signal = "—"
+            bear_signal = f"{retest_type} Retest Below PML ({freshness_label})"
+
+        # Find option suggestion
+        best_opt = None
+        try:
+            best_opt = find_best_option(ticker, signal_type, last_close)
+        except Exception:
+            pass
+
+        vwap_dist_pct = ((last_close - last_vwap) / last_vwap) * 100 if last_vwap > 0 else 0.0
+        ema8_dist_pct = ((last_close - last_ema8) / last_ema8) * 100 if last_ema8 > 0 else 0.0
+        reject_str = " | Rejection Bounce" if is_rejection else ""
+        src_str = f" | {source_tag}" if source_tag else ""
+
+        return {
+            "Ticker": ticker,
+            "Direction": direction,
+            "Last Price": round(last_close, 2),
+            "Volume": total_rth_vol,
+            "RSI": round(rsi_val, 1),
+            "RVOL": round(rvol, 1),
+            "Score": score,
+            "Grade": grade,
+            "Bullish Signals": bull_signal,
+            "Bearish Signals": bear_signal,
+            "Patterns": f"{retest_icon} {retest_type} Retest | {zone_side} | {freshness_label} ({time_display}){reject_str}{src_str}",
+            "Entry": round(last_close, 2),
+            "Stop Loss": round(stop_loss_px, 2),
+            "Profit Target": f"${round(target_1_px, 2)} ({target_label})",
+            "VWAP Level": round(last_vwap, 2),
+            "EMA8 Level": round(last_ema8, 2),
+            "VWAP Dist Pct": round(vwap_dist_pct, 2),
+            "EMA8 Dist Pct": round(ema8_dist_pct, 2),
+            "PM High": round(pm_high, 2),
+            "PM Low": round(pm_low, 2),
+            "Retest Type": retest_type,
+            "Retest Freshness": freshness_label,
+            "Bars Ago": bars_ago,
+            "Ticker Source": source_tag or "Combined",
+            "Supply/Demand Zone": f"PMH ${pm_high:.2f} / PML ${pm_low:.2f}",
+            "In Zone": True,
+            "Zone Details": {
+                "pm_high": round(pm_high, 2),
+                "pm_low": round(pm_low, 2),
+                "hod": round(hod, 2),
+                "lod": round(lod, 2),
+                "vwap": round(last_vwap, 2),
+                "ema8": round(last_ema8, 2),
+                "stop_loss": round(stop_loss_px, 2),
+                "target_1": round(target_1_px, 2),
+            },
+            "Market Sentiment": m_sentiment,
+            "Market Sentiment Score": m_score,
+            "Sentiment Alignment": sentiment_align,
+            "Technical Trend": "Bullish" if is_long else "Bearish",
+            "MACD": "Bullish" if is_long else "Bearish",
+            "Option Play": best_opt,
+            "Suggested Option": f"{best_opt['exp']} ${best_opt['strike']} {best_opt['type']} (@${best_opt['mid']:.2f})" if best_opt else None,
+            "Setup Time": time_display,
+        }
+    except Exception as e:
+        print(f"Error analyzing {ticker} for intraday VWAP/8EMA retest: {e}")
+        return None
+
 # =====================================================================
 # A+ Swing Trade Scanner (Watchlist Only)
 # =====================================================================
@@ -5048,6 +5348,82 @@ def watchlist_scan(tickers, extended_hours=False, mode="watchlist"):
         return pd.DataFrame()
 
     df = pd.DataFrame(results).sort_values(by="Score", ascending=False)
+    df.attrs["market_sentiment"] = market_sentiment
+    return df
+
+
+def intraday_retest_scan(tickers, watchlist_set=None, top50_set=None):
+    """
+    Intraday 5-Minute VWAP / 8 EMA Retest Scan (Above PMH & Below PML).
+    Scans combined Watchlist + Bot Tickers for active/recent (last 3 candles)
+    VWAP or 8 EMA retests while holding above Premarket High or below Premarket Low.
+    """
+    _reset_progress(status="running", mode="intraday_retest")
+    scan_progress["status"] = "running"
+    scan_progress["mode"] = "intraday_retest"
+    start_time = time.time()
+
+    total = len(tickers)
+    wl_set = set(watchlist_set or [])
+    t50_set = set(top50_set or [])
+    print(f"  [Intraday Retest Scan] Scanning {total} tickers for 5m VWAP / 8 EMA retests (Above PMH / Below PML)...")
+
+    def _on_dl_progress(i, tot, sym):
+        pct = int((i / tot) * 35) if tot else 0
+        _update_progress("downloading", f"Downloading 5m candles: {sym}...", i, tot, ticker=sym, found=0, pct=pct)
+
+    candle_data = fetch_batch_concurrent(
+        tickers, days=5, max_workers=20,
+        on_progress=_on_dl_progress, delay=0.01, interval="5m", includePrePost="true"
+    )
+
+    market_sentiment = get_market_sentiment(force=True)
+    scan_progress.update({"market_sentiment": market_sentiment})
+    results = []
+
+    for i, sym in enumerate(tickers):
+        pct = 35 + int((i / total) * 60) if total else 95
+        _update_progress(
+            "analyzing",
+            f"Analyzing {sym} (VWAP / 8 EMA Retest)...",
+            i, total, ticker=sym, found=len(results), pct=pct
+        )
+        try:
+            df = candle_data.get(sym)
+            if df is None or len(df) < 5:
+                continue
+            in_wl = sym in wl_set
+            in_t50 = sym in t50_set
+            if in_wl and in_t50:
+                src_tag = "Bot + Watchlist"
+            elif in_t50:
+                src_tag = "Bot Tickers"
+            else:
+                src_tag = "Watchlist"
+
+            r = _analyze_intraday_vwap_ema8_retest(
+                sym, df, source_tag=src_tag, market_sentiment=market_sentiment
+            )
+            if r:
+                results.append(r)
+        except Exception as e:
+            print(f"Error analyzing {sym} in Intraday Retest Scan: {e}")
+            continue
+
+    total_time = time.time() - start_time
+    scan_progress.update({
+        "status": "done", "mode": "intraday_retest", "phase": "complete",
+        "phase_label": f"Done — {len(results)} retest setups found",
+        "current": total, "total": total,
+        "found": len(results), "pct": 100, "eta_seconds": 0,
+        "market_sentiment": market_sentiment
+    })
+
+    print(f"[Done] Intraday Retest Scan: {len(results)} setups found in {total_time:.1f}s")
+    if not results:
+        return pd.DataFrame()
+
+    df = pd.DataFrame(results).sort_values(by=["Score", "Bars Ago"], ascending=[False, True])
     df.attrs["market_sentiment"] = market_sentiment
     return df
 

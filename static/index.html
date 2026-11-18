@@ -49,7 +49,7 @@
     <div id="scannerView">
       <!-- Scanner description -->
       <div class="mode-info">
-        <p class="mode-desc" id="modeDesc">📋 Watchlist: A+ Swing Trade Scanner (Daily Chart, 30-60 DTE Options) • 🤖 Bot Tickers: Premarket Breakouts</p>
+        <p class="mode-desc" id="modeDesc">📋 Watchlist: A+ Swing (Daily) • 🤖 Bot Tickers: PM Breakouts • 🎯 Intraday Retest: 5m VWAP / 8 EMA Above PMH &amp; Below PML</p>
         <div class="mode-links">
           <button class="edit-link" id="viewCriteriaBtn" onclick="openCriteriaModal()">🎯 Swing Criteria</button>
           <button class="edit-link" id="editWatchlistBtn" onclick="openWatchlistModal()">⚙️ Edit Watchlist</button>
@@ -130,6 +130,10 @@
         <button class="scan-btn scan-btn--unusual" id="scanUnusualOptsBtn" onclick="runUnusualOptionsScan()">
           <div class="scan-btn__spinner"></div>
           <span class="scan-btn__text">⚡ Unusual Options</span>
+        </button>
+        <button class="scan-btn scan-btn--retest" id="scanIntradayRetestBtn" onclick="runScan('intraday_retest')" title="Intraday 5m Scan (Watchlist + Bot Tickers): Active VWAP or 8 EMA Retests Above Premarket High &amp; Below Premarket Low">
+          <div class="scan-btn__spinner"></div>
+          <span class="scan-btn__text">🎯 Intraday VWAP / 8 EMA Retest (PMH / PML)</span>
         </button>
       </div>
 
