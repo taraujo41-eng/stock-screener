@@ -9,6 +9,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import data_fetcher
 import paper_trader
 
@@ -232,10 +233,10 @@ class TestWebullOpenAPILiveData(unittest.TestCase):
             "exp_date": "2026-11-20",
             "dte": 9,
             "mid": 5.0,
-            "bid": 4.9,
-            "ask": 5.1,
-            "spread": 0.2,
-            "spread_pct": 4.0,
+            "bid": 4.98,
+            "ask": 5.02,
+            "spread": 0.04,
+            "spread_pct": 0.8,
             "quote_source": "Webull_Delayed_Guest",
             "is_realtime": False,
         }
@@ -344,10 +345,10 @@ class TestWebullOpenAPILiveData(unittest.TestCase):
             "exp_date": "2026-11-20",
             "dte": 9,
             "mid": 5.0,
-            "bid": 4.9,
-            "ask": 5.1,
-            "spread": 0.2,
-            "spread_pct": 4.0,
+            "bid": 4.98,
+            "ask": 5.02,
+            "spread": 0.04,
+            "spread_pct": 0.8,
             "quote_source": "Webull_OpenAPI",
             "is_realtime": True,
         }
@@ -457,6 +458,124 @@ class TestWebullOpenAPILiveData(unittest.TestCase):
         self.assertAlmostEqual(float(acc_day2["unsettled_cash"]), 0.00, places=2)
         self.assertAlmostEqual(float(acc_day2["settled_cash"]), 3562.00, places=2)
         self.assertAlmostEqual(avail_day2, 3562.00, places=2)
+
+    def test_scaled_exit_tp1_scale_out_and_breakeven_runner(self):
+        """Test TP1 scale-out at 1.0R (closes 1 of 2 contracts) and moves runner stop to breakeven."""
+        trader = paper_trader.PaperTrader()
+        trader._logged_in = True
+        trader._is_real_paper_account = False
+        trader.use_strategy_vwap_exits = True
+
+        trade_record = {
+            "id": 101,
+            "ticker": "NVDA",
+            "option_symbol": "NVDA261120P00155000",
+            "instrument_id": "SIM_NVDA_PUT",
+            "strike": 155.0,
+            "type": "PUT",
+            "signal_type": "bearish",
+            "entry_price": 5.0,
+            "stock_price_at_entry": 156.0,
+            "stop_loss": 158.0,
+            "tp1_target": 154.0,  # 1.0R target
+            "tp2_target": 152.0,  # 2.0R target
+            "tp1_hit": False,
+            "runner_active": False,
+            "quantity": 2,
+            "status": "open",
+            "entry_time": "2026-11-18T09:40:00-05:00",
+        }
+        trader._open_positions = [trade_record]
+        trader._trade_log = {"trades": [trade_record]}
+
+        ny_tz = paper_trader.get_ny_timezone()
+        idx = pd.date_range("2026-11-18 09:30", periods=5, freq="5min", tz=ny_tz)
+        # Candle 1 (entry candle): 09:40
+        # Candle 2 (first completed candle after entry): 09:45 reaches 153.50 <= 154.0 (TP1 hit)
+        bars_data = {
+            "Open": [156.5, 156.0, 156.0, 155.0, 154.5],
+            "High": [157.0, 156.5, 156.0, 155.5, 154.8],
+            "Low": [156.0, 155.5, 153.5, 154.0, 154.0],
+            "Close": [156.2, 155.8, 154.2, 154.8, 154.2],
+            "Volume": [1000, 1000, 1000, 1000, 1000]
+        }
+        df_bars = pd.DataFrame(bars_data, index=idx)
+
+        with patch("data_fetcher.fetch_one", return_value=df_bars), \
+             patch.object(trader, "get_trade_option_quote", return_value={"bid": 6.0, "mid": 6.1}), \
+             patch.object(paper_trader, "_save_trade_log"), \
+             patch("indicator_bot.send_telegram_notification"):
+            # 1. Check exits: candle 2 low (153.50) hits tp1_target (154.0)
+            trader._check_exits()
+
+        # Verify 1 contract was scaled out and 1 contract remains open as runner
+        self.assertEqual(trade_record["quantity"], 1)
+        self.assertTrue(trade_record["tp1_hit"])
+        self.assertTrue(trade_record["runner_active"])
+        self.assertEqual(trade_record["stop_loss"], 156.0)  # moved to entry price
+        self.assertEqual(len(trade_record.get("partial_exits", [])), 1)
+        self.assertEqual(trade_record["partial_exits"][0]["exit_reason"], "profit_target_1r")
+
+        # 2. Next cycle: price rallies back to entry price ($156.0) -> Breakeven runner exit
+        bars_data_pullback = {
+            "Open": [156.5, 156.0, 154.2, 155.5, 156.2],
+            "High": [157.0, 156.5, 155.0, 156.5, 156.5],
+            "Low": [156.0, 155.5, 154.0, 155.0, 155.8],
+            "Close": [156.2, 155.8, 154.8, 156.0, 156.1],  # closed at 156.0
+            "Volume": [1000, 1000, 1000, 1000, 1000]
+        }
+        df_pullback = pd.DataFrame(bars_data_pullback, index=idx)
+        with patch("data_fetcher.fetch_one", return_value=df_pullback), \
+             patch.object(trader, "get_trade_option_quote", return_value={"bid": 5.0, "mid": 5.0}), \
+             patch.object(paper_trader, "_save_trade_log"), \
+             patch("indicator_bot.send_telegram_notification"):
+            trader._check_exits()
+
+        self.assertEqual(trade_record["status"], "closed")
+        self.assertEqual(trade_record["exit_reason"], "breakeven_runner_exit")
+        self.assertEqual(len(trader._open_positions), 0)
+
+    def test_daily_circuit_breaker_one_way_lockout(self):
+        """Test strict one-way circuit breaker lockout prevents new trades once daily loss limit is hit."""
+        trader = paper_trader.PaperTrader()
+        trader.max_daily_loss = 300.0
+
+        ny_tz = paper_trader.get_ny_timezone()
+        today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
+
+        # Initially no loss
+        trader._trade_log = {"trades": [], "daily_stats": {today_str: {"circuit_breaker_locked": False}}}
+        ok, _ = trader._check_risk_limits(5.0)
+        self.assertTrue(ok)
+
+        # Simulate a trade closing with -$350 loss
+        loss_trade = {
+            "id": 1,
+            "ticker": "INTC",
+            "status": "closed",
+            "pnl": -350.0,
+            "exit_time": f"{today_str}T10:00:00-05:00"
+        }
+        trader._trade_log["trades"].append(loss_trade)
+
+        # Check risk limits -> should trigger circuit breaker and set lockout flag
+        ok, reason = trader._check_risk_limits(5.0)
+        self.assertFalse(ok)
+        self.assertIn("circuit breaker", reason.lower())
+        self.assertTrue(trader._trade_log["daily_stats"][today_str]["circuit_breaker_locked"])
+
+        # Even if a subsequent winning trade (+100) reduces net daily loss to -$250, lockout remains permanent!
+        win_trade = {
+            "id": 2,
+            "ticker": "NVDA",
+            "status": "closed",
+            "pnl": 100.0,
+            "exit_time": f"{today_str}T11:00:00-05:00"
+        }
+        trader._trade_log["trades"].append(win_trade)
+        ok2, reason2 = trader._check_risk_limits(5.0)
+        self.assertFalse(ok2)
+        self.assertIn("circuit breaker locked", reason2.lower())
 
 
 if __name__ == "__main__":

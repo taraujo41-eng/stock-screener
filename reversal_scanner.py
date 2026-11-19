@@ -1363,7 +1363,7 @@ def find_best_option(ticker, signal_type, last_price, min_dte=None, max_dte=None
     """
     try:
         if min_dte is None:
-            min_dte = int(os.getenv("OPTIONS_MIN_DTE", "0"))
+            min_dte = int(os.getenv("OPTIONS_MIN_DTE", "7"))
         if max_dte is None:
             max_dte = int(os.getenv("OPTIONS_MAX_DTE", "30"))
         if target_delta_min is None:

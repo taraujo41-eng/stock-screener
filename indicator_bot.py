@@ -331,7 +331,7 @@ def send_telegram_notification(message, max_retries=3):
                 
     return False
 
-def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=None, reason=None, score=None, grade=None, rvol=None, zone_summary=None, in_zone=False, sentiment_align=None, market_sentiment_summary=None, tech_trend=None, hod=None, lod=None, pm_high=None, pm_low=None, ema8=None, confluence=None, stop_loss=None, target_1=None):
+def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=None, reason=None, score=None, grade=None, rvol=None, zone_summary=None, in_zone=False, sentiment_align=None, market_sentiment_summary=None, tech_trend=None, hod=None, lod=None, pm_high=None, pm_low=None, ema8=None, confluence=None, stop_loss=None, target_1=None, target_2=None):
     grade_str = grade or ("A+" if (score and score >= 19) else "A")
     grade_icon = "⭐️" if grade_str == "A+" else "🔥"
 
@@ -343,15 +343,16 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
 
     sl_str = f"${stop_loss:.2f}" if stop_loss else "N/A"
     tp1_str = f"${target_1:.2f}" if target_1 else "N/A"
+    tp2_str = f"${target_2:.2f}" if target_2 else (f"${target_1:.2f}" if target_1 else "N/A")
     pmh_str = f"${pm_high:.2f}" if pm_high else "N/A"
     pml_str = f"${pm_low:.2f}" if pm_low else "N/A"
     zone_title = "5-MIN PREMARKET BREAKOUT (PMB)"
 
-    logger.info(f"🔔 {grade_str} {zone_title} SIGNAL on {ticker}: {action} | Setup: {reason} | Price=${last_price:.2f}, VWAP=${vwap_target:.2f}, 8EMA={f'${ema8:.2f}' if ema8 else 'N/A'} | Hard SL={sl_str} | 2R Target={tp1_str}")
+    logger.info(f"🔔 {grade_str} {zone_title} SIGNAL on {ticker}: {action} | Setup: {reason} | Price=${last_price:.2f}, VWAP=${vwap_target:.2f}, 8EMA={f'${ema8:.2f}' if ema8 else 'N/A'} | Hard SL={sl_str} | TP1 (1R)={tp1_str} | TP2 (2R)={tp2_str}")
     
     alert_method = os.getenv("ALERT_METHOD", "TELEGRAM").upper()
     
-    # 0. Find best option contract suggestion (PMB specs: 0-30 DTE, Delta 0.45-0.60, OI >= 500, Spread <= $0.10/2%)
+    # 0. Find best option contract suggestion (PMB specs: 7-30 DTE, Delta 0.45-0.60, OI >= 500, Spread <= $0.10/2%)
     opt_str = "None"
     opt_info = None
     try:
@@ -360,7 +361,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             ticker,
             signal_type,
             last_price,
-            min_dte=int(os.getenv("OPTIONS_MIN_DTE", "0")),
+            min_dte=int(os.getenv("OPTIONS_MIN_DTE", "7")),
             max_dte=int(os.getenv("OPTIONS_MAX_DTE", "30")),
             target_delta_min=0.45,
             target_delta_max=0.60,
@@ -385,7 +386,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             f"Action: {action_label} ({signal_type.upper()})\n"
             f"Price: ${last_price:.2f} | PMH: {pmh_str} | PML: {pml_str}\n"
             f"VWAP: ${vwap_target:.2f} | 8 EMA: ${ema8:.2f}\n"
-            f"Hard SL: {sl_str} | 2R Target: {tp1_str}\n"
+            f"Hard SL: {sl_str} | TP1 (1R): {tp1_str} | TP2 (2R): {tp2_str}\n"
             f"Early Invalidation: {struct_invalidation}\n"
             f"Option: {opt_str}"
         )
@@ -409,7 +410,8 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             f"<b>Intraday Anchors:</b> VWAP ${vwap_target:.2f} | 8 EMA ${ema8:.2f}\n"
             f"<b>Relative Volume (RVOL):</b> {rvol_formatted} (≥ 1.5x Volume SMA)\n"
             f"<b>Hard Emergency Stop:</b> {_esc(sl_str)}\n"
-            f"<b>Profit Target (2R):</b> {_esc(tp1_str)} (2:1 Asymmetry)\n"
+            f"<b>Take Profit 1 (1.0R Scale):</b> {_esc(tp1_str)} (Scale Out 50%)\n"
+            f"<b>Take Profit 2 (2.0R Runner):</b> {_esc(tp2_str)} (Runner Target)\n"
             f"<b>Early Invalidation:</b> 🏃 {_esc(struct_invalidation)}\n"
             f"<b>Market Filter:</b> {_esc(market_sentiment_summary or 'SPY/QQQ Confirmed 🎯')}\n"
             f"<b>Suggested Option:</b> {_esc(opt_str)}"
@@ -437,7 +439,8 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                 pml=pm_low,
                 ema8=ema8,
                 stop_loss_price=stop_loss,
-                target_1_price=target_1
+                target_1_price=target_1,
+                target_2_price=target_2
             )
             if result:
                 trade_executed = True
@@ -452,7 +455,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                     f"Price: ${result.get('entry_price', 0):.2f}\n"
                     f"Qty: {result.get('quantity', 1)} contract(s)\n"
                     f"Stock: ${last_price:.2f} | PMH: {pmh_str} | PML: {pml_str}\n"
-                    f"Hard SL: {sl_str} | 2R Target: {tp1_str}\n"
+                    f"Hard SL: {sl_str} | TP1 (1R): {tp1_str} | TP2 (2R): {tp2_str}\n"
                     f"Early Invalidation: {struct_invalidation}\n"
                     f"Data Feed: {feed_str}\n"
                     f"Mode: {mode_str}"
@@ -469,7 +472,8 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                         f"<b>Stock Price:</b> ${last_price:.2f} | <b>VWAP:</b> ${vwap_target:.2f} | <b>8 EMA:</b> ${ema8:.2f}\n"
                         f"<b>PMH:</b> {pmh_str} | <b>PML:</b> {pml_str}\n"
                         f"<b>Hard Emergency Stop:</b> {_esc(sl_str)}\n"
-                        f"<b>Profit Target (2R):</b> {_esc(tp1_str)} (2:1 Asymmetry)\n"
+                        f"<b>Take Profit 1 (1.0R Scale):</b> {_esc(tp1_str)} (Scale Out 50%)\n"
+                        f"<b>Take Profit 2 (2.0R Runner):</b> {_esc(tp2_str)} (Runner Target)\n"
                         f"<b>Early Invalidation:</b> 🏃 {_esc(struct_invalidation)}\n"
                         f"<b>Setup:</b> {_esc(reason or action)}\n"
                         f"<b>Data Feed:</b> {_esc(feed_str)}\n"
@@ -623,30 +627,41 @@ def evaluate_ticker_process(ticker, df):
             if not long_market_ok:
                 logger.info(f"[{ticker}] ⚠️ Skipping Bullish PMB: Market sentiment/trend is not aligned for CALLS ({market_align.get('summary')})")
                 return None
+            # Anti-Chasing Filter: Do not enter if candle is over-extended from PMH (> 1.2 ATR)
+            if (close_price - pm_high) > (1.2 * current_atr):
+                logger.info(f"[{ticker}] ⚠️ Skipping Bullish PMB: Candle over-extended from PMH (${close_price:.2f} - ${pm_high:.2f} > 1.2*ATR(${1.2*current_atr:.2f})) — waiting for pullback")
+                return None
             is_long = True
-            # Proper structural stop: PMH must hold. Place stop below PMH with an ATR buffer, or full 1 ATR drop
-            structural_stop = pm_high - (0.3 * current_atr)
+            # Tighter realistic stop: low of breakout candle or 1.0 ATR drop
+            candle_stop = low_price - (0.1 * current_atr)
             atr_stop = close_price - (1.0 * current_atr)
-            hard_stop_px = min(structural_stop, atr_stop)
+            hard_stop_px = max(candle_stop, atr_stop)
             # Ensure risk is at least min_risk_cushion so normal market noise doesn't trigger stop
             if (close_price - hard_stop_px) < min_risk_cushion:
                 hard_stop_px = close_price - min_risk_cushion
             r_risk = close_price - hard_stop_px
-            target_2r_px = close_price + (2.0 * r_risk)
+            target_1_px = close_price + (1.0 * r_risk)   # 1.0R scale out (50%)
+            target_2r_px = close_price + (2.0 * r_risk)  # 2.0R runner
 
         # Short Setup Evaluation (Monday Rules)
         elif (close_price < pm_low) and (rvol >= 1.5) and (close_price < current_vwap) and (close_price < current_ema8):
             if not short_market_ok:
                 logger.info(f"[{ticker}] ⚠️ Skipping Bearish PMB: Market sentiment/trend is not aligned for PUTS ({market_align.get('summary')})")
                 return None
+            # Anti-Chasing Filter: Do not enter if candle is over-extended from PML (> 1.2 ATR)
+            if (pm_low - close_price) > (1.2 * current_atr):
+                logger.info(f"[{ticker}] ⚠️ Skipping Bearish PMB: Candle over-extended from PML (${pm_low:.2f} - ${close_price:.2f} > 1.2*ATR(${1.2*current_atr:.2f})) — waiting for pullback")
+                return None
             is_short = True
-            structural_stop = pm_low + (0.3 * current_atr)
+            # Tighter realistic stop: high of breakout candle or 1.0 ATR rise
+            candle_stop = high_price + (0.1 * current_atr)
             atr_stop = close_price + (1.0 * current_atr)
-            hard_stop_px = max(structural_stop, atr_stop)
+            hard_stop_px = min(candle_stop, atr_stop)
             if (hard_stop_px - close_price) < min_risk_cushion:
                 hard_stop_px = close_price + min_risk_cushion
             r_risk = hard_stop_px - close_price
-            target_2r_px = close_price - (2.0 * r_risk)
+            target_1_px = close_price - (1.0 * r_risk)   # 1.0R scale out (50%)
+            target_2r_px = close_price - (2.0 * r_risk)  # 2.0R runner
 
         if not (is_long or is_short):
             return None
@@ -654,7 +669,7 @@ def evaluate_ticker_process(ticker, df):
         action = "BUY" if is_long else "SELL"
         signal_type = "bullish" if is_long else "bearish"
 
-        # 6. Derivative / Option Contract Lookup (PMB Specs: 0-30 DTE, Delta 0.45-0.60, OI >= 500, Spread <= $0.10/2%)
+        # 6. Derivative / Option Contract Lookup (PMB Specs: 7-30 DTE, Delta 0.45-0.60, OI >= 500, Spread <= $0.10/2%)
         best_opt = None
         try:
             from reversal_scanner import find_best_option
@@ -662,7 +677,7 @@ def evaluate_ticker_process(ticker, df):
                 ticker=ticker,
                 signal_type=signal_type,
                 last_price=close_price,
-                min_dte=int(os.getenv("OPTIONS_MIN_DTE", "0")),
+                min_dte=int(os.getenv("OPTIONS_MIN_DTE", "7")),
                 max_dte=int(os.getenv("OPTIONS_MAX_DTE", "30")),
                 target_delta_min=0.45,
                 target_delta_max=0.60,
@@ -674,7 +689,7 @@ def evaluate_ticker_process(ticker, df):
             logger.debug(f"Option search error for {ticker}: {ex}")
 
         if not best_opt:
-            logger.info(f"[{ticker}] ⚠️ {signal_type.upper()} PMB Breakout detected @ ${close_price:.2f}, but no liquid 0-30 DTE option contract found.")
+            logger.info(f"[{ticker}] ⚠️ {signal_type.upper()} PMB Breakout detected @ ${close_price:.2f}, but no liquid 7-30 DTE option contract found.")
             return None
 
         # 7. Rigorous A+ Scoring Formula
@@ -706,16 +721,16 @@ def evaluate_ticker_process(ticker, df):
         grade = "A+" if score >= 19 else "A"
 
         if is_long:
-            setup_reason = f"5m PMB Long | Closed Above PMH (${pm_high:.2f}) | RVOL {rvol:.1f}x | Above VWAP (${current_vwap:.2f}) + 8EMA (${current_ema8:.2f}) | 2R Target: ${target_2r_px:.2f} 🚀"
+            setup_reason = f"5m PMB Long | Closed Above PMH (${pm_high:.2f}) | RVOL {rvol:.1f}x | Above VWAP (${current_vwap:.2f}) + 8EMA (${current_ema8:.2f}) | TP1: ${target_1_px:.2f} | 2R Target: ${target_2r_px:.2f} 🚀"
             confluence_tag = f"PMH Breakout (${pm_high:.2f}) + RVOL {rvol:.1f}x"
         else:
-            setup_reason = f"5m PMB Short | Closed Below PML (${pm_low:.2f}) | RVOL {rvol:.1f}x | Below VWAP (${current_vwap:.2f}) + 8EMA (${current_ema8:.2f}) | 2R Target: ${target_2r_px:.2f} 🩸"
+            setup_reason = f"5m PMB Short | Closed Below PML (${pm_low:.2f}) | RVOL {rvol:.1f}x | Below VWAP (${current_vwap:.2f}) + 8EMA (${current_ema8:.2f}) | TP1: ${target_1_px:.2f} | 2R Target: ${target_2r_px:.2f} 🩸"
             confluence_tag = f"PML Breakdown (${pm_low:.2f}) + RVOL {rvol:.1f}x"
 
         logger.info(
             f"[{ticker}] 🎯 {grade} PMB {action} SIGNAL! Price: ${close_price:.2f} | "
             f"PMH: ${pm_high:.2f} | PML: ${pm_low:.2f} | VWAP: ${current_vwap:.2f} | 8EMA: ${current_ema8:.2f} | "
-            f"RVOL: {rvol:.1f}x | Hard SL: ${hard_stop_px:.2f} | 2R Target: ${target_2r_px:.2f}"
+            f"RVOL: {rvol:.1f}x | Hard SL: ${hard_stop_px:.2f} | TP1: ${target_1_px:.2f} | 2R Target: ${target_2r_px:.2f}"
         )
 
         return {
@@ -725,7 +740,8 @@ def evaluate_ticker_process(ticker, df):
             'vwap': round(current_vwap, 2),
             'ema8': round(current_ema8, 2),
             'stop_loss': round(hard_stop_px, 2),
-            'target_1': round(target_2r_px, 2),
+            'target_1': round(target_1_px, 2),
+            'target_2': round(target_2r_px, 2),
             'pm_high': round(pm_high, 2),
             'pm_low': round(pm_low, 2),
             'r_risk': round(r_risk, 2),
@@ -1006,7 +1022,8 @@ def bot_loop():
                             ema8=res.get('ema8'),
                             confluence=res.get('confluence'),
                             stop_loss=res.get('stop_loss'),
-                            target_1=res.get('target_1')
+                            target_1=res.get('target_1'),
+                            target_2=res.get('target_2')
                         )
                         if placed:
                             _record_alert(ticker, direction, res['price'])

@@ -480,14 +480,20 @@ class PaperTrader:
         return count
 
     def _daily_realized_pnl(self):
-        """Calculate total realized PnL for trades closed today."""
+        """Calculate total realized PnL for trades closed today, including partial exits."""
         ny_tz = get_ny_timezone()
         today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
         total_pnl = 0.0
         for trade in self._trade_log.get("trades", []):
-            exit_time_str = trade.get("exit_time") or ""
-            if exit_time_str.startswith(today_str) and trade.get("status") == "closed":
-                total_pnl += float(trade.get("pnl") or 0.0)
+            if trade.get("status") == "closed":
+                exit_time_str = trade.get("exit_time") or ""
+                if exit_time_str.startswith(today_str):
+                    total_pnl += float(trade.get("pnl") or 0.0)
+            elif trade.get("status") == "open":
+                for p_exit in trade.get("partial_exits", []):
+                    ptime = p_exit.get("exit_time") or ""
+                    if ptime.startswith(today_str):
+                        total_pnl += float(p_exit.get("pnl") or 0.0)
         return total_pnl
 
     def _last_entry_time(self):
@@ -540,11 +546,22 @@ class PaperTrader:
         if self._daily_trade_count() >= self.max_daily_trades:
             return False, f"Daily trade limit reached ({self.max_daily_trades})"
 
-        # Daily Max Loss Circuit Breaker
+        # Daily Max Loss Circuit Breaker (Strict One-Way Lockout)
         if self.max_daily_loss > 0:
+            ny_tz = get_ny_timezone()
+            today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
+            daily_stats = self._trade_log.setdefault("daily_stats", {})
+            today_stats = daily_stats.setdefault(today_str, {})
+
+            if today_stats.get("circuit_breaker_locked"):
+                return False, f"Daily max loss circuit breaker locked for today (-${self.max_daily_loss:.2f} breached). Trading halted until tomorrow."
+
             realized_pnl = self._daily_realized_pnl()
             if realized_pnl <= -abs(self.max_daily_loss):
-                return False, f"Daily max loss circuit breaker triggered (${realized_pnl:.2f} <= -${self.max_daily_loss:.2f})"
+                today_stats["circuit_breaker_locked"] = True
+                with self._lock:
+                    _save_trade_log(self._trade_log)
+                return False, f"Daily max loss circuit breaker triggered (${realized_pnl:.2f} <= -${self.max_daily_loss:.2f}). Trading locked for the day."
 
         # Entry pacing / interval cooldown (avoid entering multiple trades in seconds)
         if self.min_entry_interval_secs > 0:
@@ -614,7 +631,7 @@ class PaperTrader:
 
     # ── Order Placement ─────────────────────────────────────────────
 
-    def place_option_order(self, ticker, signal_type, last_price, vwap_target=None, zone_summary=None, in_zone=False, setup_reason=None, hod=None, lod=None, pmh=None, pml=None, ema8=None, stop_loss_price=None, target_1_price=None, force=False):
+    def place_option_order(self, ticker, signal_type, last_price, vwap_target=None, zone_summary=None, in_zone=False, setup_reason=None, hod=None, lod=None, pmh=None, pml=None, ema8=None, stop_loss_price=None, target_1_price=None, target_2_price=None, force=False):
         """
         Find the best option contract for the signal and place an order.
 
@@ -712,7 +729,7 @@ class PaperTrader:
                 ticker,
                 signal_type,
                 last_price,
-                min_dte=int(os.getenv("OPTIONS_MIN_DTE", "0")),
+                min_dte=int(os.getenv("OPTIONS_MIN_DTE", "7")),
                 max_dte=int(os.getenv("OPTIONS_MAX_DTE", "30")),
                 target_delta_min=0.45,
                 target_delta_max=0.60,
@@ -880,10 +897,12 @@ class PaperTrader:
                 "pmh": pmh,
                 "pml": pml,
                 "stop_loss": stop_loss_price,
-                "tp1_target": target_1_price or (hod if signal_type == "bullish" else lod),
+                "tp1_target": target_1_price,
+                "tp2_target": target_2_price or target_1_price or (hod if signal_type == "bullish" else lod),
                 "tp1_hit": False,
                 "runner_active": False,
                 "stock_price_at_entry": last_price,
+                "initial_quantity": order_qty,
                 "quantity": order_qty,
                 "dte": best["dte"],
                 "expiration": best.get("exp", ""),
@@ -1124,6 +1143,19 @@ class PaperTrader:
                     ]
                 _save_trade_log(self._trade_log)
 
+            # If daily max loss breached, lock out entries for the rest of today (one-way lockout)
+            if self.max_daily_loss > 0:
+                daily_pnl = self._daily_realized_pnl()
+                if daily_pnl <= -abs(self.max_daily_loss):
+                    today_str = datetime.now(ny_tz).strftime("%Y-%m-%d")
+                    with self._lock:
+                        self._trade_log.setdefault("daily_stats", {}).setdefault(today_str, {})["circuit_breaker_locked"] = True
+                        _save_trade_log(self._trade_log)
+                    logger.warning(
+                        f"[PaperTrader] 🚨 Daily max loss circuit breaker LOCKED for today (${daily_pnl:.2f} <= -${self.max_daily_loss:.2f}). "
+                        f"No further new positions will be permitted."
+                    )
+
             pnl_str = f"${pnl:+.2f}" if pnl is not None else "unknown"
             logger.info(
                 f"[PaperTrader] {'🟢' if (pnl or 0) >= 0 else '🔴'} "
@@ -1272,70 +1304,124 @@ class PaperTrader:
                                         logger.warning(f"[PaperTrader] Candle timing check error: {ex} — skipping exit check for safety")
                                         continue
 
-                                # ── PMB Strategy Exits (Hybrid Invalidation & 2:1 Asymmetry) ──
+                                # ── PMB Strategy Exits (1.0R Scale-Out + 2.0R Runner + Breakeven Lock) ──
                                 hard_sl = trade.get("stop_loss")
-                                tp_2r = trade.get("tp1_target")
+                                tp_1r = trade.get("tp1_target")
+                                tp_2r = trade.get("tp2_target") or tp_1r
                                 pmh = trade.get("pmh")
                                 pml = trade.get("pml")
                                 entry_stock = trade.get("stock_price_at_entry") or c_open
                                 curr_stock_price = float(rth_bars["Close"].iloc[-1])
+                                current_qty = trade.get("quantity", 1)
 
                                 if sig == "bullish":
-                                    # 1. Profit Target (2:1 Asymmetry / 2R) — Evaluated FIRST!
-                                    # If the 5m candle high reached the 2R target OR live price reached it, lock in profit!
+                                    # 1. Target 1 (1.0R Scale-Out) — Bank 50% profit and de-risk runner
+                                    if tp_1r and not trade.get("tp1_hit") and (c_high >= tp_1r or curr_stock_price >= tp_1r):
+                                        trade["tp1_hit"] = True
+                                        trade["runner_active"] = True
+                                        trade["breakeven_locked"] = True
+                                        trade["stop_loss"] = entry_stock
+                                        trade_log_dirty = True
+                                        if current_qty > 1:
+                                            scale_qty = max(1, current_qty // 2)
+                                            logger.info(
+                                                f"[PaperTrader] 🎯 1.0R TARGET HIT on {trade['ticker']} | "
+                                                f"Target=${tp_1r:.2f} reached (High=${c_high:.2f}). Scaling out {scale_qty} contract(s). Stop moved to Breakeven (${entry_stock:.2f})."
+                                            )
+                                            positions_to_close.append((trade, "profit_target_1r", current_price, scale_qty))
+                                            continue
+                                        else:
+                                            logger.info(f"[PaperTrader] 🎯 1.0R TARGET HIT on {trade['ticker']} | Target=${tp_1r:.2f} reached. Breakeven stop locked.")
+
+                                    # 2. Target 2 (2.0R Runner Exit)
                                     if tp_2r and (c_high >= tp_2r or curr_stock_price >= tp_2r):
                                         logger.info(
                                             f"[PaperTrader] 🎯 2:1 PROFIT TARGET HIT on {trade['ticker']} | "
                                             f"Target=${tp_2r:.2f} reached (Candle High=${c_high:.2f}, Current=${curr_stock_price:.2f})"
                                         )
-                                        positions_to_close.append((trade, "profit_target_2r", current_price))
+                                        positions_to_close.append((trade, "profit_target_2r", current_price, current_qty))
                                         continue
 
-                                    # 2. Hard Emergency Stop (Max Loss Protection: current stock breaches hard SL OR candle closed below hard SL)
+                                    # 3. Runner Breakeven Stop (Protects gains after TP1)
+                                    if trade.get("runner_active") and (curr_stock_price <= entry_stock or c_close <= entry_stock):
+                                        logger.info(
+                                            f"[PaperTrader] 🛡️ RUNNER BREAKEVEN STOP HIT on {trade['ticker']} | "
+                                            f"Stock pulled back to entry ${entry_stock:.2f}. Closing remaining {current_qty} contract(s) to protect gains."
+                                        )
+                                        positions_to_close.append((trade, "breakeven_runner_exit", current_price, current_qty))
+                                        continue
+
+                                    # 4. Hard Emergency Stop (Max Loss Protection)
                                     if hard_sl and (curr_stock_price <= hard_sl or c_close <= hard_sl):
                                         logger.info(
                                             f"[PaperTrader] 🛑 HARD EMERGENCY STOP on {trade['ticker']} | "
                                             f"Stock Current=${curr_stock_price:.2f}, Close=${c_close:.2f} <= Hard SL=${hard_sl:.2f}"
                                         )
-                                        positions_to_close.append((trade, "hard_emergency_stop", current_price))
+                                        positions_to_close.append((trade, "hard_emergency_stop", current_price, current_qty))
                                         continue
 
-                                    # 3. Structural Stop (Confirmed Invalidation: 5m candle CLOSES below PMH)
-                                    if pmh and (c_close < pmh):
+                                    # 5. Structural Stop (Confirmed Invalidation: 5m candle CLOSES below PMH)
+                                    if not trade.get("runner_active") and pmh and (c_close < pmh):
                                         logger.info(
                                             f"[PaperTrader] 🛑 STRUCTURAL STOP (PMH Invalidation) on {trade['ticker']} | "
                                             f"5m Candle Closed Below PMH (Close=${c_close:.2f} < PMH=${pmh:.2f})"
                                         )
-                                        positions_to_close.append((trade, "structural_stop_pmh", current_price))
+                                        positions_to_close.append((trade, "structural_stop_pmh", current_price, current_qty))
                                         continue
 
                                 elif sig == "bearish":
-                                    # 1. Profit Target (2:1 Asymmetry / 2R) — Evaluated FIRST!
-                                    # If the 5m candle low reached the 2R target OR live price reached it, lock in profit!
+                                    # 1. Target 1 (1.0R Scale-Out) — Bank 50% profit and de-risk runner
+                                    if tp_1r and not trade.get("tp1_hit") and (c_low <= tp_1r or curr_stock_price <= tp_1r):
+                                        trade["tp1_hit"] = True
+                                        trade["runner_active"] = True
+                                        trade["breakeven_locked"] = True
+                                        trade["stop_loss"] = entry_stock
+                                        trade_log_dirty = True
+                                        if current_qty > 1:
+                                            scale_qty = max(1, current_qty // 2)
+                                            logger.info(
+                                                f"[PaperTrader] 🎯 1.0R TARGET HIT on {trade['ticker']} | "
+                                                f"Target=${tp_1r:.2f} reached (Low=${c_low:.2f}). Scaling out {scale_qty} contract(s). Stop moved to Breakeven (${entry_stock:.2f})."
+                                            )
+                                            positions_to_close.append((trade, "profit_target_1r", current_price, scale_qty))
+                                            continue
+                                        else:
+                                            logger.info(f"[PaperTrader] 🎯 1.0R TARGET HIT on {trade['ticker']} | Target=${tp_1r:.2f} reached. Breakeven stop locked.")
+
+                                    # 2. Target 2 (2.0R Runner Exit)
                                     if tp_2r and (c_low <= tp_2r or curr_stock_price <= tp_2r):
                                         logger.info(
                                             f"[PaperTrader] 🎯 2:1 PROFIT TARGET HIT on {trade['ticker']} | "
                                             f"Target=${tp_2r:.2f} reached (Candle Low=${c_low:.2f}, Current=${curr_stock_price:.2f})"
                                         )
-                                        positions_to_close.append((trade, "profit_target_2r", current_price))
+                                        positions_to_close.append((trade, "profit_target_2r", current_price, current_qty))
                                         continue
 
-                                    # 2. Hard Emergency Stop (Max Loss Protection: current stock breaches hard SL OR candle closed above hard SL)
+                                    # 3. Runner Breakeven Stop (Protects gains after TP1)
+                                    if trade.get("runner_active") and (curr_stock_price >= entry_stock or c_close >= entry_stock):
+                                        logger.info(
+                                            f"[PaperTrader] 🛡️ RUNNER BREAKEVEN STOP HIT on {trade['ticker']} | "
+                                            f"Stock pulled back to entry ${entry_stock:.2f}. Closing remaining {current_qty} contract(s) to protect gains."
+                                        )
+                                        positions_to_close.append((trade, "breakeven_runner_exit", current_price, current_qty))
+                                        continue
+
+                                    # 4. Hard Emergency Stop (Max Loss Protection)
                                     if hard_sl and (curr_stock_price >= hard_sl or c_close >= hard_sl):
                                         logger.info(
                                             f"[PaperTrader] 🛑 HARD EMERGENCY STOP on {trade['ticker']} | "
                                             f"Stock Current=${curr_stock_price:.2f}, Close=${c_close:.2f} >= Hard SL=${hard_sl:.2f}"
                                         )
-                                        positions_to_close.append((trade, "hard_emergency_stop", current_price))
+                                        positions_to_close.append((trade, "hard_emergency_stop", current_price, current_qty))
                                         continue
 
-                                    # 3. Structural Stop (Confirmed Invalidation: 5m candle CLOSES above PML)
-                                    if pml and (c_close > pml):
+                                    # 5. Structural Stop (Confirmed Invalidation: 5m candle CLOSES above PML)
+                                    if not trade.get("runner_active") and pml and (c_close > pml):
                                         logger.info(
                                             f"[PaperTrader] 🛑 STRUCTURAL STOP (PML Invalidation) on {trade['ticker']} | "
                                             f"5m Candle Closed Above PML (Close=${c_close:.2f} > PML=${pml:.2f})"
                                         )
-                                        positions_to_close.append((trade, "structural_stop_pml", current_price))
+                                        positions_to_close.append((trade, "structural_stop_pml", current_price, current_qty))
                                         continue
                     except Exception as ex:
                         logger.debug(f"[PaperTrader] 5m strategy exit check error for {trade['ticker']}: {ex}")
@@ -1460,7 +1546,10 @@ class PaperTrader:
                 _save_trade_log(self._trade_log)
 
         for item in positions_to_close:
-            if len(item) == 3:
+            if len(item) == 4:
+                trade, reason, px, qty = item
+                self.close_position(trade, exit_price=px, reason=reason, qty_to_close=qty)
+            elif len(item) == 3:
                 trade, reason, px = item
                 self.close_position(trade, exit_price=px, reason=reason)
             else:
