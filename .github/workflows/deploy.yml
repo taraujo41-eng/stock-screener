@@ -24,6 +24,12 @@ jobs:
             docker compose up -d --build
             echo "✅ Verifying running containers:"
             docker ps
+            echo "📊 Paper Trader Status:"
+            docker exec stock_scanner_web curl -s http://127.0.0.1:5000/api/paper/status || true
+            echo ""
+            echo "📈 Open Positions:"
+            docker exec stock_scanner_web curl -s http://127.0.0.1:5000/api/paper/positions || true
+            echo ""
             echo "📋 Latest Bot Logs:"
-            sleep 8
-            docker logs --tail 50 stock_scanner_bot
+            sleep 5
+            docker logs --tail 80 stock_scanner_bot
