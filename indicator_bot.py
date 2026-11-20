@@ -331,6 +331,47 @@ def send_telegram_notification(message, max_retries=3):
                 
     return False
 
+
+_last_token_alert_time = 0.0
+
+
+def notify_webull_token_expired(context="Bot Health Check", detail=None):
+    """
+    Sends an urgent Telegram & SMS notification when Webull session token is expired.
+    Throttled to once every 4 hours to avoid repetitive spam while keeping user informed.
+    """
+    global _last_token_alert_time
+    now = time.time()
+    # Throttle to once every 4 hours (14,400 seconds)
+    if now - _last_token_alert_time < 14400:
+        return False
+    _last_token_alert_time = now
+
+    detail_str = f" ({detail})" if detail else ""
+    msg = (
+        "🚨 <b>WEBULL SESSION TOKEN EXPIRED</b>\n\n"
+        f"<b>Trigger:</b> {context}{detail_str}\n"
+        "<b>Status:</b> Your Webull App session token has expired, and auto-refresh could not re-authenticate.\n\n"
+        "⚠️ <b>Risk:</b> The bot cannot access your active real-time quote subscription and is falling back to "
+        "<b>15-minute delayed guest quotes</b>, which can cause severe mispricing on options trade entries and exits!\n\n"
+        "🔧 <b>Action Required:</b>\n"
+        "Run <code>python3 login_webull.py</code> to log into Webull and restore 0-second real-time quotes immediately."
+    )
+
+    try:
+        send_telegram_notification(msg)
+        alert_method = os.getenv("ALERT_METHOD", "TELEGRAM").upper()
+        if alert_method in ("SMS", "BOTH"):
+            send_sms_notification(
+                "🚨 ALERT: Webull session token EXPIRED! Bot running on 15m delayed data. Run login_webull.py to restore real-time quotes."
+            )
+        logger.warning(f"[Webull Token Alert] Delivered token expiration alert to Telegram (context: {context}).")
+        return True
+    except Exception as e:
+        logger.error(f"[Webull Token Alert] Failed to send expiration alert: {e}")
+        return False
+
+
 def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=None, reason=None, score=None, grade=None, rvol=None, zone_summary=None, in_zone=False, sentiment_align=None, market_sentiment_summary=None, tech_trend=None, hod=None, lod=None, pm_high=None, pm_low=None, ema8=None, confluence=None, stop_loss=None, target_1=None, target_2=None):
     grade_str = grade or ("A+" if (score and score >= 19) else "A")
     grade_icon = "⭐️" if grade_str == "A+" else "🔥"
@@ -886,6 +927,18 @@ def bot_loop():
                 time.sleep(30)
                 continue
 
+            # Check Webull session token health and alert user if expired
+            try:
+                from data_fetcher import get_market_data_status
+                m_status = get_market_data_status()
+                if not m_status.get("realtime_options_ready"):
+                    notify_webull_token_expired(
+                        context="Market Hours Scan Loop",
+                        detail=m_status.get("openapi_option_error") or "Session token expired (running on 15m delayed data)"
+                    )
+            except Exception as tok_err:
+                logger.debug(f"Token health check error: {tok_err}")
+
             # Check daily trade limit (max 5 trades/day) before scanning
             try:
                 from paper_trader import get_paper_trader
@@ -1080,8 +1133,7 @@ def start_bot_thread():
                     else:
                         opt_err = diag.get("webull_openapi_options_error") or diag.get("webull_unofficial_options_mode")
                         logger.warning(f"⚠️ Real-time options data NOT active on startup ({opt_err}).")
-                        if not pt.allow_delayed_options:
-                            pt._notify_delayed_data_once("Bot startup check (SPY)", str(opt_err))
+                        notify_webull_token_expired(context="Bot Startup Verification", detail=str(opt_err))
                 except Exception as diag_err:
                     logger.warning(f"Startup market-data check failed: {diag_err}")
 

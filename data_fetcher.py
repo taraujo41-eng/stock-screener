@@ -217,13 +217,25 @@ def get_unofficial_client():
                     except Exception:
                         _unofficial_authenticated = False
 
+                    # If access token is expired, attempt automatic refresh via refreshToken
+                    if not _unofficial_authenticated and wb._refresh_token and wb._refresh_token != "dummy_refresh_token_bypassed":
+                        try:
+                            ref = wb.refresh_login(save_token=True, token_path=token_path)
+                            if ref and ref.get("accessToken") and wb.is_logged_in():
+                                _unofficial_authenticated = True
+                                os.environ["WEBULL_ACCESS_TOKEN"] = wb._access_token
+                                os.environ["WEBULL_REFRESH_TOKEN"] = wb._refresh_token
+                                print("[Webull Unofficial] ✅ Successfully auto-refreshed session token via refreshToken.")
+                        except Exception as ref_err:
+                            print(f"[Webull Unofficial] Auto-refresh via env refreshToken failed: {ref_err}")
+
                     if _unofficial_authenticated:
                         print("[Webull Unofficial] Authenticated session verified via Environment Variables.")
+                        _unofficial_client = wb
+                        _unofficial_initialized = True
+                        return _unofficial_client
                     else:
-                        print("[Webull Unofficial] ⚠️ Env token expired/invalid (is_logged_in=False) — options fallback quotes are 15-min DELAYED guest data.")
-                    _unofficial_client = wb
-                    _unofficial_initialized = True
-                    return _unofficial_client
+                        print("[Webull Unofficial] ⚠️ Env token expired/invalid (is_logged_in=False) — checking cached credentials...")
                 except Exception as e:
                     print(f"[Webull Unofficial] Environment token load failed: {e}")
 
@@ -253,37 +265,63 @@ def get_unofficial_client():
                         except Exception:
                             _unofficial_authenticated = False
 
+                        # If access token is expired, attempt automatic refresh via credentials file
+                        if not _unofficial_authenticated and wb._refresh_token:
+                            try:
+                                ref = wb.refresh_login(save_token=True, token_path=token_path)
+                                if ref and ref.get("accessToken") and wb.is_logged_in():
+                                    _unofficial_authenticated = True
+                                    os.environ["WEBULL_ACCESS_TOKEN"] = wb._access_token
+                                    os.environ["WEBULL_REFRESH_TOKEN"] = wb._refresh_token
+                                    print("[Webull Unofficial] ✅ Successfully auto-refreshed session token from webull_credentials.json.")
+                            except Exception as ref_err:
+                                print(f"[Webull Unofficial] Cached token refresh failed: {ref_err}")
+
                         if _unofficial_authenticated:
                             print("[Webull Unofficial] Verified cached session from webull_credentials.json.")
+                            _unofficial_client = wb
+                            _unofficial_initialized = True
+                            return _unofficial_client
                         else:
                             print("[Webull Unofficial] ⚠️ Cached credentials expired — running as delayed guest session.")
-                        _unofficial_client = wb
-                        _unofficial_initialized = True
-                        return _unofficial_client
                 except Exception as e:
                     print(f"[Webull Unofficial] Cached token load failed: {e}")
 
-            # 3. Perform Login if cached token fails/does not exist
+            # 3. Perform Login if cached token fails/does not exist (interactive only)
             email = os.getenv("WEBULL_EMAIL")
             password = os.getenv("WEBULL_PASSWORD")
             is_interactive = sys.stdin and sys.stdin.isatty()
-            if not is_interactive or not (email and password):
-                print("[Webull Unofficial] Skipping fresh login in non-interactive environment.")
-                _unofficial_client = None
-                _unofficial_authenticated = False
-                _unofficial_initialized = True
-                return None
+            if is_interactive and (email and password):
+                print(f"[Webull Unofficial] Interactive terminal detected: Logging in as '{email}'...")
+                try:
+                    res = wb.login(email, password, save_token=True, token_path=token_path)
+                    if "accessToken" in res and wb.is_logged_in():
+                        print("[Webull Unofficial] Login successful!")
+                        _unofficial_client = wb
+                        _unofficial_authenticated = True
+                        _unofficial_initialized = True
+                        return _unofficial_client
+                    else:
+                        print(f"[Webull Unofficial] Login failed: {res}")
+                except Exception as log_err:
+                    print(f"[Webull Unofficial] Interactive login error: {log_err}")
 
-            print(f"[Webull Unofficial] Logging in as '{email}'...")
-            res = wb.login(email, password, save_token=True, token_path=token_path)
-            if "accessToken" in res:
-                print("[Webull Unofficial] Login successful!")
-                _unofficial_client = wb
-                _unofficial_authenticated = True
-            else:
-                print(f"[Webull Unofficial] Login failed: {res}")
-                _unofficial_client = None
-                _unofficial_authenticated = False
+            # Keep unauthenticated client for delayed guest fallback
+            _unofficial_client = wb
+            _unofficial_authenticated = False
+            _unofficial_initialized = True
+            print("[Webull Unofficial] Operating in 15-minute delayed guest mode (session token expired/unauthenticated).")
+
+            # Fire token expiration alert (throttled to once every 4 hours)
+            try:
+                from indicator_bot import notify_webull_token_expired
+                notify_webull_token_expired(
+                    context="Webull Client Init",
+                    detail="Session token expired/unauthenticated (running on 15m delayed data)"
+                )
+            except Exception:
+                pass
+
         except Exception as e:
             print(f"[Webull Unofficial] Initialization error: {e}")
             _unofficial_client = None

@@ -148,22 +148,10 @@ class PaperTrader:
         self._last_delayed_alert_date = None
 
     def _notify_delayed_data_once(self, ticker_or_ctx, detail):
-        """Send at most one Telegram warning per trading day when live real-time options data is unavailable."""
-        today_ny = datetime.now(get_ny_timezone()).date()
-        if self._last_delayed_alert_date == today_ny:
-            return
-        self._last_delayed_alert_date = today_ny
+        """Send alert when live real-time options data is unavailable."""
         try:
-            from indicator_bot import send_telegram_notification
-            msg = (
-                "⚠️ <b>LIVE OPTIONS DATA NOT ACTIVE</b>\n\n"
-                f"<b>Context:</b> {ticker_or_ctx}\n"
-                f"<b>Status:</b> {detail}\n\n"
-                "New automated option trades are <b>paused</b> so the bot does not trade on 15-minute delayed quotes.\n\n"
-                "<b>Action required:</b> Open the <b>Webull OpenAPI Developer Portal</b> and enable/subscribe to "
-                "<code>US_OPTION</code> (OPRA Real-Time) under your App Key. The bot re-checks every 5 minutes automatically."
-            )
-            send_telegram_notification(msg)
+            from indicator_bot import notify_webull_token_expired
+            notify_webull_token_expired(context=str(ticker_or_ctx), detail=str(detail))
         except Exception as e:
             logger.debug(f"[PaperTrader] Failed to send delayed-data Telegram warning: {e}")
 
@@ -1008,11 +996,14 @@ class PaperTrader:
         """
         try:
             entry_opt_price = float(trade_record.get("entry_price") or 1.0)
-            entry_stock_price = trade_record.get("stock_price_at_entry")
+            entry_stock_price = trade_record.get("stock_price_at_entry") or trade_record.get("entry_stock_price")
             strike = float(trade_record.get("strike") or 0.0)
             opt_type = str(trade_record.get("type") or "CALL").upper()
 
-            # If current stock price not provided, attempt a quick fetch
+            # If current stock price not provided, attempt a quick fetch or check trade_record
+            if current_stock_price is None or current_stock_price <= 0:
+                current_stock_price = trade_record.get("current_stock_price")
+
             if current_stock_price is None or current_stock_price <= 0:
                 try:
                     from data_fetcher import fetch_one
@@ -1063,6 +1054,7 @@ class PaperTrader:
             is_partial = (close_qty < total_qty)
 
             # Get current option quote for realistic exit price
+            opt_q = None
             if exit_price is None or exit_price <= 0:
                 opt_q = self.get_trade_option_quote(trade_record)
                 if opt_q:
@@ -1080,6 +1072,26 @@ class PaperTrader:
                     f"[PaperTrader] ℹ️ Live quote unavailable on exit — estimated realistic option price for "
                     f"{trade_record['ticker']} {trade_record['type']} as ${exit_price:.2f}"
                 )
+
+            # Guard against delayed-data phantom profits on stop-outs:
+            # If quote source is delayed and a stop-loss/emergency-stop is triggered, the underlying stock
+            # moved adversely. A stale delayed option quote reflecting an earlier peak must NOT book
+            # an artificial gain. Overriding with delta-adjusted estimate.
+            is_rt = (
+                opt_q.get("is_realtime", True)
+                if (opt_q and isinstance(opt_q, dict) and "is_realtime" in opt_q)
+                else trade_record.get("is_realtime", True)
+            )
+            entry_opt_price = float(trade_record.get("entry_price", 0.0) or 0.0)
+            is_stop_exit = any(s in str(reason).lower() for s in ("stop", "emergency", "loss", "sl"))
+            if not is_rt and is_stop_exit and exit_price is not None and entry_opt_price > 0 and exit_price > entry_opt_price:
+                estimated_price = self.estimate_option_exit_price(trade_record)
+                logger.warning(
+                    f"[PaperTrader] ⚠️ Delayed quote anomaly detected on stop-out ({reason}): Delayed quote exit "
+                    f"${exit_price:.2f} > entry ${entry_opt_price:.2f} despite adverse move. "
+                    f"Overriding with delta-adjusted estimate: ${estimated_price:.2f}"
+                )
+                exit_price = estimated_price
 
             client_order_id = str(uuid.uuid4())[:20]
 
