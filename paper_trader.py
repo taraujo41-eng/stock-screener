@@ -734,7 +734,7 @@ class PaperTrader:
                 target_delta_min=0.45,
                 target_delta_max=0.60,
                 min_oi=500,
-                max_spread_dollars=float(os.getenv("OPTIONS_MAX_SPREAD_DOLLARS", "0.10")),
+                max_spread_dollars=float(os.getenv("OPTIONS_MAX_SPREAD_DOLLARS", "0.30")),
                 max_spread_pct=2.0
             )
 
@@ -769,9 +769,12 @@ class PaperTrader:
                 logger.warning(f"[PaperTrader] No suitable option contract found for {ticker} ({signal_type})")
                 return None
 
-            # Hard Spread Gate: enforce maximum spread limit ($0.10)
+            # Hard Spread Gate: enforce maximum spread limit ($0.30 for 7+ DTE, or $0.10 for 0-6 DTE)
             opt_spread = float(best.get("spread", 0))
-            max_allowed_spread = float(os.getenv("OPTIONS_MAX_SPREAD_DOLLARS", "0.10"))
+            opt_dte = int(best.get("dte", 0))
+            max_allowed_spread = float(os.getenv("OPTIONS_MAX_SPREAD_DOLLARS", "0.30"))
+            if opt_dte >= 7:
+                max_allowed_spread = max(max_allowed_spread, 0.30)
             if opt_spread > max_allowed_spread and not force:
                 logger.warning(
                     f"[PaperTrader] ⛔ Blocked entry on {ticker}: Option {best.get('symbol')} "
