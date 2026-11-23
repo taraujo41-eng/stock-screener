@@ -68,12 +68,9 @@ function updateMarketSentimentUI(sentiment) {
 
   const timeEl = document.getElementById("sentimentUpdatedTime");
   if (timeEl) {
-    if (sentiment.timestamp) {
-      timeEl.textContent = `• Updated ${sentiment.timestamp}`;
-    } else {
-      const now = new Date();
-      timeEl.textContent = `• Updated ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-    }
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    timeEl.innerHTML = `<span style="display:inline-block; width:6px; height:6px; background:#10b981; border-radius:50%; margin-right:4px; vertical-align:middle; box-shadow:0 0 6px #10b981;"></span>Live • ${timeStr}`;
   }
 
   // SPY
@@ -122,14 +119,14 @@ function updateMarketSentimentUI(sentiment) {
   }
 }
 
-async function fetchLiveMarketSentiment(force = false) {
+async function fetchLiveMarketSentiment(force = false, isBackground = false) {
   const btn = document.getElementById("sentimentRefreshBtn");
-  if (btn) {
+  if (btn && !isBackground) {
     btn.textContent = "⏳...";
     btn.classList.add("sentiment-refresh-btn--loading");
   }
   try {
-    const url = force ? `/api/market-sentiment?force=true&t=${Date.now()}` : `/api/market-sentiment?t=${Date.now()}`;
+    const url = `/api/market-sentiment?force=true&t=${Date.now()}`;
     const res = await fetch(url);
     if (res.ok) {
       const data = await res.json();
@@ -138,9 +135,9 @@ async function fetchLiveMarketSentiment(force = false) {
       }
     }
   } catch (e) {
-    console.error("Failed to fetch market sentiment:", e);
+    if (!isBackground) console.error("Failed to fetch market sentiment:", e);
   } finally {
-    if (btn) {
+    if (btn && !isBackground) {
       btn.textContent = "🔄 Live";
       btn.classList.remove("sentiment-refresh-btn--loading");
     }
@@ -1118,11 +1115,8 @@ function displayResults(data) {
     badge.classList.add("hidden");
   }
 
-  if (data.market_sentiment) {
-    updateMarketSentimentUI(data.market_sentiment);
-  } else {
-    fetchLiveMarketSentiment(true);
-  }
+  // Always fetch and display current live market sentiment rather than historical scan snapshot
+  fetchLiveMarketSentiment(true, true);
 
   updateStats();
 
@@ -1640,6 +1634,11 @@ checkActiveScan().then(running => {
 // Fetch user watchlist from server on app load
 fetchWatchlist();
 fetchLiveMarketSentiment(true);
+
+// Auto-refresh market sentiment card every 15 seconds to always display live data
+setInterval(() => {
+  fetchLiveMarketSentiment(true, true);
+}, 15000);
 
 // ── Watchlist Manager Functions ───────────────────────────────────
 

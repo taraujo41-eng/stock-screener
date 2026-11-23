@@ -428,6 +428,15 @@ def prefilter_liquid_optionable(tickers, MIN_PRICE=10.0, MIN_AVG_VOLUME=500_000)
     return filtered
 
 
+def _safe_float(val, default=None):
+    try:
+        if val is None or val == "" or str(val).lower() == "none":
+            return default
+        return float(val)
+    except (ValueError, TypeError):
+        return default
+
+
 _market_sentiment_cache = None
 _market_sentiment_cache_ts = 0
 
@@ -440,7 +449,7 @@ def _fetch_sentiment_index_data(symbol):
     prev_close = None
     df = None
 
-    # 1. Try Webull quote if available
+    # 1. Try Webull quote if available (prioritizing live real-time price)
     try:
         from data_fetcher import get_unofficial_client
         wb_un = get_unofficial_client()
@@ -450,10 +459,10 @@ def _fetch_sentiment_index_data(symbol):
                 p_cur = _safe_float(q.get("pPrice"))
                 cur = _safe_float(q.get("close"))
                 pre = _safe_float(q.get("preClose"))
+                if cur and cur > 0:
+                    price = cur
                 if p_cur and p_cur > 0:
                     price = p_cur
-                elif cur and cur > 0:
-                    price = cur
                 if pre and pre > 0:
                     prev_close = pre
     except Exception:
@@ -498,6 +507,20 @@ def _fetch_sentiment_index_data(symbol):
 
 def _fetch_sentiment_vix_data():
     """Fetches real-time CBOE Volatility Index (^VIX)."""
+    # 1. Try real-time Webull quote
+    try:
+        from data_fetcher import get_unofficial_client
+        wb_un = get_unofficial_client()
+        if wb_un:
+            q = wb_un.get_quote(stock="VIX")
+            if q and isinstance(q, dict):
+                v_cur = _safe_float(q.get("close"))
+                if v_cur and v_cur > 0:
+                    return round(v_cur, 2)
+    except Exception:
+        pass
+
+    # 2. Fallback to yfinance
     try:
         import yfinance as yf
         t = yf.Ticker("^VIX")
@@ -516,7 +539,7 @@ def _fetch_sentiment_vix_data():
     return 18.5
 
 
-def get_market_sentiment(max_age_seconds=180, force=False):
+def get_market_sentiment(max_age_seconds=15, force=False):
     """
     Evaluates comprehensive Market Sentiment (SPY, QQQ, VIX).
     Returns a dict with:
@@ -680,6 +703,7 @@ def get_market_sentiment(max_age_seconds=180, force=False):
             "score": score,
             "label": label,
             "is_bullish": sentiment == "Bullish",
+            "is_realtime": True,
             "spy": spy_info,
             "qqq": qqq_info,
             "vix": vix_info,

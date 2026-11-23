@@ -731,8 +731,8 @@ def scan_watchlist_results():
 def api_market_sentiment():
     """Returns real-time broad market sentiment (SPY, QQQ, VIX)."""
     try:
-        force = request.args.get("force", "false").lower() in ("true", "1", "yes")
-        sentiment = get_market_sentiment(force=force)
+        force = request.args.get("force", "true").lower() in ("true", "1", "yes")
+        sentiment = get_market_sentiment(max_age_seconds=15, force=force)
         return jsonify({"ok": True, "sentiment": sentiment})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500

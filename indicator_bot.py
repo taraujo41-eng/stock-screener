@@ -55,14 +55,14 @@ _market_sentiment_cache = None
 _market_sentiment_last_time = 0
 
 def get_cached_market_sentiment():
-    """Fetches real-time SPY, QQQ, and VIX sentiment, caching for 5 minutes."""
+    """Fetches real-time SPY, QQQ, and VIX sentiment, refreshing every 30 seconds."""
     global _market_sentiment_cache, _market_sentiment_last_time
     now = time.time()
-    if _market_sentiment_cache and (now - _market_sentiment_last_time) < 300:
+    if _market_sentiment_cache and (now - _market_sentiment_last_time) < 30:
         return _market_sentiment_cache
     try:
         from reversal_scanner import get_market_sentiment
-        s = get_market_sentiment()
+        s = get_market_sentiment(max_age_seconds=15, force=True)
         if s and isinstance(s, dict):
             _market_sentiment_cache = s
             _market_sentiment_last_time = now
