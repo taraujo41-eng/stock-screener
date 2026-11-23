@@ -442,109 +442,90 @@ _market_sentiment_cache_ts = 0
 
 def _fetch_sentiment_index_data(symbol):
     """
-    Fetches real-time price, previous close, and historical daily bars for SPY/QQQ.
-    Supports ALL market sessions:
-      - 24-Hour Overnight / Sunday Evening (live CME Globex Futures ES=F & NQ=F)
-      - Pre-Market (4:00 AM - 9:30 AM ET via Webull real-time quotes)
-      - Regular Market (9:30 AM - 4:00 PM ET via Webull real-time quotes)
-      - Post-Market (4:00 PM - 8:00 PM ET via Webull real-time quotes)
+    Fetches real-time price, previous close, and historical daily bars for SPY/QQQ
+    exclusively from Webull (no Yahoo Finance).
+    Supports all market sessions:
+      - Pre-Market (4:00 AM - 9:30 AM ET via Webull pPrice / quotes)
+      - Regular Market (9:30 AM - 4:00 PM ET via Webull close / quotes)
+      - Post-Market / Extended Hours (4:00 PM - 8:00 PM ET via Webull pPrice / quotes)
+      - Overnight / Off-Hours (Webull real-time quotes & bars)
     """
     price = None
     prev_close = None
     df = None
 
-    # Check if we are in the 24-Hour Overnight / Sunday Evening futures session:
-    # Sunday after 6:00 PM ET (1080 mins), or Weekdays between 8:00 PM (1200 mins) and 4:00 AM (240 mins) ET
-    is_overnight = False
+    wb_un = None
     try:
-        ny_tz = get_ny_timezone()
-        now_ny = datetime.now(ny_tz)
-        weekday = now_ny.weekday()  # 0=Mon, 6=Sun
-        time_mins = now_ny.hour * 60 + now_ny.minute
-        if weekday == 6 and time_mins >= 1080:
-            is_overnight = True
-        elif weekday in (0, 1, 2, 3, 4) and (time_mins >= 1200 or time_mins < 240):
-            is_overnight = True
-    except Exception:
-        pass
+        from data_fetcher import get_unofficial_client
+        wb_un = get_unofficial_client()
+    except Exception as e:
+        logger.warning(f"Error getting Webull client for {symbol}: {e}")
 
-    # 1. During overnight hours, fetch live S&P / Nasdaq futures (ES=F / NQ=F)
-    if is_overnight:
+    # 1. Real-time quote from Webull
+    if wb_un:
         try:
-            import yfinance as yf
-            fut_sym = "ES=F" if symbol.upper() == "SPY" else ("NQ=F" if symbol.upper() == "QQQ" else None)
-            if fut_sym:
-                fut = yf.Ticker(fut_sym)
-                f_px = getattr(fut.fast_info, "last_price", None)
-                f_prev = getattr(fut.fast_info, "previous_close", None)
-                if f_px and f_prev and f_prev > 0:
-                    f_pct = (float(f_px) - float(f_prev)) / float(f_prev)
-                    base_close = 689.81 if symbol.upper() == "SPY" else 608.45
-                    price = round(base_close * (1.0 + f_pct), 2)
-                    prev_close = base_close
-        except Exception:
-            pass
+            q = wb_un.get_quote(stock=symbol)
+            if q and isinstance(q, dict):
+                p_cur = _safe_float(q.get("pPrice"))
+                cur = _safe_float(q.get("close"))
+                pre = _safe_float(q.get("preClose"))
 
-    # 2. Try Webull quote if not overnight or if futures lookup did not set price
-    if not price:
-        try:
-            from data_fetcher import get_unofficial_client
-            wb_un = get_unofficial_client()
-            if wb_un:
-                q = wb_un.get_quote(stock=symbol)
-                if q and isinstance(q, dict):
-                    p_cur = _safe_float(q.get("pPrice"))
-                    cur = _safe_float(q.get("close"))
-                    pre = _safe_float(q.get("preClose"))
+                # Check NY market session time
+                is_rth = False
+                try:
+                    ny_tz = get_ny_timezone()
+                    now_ny = datetime.now(ny_tz)
+                    time_mins = now_ny.hour * 60 + now_ny.minute
+                    is_rth = (now_ny.weekday() < 5) and (570 <= time_mins < 960)  # 9:30 AM - 4:00 PM ET
+                except Exception:
+                    pass
+
+                if is_rth:
+                    # During regular hours, 'close' is the live last trade price
                     if cur and cur > 0:
                         price = cur
+                    elif p_cur and p_cur > 0:
+                        price = p_cur
+                else:
+                    # Extended hours / overnight: use pPrice if available
                     if p_cur and p_cur > 0:
                         price = p_cur
-                    if pre and pre > 0:
-                        prev_close = pre
+                    elif cur and cur > 0:
+                        price = cur
+
+                if pre and pre > 0:
+                    prev_close = pre
+        except Exception as e:
+            logger.warning(f"Error fetching Webull quote for {symbol}: {e}")
+
+    # 2. Check latest 1m extended bar if price not found
+    if wb_un and not price:
+        try:
+            b = wb_un.get_bars(stock=symbol, interval='m1', count=1, extendTrading=1)
+            if b is not None and not b.empty:
+                b_close = _safe_float(b['close'].iloc[-1])
+                if b_close and b_close > 0:
+                    price = b_close
         except Exception:
             pass
 
-    # 3. Try yfinance for real-time fast_info and history
+    # 3. Fetch historical daily bars via Webull (data_fetcher.fetch_one uses Webull exclusively)
     try:
-        import yfinance as yf
-        t = yf.Ticker(symbol)
-        fi = getattr(t, "fast_info", None)
-        if fi:
-            if not price and getattr(fi, "last_price", None):
-                price = float(fi.last_price)
-            if not prev_close and getattr(fi, "previous_close", None):
-                prev_close = float(fi.previous_close)
-        
-        hist = t.history(period="1y", interval="1d")
-        if hist is not None and len(hist) >= 20:
-            df = hist
+        from data_fetcher import fetch_one
+        df = fetch_one(symbol, days=250, interval="1d", skip_webull=False)
+        if df is not None and len(df) >= 20:
             if not price and len(df) > 0:
                 price = float(df['Close'].iloc[-1])
             if not prev_close and len(df) > 1:
                 prev_close = float(df['Close'].iloc[-2])
-    except Exception:
-        pass
-
-    # 3. Fallback to data_fetcher fetch_one if historical df still needed
-    if df is None:
-        try:
-            from data_fetcher import fetch_one
-            df = fetch_one(symbol, days=250, interval="1d")
-            if df is not None and len(df) >= 20:
-                if not price and len(df) > 0:
-                    price = float(df['Close'].iloc[-1])
-                if not prev_close and len(df) > 1:
-                    prev_close = float(df['Close'].iloc[-2])
-        except Exception:
-            pass
+    except Exception as e:
+        logger.warning(f"Error fetching Webull historical bars for {symbol}: {e}")
 
     return price, prev_close, df
 
 
 def _fetch_sentiment_vix_data():
-    """Fetches real-time CBOE Volatility Index (^VIX)."""
-    # 1. Try real-time Webull quote
+    """Fetches real-time CBOE Volatility Index (VIX) exclusively from Webull."""
     try:
         from data_fetcher import get_unofficial_client
         wb_un = get_unofficial_client()
@@ -554,25 +535,8 @@ def _fetch_sentiment_vix_data():
                 v_cur = _safe_float(q.get("close"))
                 if v_cur and v_cur > 0:
                     return round(v_cur, 2)
-    except Exception:
-        pass
-
-    # 2. Fallback to yfinance
-    try:
-        import yfinance as yf
-        t = yf.Ticker("^VIX")
-        fi = getattr(t, "fast_info", None)
-        if fi and getattr(fi, "last_price", None):
-            val = float(fi.last_price)
-            if val > 0:
-                return round(val, 2)
-        hist = t.history(period="5d", interval="1d")
-        if hist is not None and len(hist) > 0:
-            val = float(hist['Close'].iloc[-1])
-            if val > 0:
-                return round(val, 2)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Error fetching Webull VIX quote: {e}")
     return 18.5
 
 
