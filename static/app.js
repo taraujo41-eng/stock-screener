@@ -70,7 +70,8 @@ function updateMarketSentimentUI(sentiment) {
   if (timeEl) {
     const now = new Date();
     const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    timeEl.innerHTML = `<span style="display:inline-block; width:6px; height:6px; background:#10b981; border-radius:50%; margin-right:4px; vertical-align:middle; box-shadow:0 0 6px #10b981;"></span>Live • ${timeStr}`;
+    const sessionTag = sentiment.session ? ` (${sentiment.session})` : '';
+    timeEl.innerHTML = `<span style="display:inline-block; width:6px; height:6px; background:#10b981; border-radius:50%; margin-right:4px; vertical-align:middle; box-shadow:0 0 6px #10b981;"></span>Live${sessionTag} • ${timeStr}`;
   }
 
   // SPY
