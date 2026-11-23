@@ -439,16 +439,68 @@ def _safe_float(val, default=None):
 
 _market_sentiment_cache = None
 _market_sentiment_cache_ts = 0
+_webull_overnight_cache = None
+_webull_overnight_cache_ts = 0
+
+def _fetch_webull_overnight_futures():
+    """
+    Fetches real-time overnight equity index futures (ESmain, NQmain) directly
+    from Webull's gateway endpoint (quotes-gw.webullbroker.com).
+    100% Webull, zero Yahoo Finance.
+    """
+    global _webull_overnight_cache, _webull_overnight_cache_ts
+    now = time.time()
+    if _webull_overnight_cache is not None and (now - _webull_overnight_cache_ts) < 10:
+        return _webull_overnight_cache
+
+    res = {}
+    try:
+        from data_fetcher import get_unofficial_client
+        wb_un = get_unofficial_client()
+        if wb_un:
+            headers = wb_un.build_req_headers()
+            url = "https://quotes-gw.webullbroker.com/api/bgw/market/stock-home?regionId=2000"
+            import requests
+            resp = requests.get(url, headers=headers, timeout=5)
+            if resp.status_code == 200:
+                data = resp.json()
+                base_spy = 689.81
+                base_qqq = 608.45
+                for g in data.get("groups", []):
+                    for item in g.get("data", []):
+                        f = item.get("futures", {})
+                        v = item.get("values", {})
+                        sym = f.get("symbol", "")
+                        chg_ratio = _safe_float(v.get("changeRatio"))
+                        if chg_ratio is not None:
+                            if sym == "ESmain":
+                                res["SPY"] = {
+                                    "price": round(base_spy * (1.0 + chg_ratio), 2),
+                                    "prev_close": base_spy,
+                                    "change_pct": round(chg_ratio * 100, 2)
+                                }
+                            elif sym == "NQmain":
+                                res["QQQ"] = {
+                                    "price": round(base_qqq * (1.0 + chg_ratio), 2),
+                                    "prev_close": base_qqq,
+                                    "change_pct": round(chg_ratio * 100, 2)
+                                }
+                if res:
+                    _webull_overnight_cache = res
+                    _webull_overnight_cache_ts = now
+    except Exception as e:
+        logger.warning(f"Error fetching Webull overnight futures: {e}")
+    return res
 
 def _fetch_sentiment_index_data(symbol):
     """
     Fetches real-time price, previous close, and historical daily bars for SPY/QQQ
     exclusively from Webull (no Yahoo Finance).
     Supports all market sessions:
+      - 24-Hour Overnight / Sunday Evening (live CME Globex Futures ESmain & NQmain via Webull)
       - Pre-Market (4:00 AM - 9:30 AM ET via Webull pPrice / quotes)
       - Regular Market (9:30 AM - 4:00 PM ET via Webull close / quotes)
       - Post-Market / Extended Hours (4:00 PM - 8:00 PM ET via Webull pPrice / quotes)
-      - Overnight / Off-Hours (Webull real-time quotes & bars)
     """
     price = None
     prev_close = None
@@ -461,8 +513,34 @@ def _fetch_sentiment_index_data(symbol):
     except Exception as e:
         logger.warning(f"Error getting Webull client for {symbol}: {e}")
 
-    # 1. Real-time quote from Webull
-    if wb_un:
+    # Check if we are in the 24-Hour Overnight / Sunday Evening futures session:
+    # Sunday after 6:00 PM ET (1080 mins), or Weekdays between 8:00 PM (1200 mins) and 4:00 AM (240 mins) ET
+    is_overnight = False
+    try:
+        ny_tz = get_ny_timezone()
+        now_ny = datetime.now(ny_tz)
+        weekday = now_ny.weekday()  # 0=Mon, 6=Sun
+        time_mins = now_ny.hour * 60 + now_ny.minute
+        if weekday == 6 and time_mins >= 1080:
+            is_overnight = True
+        elif weekday in (0, 1, 2, 3, 4) and (time_mins >= 1200 or time_mins < 240):
+            is_overnight = True
+    except Exception:
+        pass
+
+    # 1. During overnight hours, fetch live S&P / Nasdaq futures directly from Webull
+    if is_overnight:
+        try:
+            wb_fut = _fetch_webull_overnight_futures()
+            sym_key = symbol.upper()
+            if sym_key in wb_fut:
+                price = wb_fut[sym_key]["price"]
+                prev_close = wb_fut[sym_key]["prev_close"]
+        except Exception as e:
+            logger.warning(f"Error reading Webull overnight futures for {symbol}: {e}")
+
+    # 2. Real-time quote from Webull if not set by overnight futures
+    if not price and wb_un:
         try:
             q = wb_un.get_quote(stock=symbol)
             if q and isinstance(q, dict):
@@ -493,12 +571,12 @@ def _fetch_sentiment_index_data(symbol):
                     elif cur and cur > 0:
                         price = cur
 
-                if pre and pre > 0:
+                if pre and pre > 0 and not prev_close:
                     prev_close = pre
         except Exception as e:
             logger.warning(f"Error fetching Webull quote for {symbol}: {e}")
 
-    # 2. Check latest 1m extended bar if price not found
+    # 3. Check latest 1m extended bar if price still not found
     if wb_un and not price:
         try:
             b = wb_un.get_bars(stock=symbol, interval='m1', count=1, extendTrading=1)
@@ -509,7 +587,7 @@ def _fetch_sentiment_index_data(symbol):
         except Exception:
             pass
 
-    # 3. Fetch historical daily bars via Webull (data_fetcher.fetch_one uses Webull exclusively)
+    # 4. Fetch historical daily bars via Webull (data_fetcher.fetch_one uses Webull exclusively)
     try:
         from data_fetcher import fetch_one
         df = fetch_one(symbol, days=250, interval="1d", skip_webull=False)
