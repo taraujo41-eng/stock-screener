@@ -728,6 +728,7 @@ def scan_watchlist_results():
     return jsonify(results)
 
 @app.route("/api/market-sentiment", methods=["GET"])
+@app.route("/api/market_sentiment", methods=["GET"])
 def api_market_sentiment():
     """Returns real-time broad market sentiment (SPY, QQQ, VIX)."""
     try:
