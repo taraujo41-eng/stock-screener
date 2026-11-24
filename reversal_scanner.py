@@ -442,7 +442,7 @@ _market_sentiment_cache_ts = 0
 _webull_overnight_cache = None
 _webull_overnight_cache_ts = 0
 
-def _fetch_webull_overnight_futures(wb_un=None):
+def _fetch_webull_overnight_futures(wb_un=None, base_spy=None, base_qqq=None, force=False):
     """
     Fetches real-time overnight equity index futures (ESmain, NQmain) directly
     from Webull's gateway endpoint (quotes-gw.webullbroker.com).
@@ -451,7 +451,7 @@ def _fetch_webull_overnight_futures(wb_un=None):
     """
     global _webull_overnight_cache, _webull_overnight_cache_ts
     now = time.time()
-    if _webull_overnight_cache is not None and (now - _webull_overnight_cache_ts) < 10:
+    if not force and _webull_overnight_cache is not None and (now - _webull_overnight_cache_ts) < 5:
         return _webull_overnight_cache
 
     res = {}
@@ -466,17 +466,20 @@ def _fetch_webull_overnight_futures(wb_un=None):
             resp = requests.get(url, headers=headers, timeout=5)
             if resp.status_code == 200:
                 data = resp.json()
-                base_spy = None
-                base_qqq = None
-                try:
-                    q_s = wb_un.get_quote(stock="SPY")
-                    if q_s and isinstance(q_s, dict):
-                        base_spy = _safe_float(q_s.get("close") or q_s.get("pPrice"))
-                    q_q = wb_un.get_quote(stock="QQQ")
-                    if q_q and isinstance(q_q, dict):
-                        base_qqq = _safe_float(q_q.get("close") or q_q.get("pPrice"))
-                except Exception:
-                    pass
+                if not base_spy:
+                    try:
+                        q_s = wb_un.get_quote(stock="SPY")
+                        if q_s and isinstance(q_s, dict):
+                            base_spy = _safe_float(q_s.get("close") or q_s.get("pPrice"))
+                    except Exception:
+                        pass
+                if not base_qqq:
+                    try:
+                        q_q = wb_un.get_quote(stock="QQQ")
+                        if q_q and isinstance(q_q, dict):
+                            base_qqq = _safe_float(q_q.get("close") or q_q.get("pPrice"))
+                    except Exception:
+                        pass
 
                 for g in data.get("groups", []):
                     for item in g.get("data", []):
@@ -504,7 +507,7 @@ def _fetch_webull_overnight_futures(wb_un=None):
         logger.warning(f"Error fetching Webull overnight futures: {e}")
     return res
 
-def _fetch_sentiment_index_data(symbol):
+def _fetch_sentiment_index_data(symbol, force=False):
     """
     Fetches real-time price, previous close, and historical daily bars for SPY/QQQ
     exclusively from Webull (no Yahoo Finance).
@@ -512,7 +515,7 @@ def _fetch_sentiment_index_data(symbol):
       - Regular Market (9:30 AM - 4:00 PM ET via Webull close / quotes)
       - Pre-Market (4:00 AM - 9:30 AM ET via Webull pPrice / quotes)
       - Post-Market / Extended Hours (4:00 PM - 8:00 PM ET via Webull pPrice / quotes)
-      - 24-Hour Overnight / Sunday Evening (Webull pPrice / quotes 24/5, or CME Globex Futures ESmain & NQmain fallback)
+      - 24-Hour Overnight / Sunday Evening (8:00 PM - 4:00 AM ET via live CME Globex Futures ESmain & NQmain)
     """
     price = None
     prev_close = None
@@ -525,7 +528,32 @@ def _fetch_sentiment_index_data(symbol):
     except Exception as e:
         logger.warning(f"Error getting Webull client for {symbol}: {e}")
 
-    # 1. Primary: Real-time quote directly from Webull (supports 24/5 overnight trading session)
+    # Determine NY market session
+    is_rth = False
+    is_extended = False
+    is_overnight = False
+    try:
+        ny_tz = get_ny_timezone()
+        now_ny = datetime.now(ny_tz)
+        weekday = now_ny.weekday()  # 0=Mon, ..., 4=Fri, 5=Sat, 6=Sun
+        time_mins = now_ny.hour * 60 + now_ny.minute
+
+        if weekday < 5:
+            if 570 <= time_mins < 960:
+                is_rth = True  # 9:30 AM - 4:00 PM ET
+            elif (240 <= time_mins < 570) or (960 <= time_mins < 1200):
+                is_extended = True  # 4:00 AM - 9:30 AM or 4:00 PM - 8:00 PM ET
+            elif time_mins >= 1200 or time_mins < 240:
+                is_overnight = True  # 8:00 PM - 4:00 AM ET
+        elif weekday == 6 and time_mins >= 1080:
+            is_overnight = True  # Sunday 6:00 PM - Monday 4:00 AM ET
+    except Exception:
+        pass
+
+    # 1. Fetch quote from Webull for base prices and prev_close
+    cur = None
+    p_cur = None
+    pre = None
     if wb_un:
         try:
             q = wb_un.get_quote(stock=symbol)
@@ -533,61 +561,30 @@ def _fetch_sentiment_index_data(symbol):
                 p_cur = _safe_float(q.get("pPrice"))
                 cur = _safe_float(q.get("close"))
                 pre = _safe_float(q.get("preClose"))
-
-                # Check NY market session time
-                is_rth = False
-                try:
-                    ny_tz = get_ny_timezone()
-                    now_ny = datetime.now(ny_tz)
-                    time_mins = now_ny.hour * 60 + now_ny.minute
-                    is_rth = (now_ny.weekday() < 5) and (570 <= time_mins < 960)  # 9:30 AM - 4:00 PM ET
-                except Exception:
-                    pass
-
-                if is_rth:
-                    # During regular hours, 'close' is the live last trade price
-                    if cur and cur > 0:
-                        price = cur
-                    elif p_cur and p_cur > 0:
-                        price = p_cur
-                else:
-                    # Extended hours / overnight: use pPrice if available
-                    if p_cur and p_cur > 0:
-                        price = p_cur
-                    elif cur and cur > 0:
-                        price = cur
-
                 if pre and pre > 0:
                     prev_close = pre
         except Exception as e:
             logger.warning(f"Error fetching Webull quote for {symbol}: {e}")
 
-    # 2. Check if we need overnight / Sunday evening futures (Sunday 6:00 PM - 8:00 PM ET before equities open)
-    # Only if price is not set, or during the pre-equity Sunday futures gap
-    is_sunday_futures_gap = False
-    try:
-        ny_tz = get_ny_timezone()
-        now_ny = datetime.now(ny_tz)
-        weekday = now_ny.weekday()  # 6=Sun
-        time_mins = now_ny.hour * 60 + now_ny.minute
-        if weekday == 6 and (1080 <= time_mins < 1200):
-            is_sunday_futures_gap = True
-    except Exception:
-        pass
-
-    if (not price or is_sunday_futures_gap) and wb_un:
+    # 2. Select live price based on market session
+    if is_overnight and wb_un:
+        # During overnight hours (8:00 PM - 4:00 AM ET & Sunday evening), stock ECNs are closed.
+        # CME Globex Futures (ESmain / NQmain) trade live 24h and drive overnight price action!
         try:
-            wb_fut = _fetch_webull_overnight_futures(wb_un=wb_un)
+            wb_fut = _fetch_webull_overnight_futures(wb_un=wb_un, base_spy=cur if symbol == "SPY" else None, base_qqq=cur if symbol == "QQQ" else None, force=force)
             sym_key = symbol.upper()
             if sym_key in wb_fut:
-                fut_price = wb_fut[sym_key].get("price")
-                fut_prev = wb_fut[sym_key].get("prev_close")
-                if fut_price:
-                    price = fut_price
-                if fut_prev and not prev_close:
-                    prev_close = fut_prev
+                price = wb_fut[sym_key].get("price")
         except Exception as e:
             logger.warning(f"Error reading Webull overnight futures for {symbol}: {e}")
+
+    if not price:
+        if is_rth:
+            price = cur if cur and cur > 0 else p_cur
+        elif is_extended:
+            price = p_cur if p_cur and p_cur > 0 else cur
+        else:
+            price = p_cur if p_cur and p_cur > 0 else cur
 
     # 3. Check latest 1m extended bar if price still not found
     if wb_un and not price:
@@ -655,7 +652,7 @@ def get_market_sentiment(max_age_seconds=15, force=False):
         details = []
 
         # 1. SPY Analysis
-        spy_price, spy_prev, spy_df = _fetch_sentiment_index_data("SPY")
+        spy_price, spy_prev, spy_df = _fetch_sentiment_index_data("SPY", force=force)
         spy_c = round(float(spy_price), 2) if spy_price else 0.0
         spy_prev = float(spy_prev) if spy_prev else spy_c
         spy_chg = round(((spy_c - spy_prev) / spy_prev) * 100, 2) if spy_prev > 0 else 0.0
@@ -705,7 +702,7 @@ def get_market_sentiment(max_age_seconds=15, force=False):
         }
 
         # 2. QQQ Analysis
-        qqq_price, qqq_prev, qqq_df = _fetch_sentiment_index_data("QQQ")
+        qqq_price, qqq_prev, qqq_df = _fetch_sentiment_index_data("QQQ", force=force)
         qqq_c = round(float(qqq_price), 2) if qqq_price else 0.0
         qqq_prev = float(qqq_prev) if qqq_prev else qqq_c
         qqq_chg = round(((qqq_c - qqq_prev) / qqq_prev) * 100, 2) if qqq_prev > 0 else 0.0
