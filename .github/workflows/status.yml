@@ -23,5 +23,10 @@ jobs:
             echo "=== OPEN POSITIONS ==="
             docker exec stock_scanner_web curl -s http://127.0.0.1:5000/api/paper/positions || true
             echo ""
+            echo "=== WEBULL SESSION STATUS & REFRESH ==="
+            docker exec stock_scanner_web curl -s -X POST http://127.0.0.1:5000/api/webull/refresh || true
+            echo ""
+            docker exec stock_scanner_web curl -s http://127.0.0.1:5000/api/webull/status || true
+            echo ""
             echo "=== BOT LOGS (LAST 80 LINES) ==="
             docker logs --tail 80 stock_scanner_bot

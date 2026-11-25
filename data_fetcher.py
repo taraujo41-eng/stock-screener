@@ -162,23 +162,169 @@ _unofficial_initialized = False
 _unofficial_authenticated = False
 
 
+def get_webull_token_path():
+    """
+    Returns the persistent directory for storing Webull session files.
+    Prefers ./conf (which is mounted into Docker containers as a persistent volume)
+    so tokens and did.bin survive container rebuilds and restarts.
+    """
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    conf_dir = os.path.join(app_dir, "conf")
+    if os.path.isdir(conf_dir):
+        return conf_dir
+    try:
+        os.makedirs(conf_dir, exist_ok=True)
+        return conf_dir
+    except Exception:
+        return app_dir
+
+
+def _sync_tokens_to_env(access_token, refresh_token, did=None):
+    """Safely updates .env with refreshed Webull tokens."""
+    for env_path in [".env", os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")]:
+        if os.path.exists(env_path):
+            try:
+                with open(env_path, "r") as f:
+                    lines = f.readlines()
+                updates = {
+                    "WEBULL_ACCESS_TOKEN": access_token,
+                    "WEBULL_REFRESH_TOKEN": refresh_token,
+                }
+                if did:
+                    updates["WEBULL_DID"] = str(did)
+                new_lines = []
+                seen_keys = set()
+                for line in lines:
+                    matched = False
+                    for k, v in updates.items():
+                        if line.strip().startswith(f"{k}=") or line.strip().startswith(f"export {k}="):
+                            prefix = "export " if line.strip().startswith("export ") else ""
+                            new_lines.append(f"{prefix}{k}={v}\n")
+                            seen_keys.add(k)
+                            matched = True
+                            break
+                    if not matched:
+                        new_lines.append(line)
+                for k, v in updates.items():
+                    if k not in seen_keys:
+                        new_lines.append(f"{k}={v}\n")
+                with open(env_path, "w") as f:
+                    f.writelines(new_lines)
+            except Exception:
+                pass
+
+
 def is_unofficial_authenticated():
     """Return True only when the unofficial Webull session passed wb.is_logged_in()."""
-    return _unofficial_authenticated
+    global _unofficial_authenticated, _unofficial_client
+    if not _unofficial_authenticated:
+        return False
+    if _unofficial_client:
+        try:
+            return bool(_unofficial_client.is_logged_in())
+        except Exception:
+            return False
+    return False
+
+
+def refresh_webull_session_if_needed(force=False):
+    """
+    Checks if Webull unofficial session token is expired or close to expiring,
+    and automatically refreshes it via refreshToken without requiring manual user intervention.
+    Returns True if session is authenticated/refreshed, False otherwise.
+    """
+    global _unofficial_client, _unofficial_authenticated, _unofficial_initialized
+    with _unofficial_lock:
+        wb = _unofficial_client
+        if wb is None:
+            wb = get_unofficial_client()
+            if not wb:
+                return False
+
+        # If already authenticated and not forcing, check if token is still valid
+        if _unofficial_authenticated and not force:
+            try:
+                if wb.is_logged_in():
+                    return True
+            except Exception:
+                pass
+
+        token_path = get_webull_token_path()
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # Locate active refresh token
+        refresh_tok = getattr(wb, "_refresh_token", None) or os.getenv("WEBULL_REFRESH_TOKEN")
+        if not refresh_tok or refresh_tok == "dummy_refresh_token_bypassed":
+            for p in (token_path, base_dir):
+                cf = os.path.join(p, "webull_credentials.json")
+                if os.path.exists(cf):
+                    try:
+                        with open(cf, "rb") as f:
+                            cdata = pickle.load(f)
+                            if cdata.get("refreshToken"):
+                                refresh_tok = cdata.get("refreshToken")
+                                wb._refresh_token = refresh_tok
+                                wb._uuid = cdata.get("uuid") or getattr(wb, "_uuid", "")
+                                break
+                    except Exception:
+                        pass
+
+        if not refresh_tok or refresh_tok == "dummy_refresh_token_bypassed":
+            _unofficial_authenticated = False
+            return False
+
+        try:
+            print("[Webull Unofficial] 🔄 Performing session token refresh via refreshToken...")
+            res = wb.refresh_login(save_token=True, token_path=token_path)
+            if res and res.get("accessToken") and wb.is_logged_in():
+                _unofficial_authenticated = True
+                _unofficial_initialized = True
+                _unofficial_client = wb
+                os.environ["WEBULL_ACCESS_TOKEN"] = wb._access_token
+                os.environ["WEBULL_REFRESH_TOKEN"] = wb._refresh_token
+                if wb._did:
+                    os.environ["WEBULL_DID"] = str(wb._did)
+
+                # Mirror credentials and did to base directory for backwards compatibility
+                if token_path != base_dir:
+                    try:
+                        wb._save_token(res, base_dir)
+                    except Exception:
+                        pass
+                    try:
+                        with open(os.path.join(base_dir, "did.bin"), "wb") as df:
+                            pickle.dump(wb._did, df)
+                    except Exception:
+                        pass
+
+                _sync_tokens_to_env(wb._access_token, wb._refresh_token, wb._did)
+                print("[Webull Unofficial] ✅ Session token successfully auto-refreshed.")
+                return True
+            else:
+                err_msg = res.get("msg") or res.get("message") or str(res)
+                print(f"[Webull Unofficial] ⚠️ Token refresh returned: {err_msg}")
+                _unofficial_authenticated = False
+                return False
+        except Exception as e:
+            print(f"[Webull Unofficial] ⚠️ Exception during token refresh: {e}")
+            _unofficial_authenticated = False
+            return False
 
 
 def get_unofficial_client():
     """Retrieve and initialize the unofficial Webull client cleanly and verify login state."""
     global _unofficial_client, _unofficial_initialized, _unofficial_authenticated
-    if _unofficial_initialized:
+    if _unofficial_initialized and _unofficial_client is not None:
         return _unofficial_client
 
     with _unofficial_lock:
-        if _unofficial_initialized:
+        if _unofficial_initialized and _unofficial_client is not None:
             return _unofficial_client
 
-        token_path = os.path.dirname(__file__)
+        token_path = get_webull_token_path()
+        base_dir = os.path.dirname(os.path.abspath(__file__))
         credentials_file = os.path.join(token_path, "webull_credentials.json")
+        fallback_cred_file = os.path.join(base_dir, "webull_credentials.json")
         env_access_token = (os.getenv("WEBULL_ACCESS_TOKEN") or "").strip() or None
         env_did = (os.getenv("WEBULL_DID") or "").strip() or None
 
@@ -187,21 +333,31 @@ def get_unofficial_client():
                 from webull.webull import webull
             except ImportError:
                 from webull import webull
-            wb = webull()
 
-            # Sync did.bin to WEBULL_DID when provided so internal SDK calls match the env DID
-            if env_did:
-                did_bin_file = os.path.join(token_path, "did.bin")
-                try:
-                    existing_did = None
-                    if os.path.exists(did_bin_file):
-                        with open(did_bin_file, "rb") as f:
-                            existing_did = pickle.load(f)
-                    if existing_did != env_did:
-                        with open(did_bin_file, "wb") as f:
-                            pickle.dump(env_did, f)
-                except Exception:
-                    pass
+            # Determine persistent Device ID (DID) before initializing webull instance
+            persistent_did = None
+            for p in (token_path, base_dir):
+                f_did = os.path.join(p, "did.bin")
+                if os.path.exists(f_did):
+                    try:
+                        with open(f_did, "rb") as df:
+                            persistent_did = pickle.load(df)
+                            if persistent_did:
+                                break
+                    except Exception:
+                        pass
+            if not persistent_did and env_did:
+                persistent_did = env_did
+
+            wb = webull()
+            if persistent_did:
+                wb._did = persistent_did
+                for p in set([token_path, base_dir]):
+                    try:
+                        with open(os.path.join(p, "did.bin"), "wb") as df:
+                            pickle.dump(persistent_did, df)
+                    except Exception:
+                        pass
 
             # 1. Try to load token from environment variables
             if env_access_token:
@@ -225,6 +381,7 @@ def get_unofficial_client():
                                 _unofficial_authenticated = True
                                 os.environ["WEBULL_ACCESS_TOKEN"] = wb._access_token
                                 os.environ["WEBULL_REFRESH_TOKEN"] = wb._refresh_token
+                                _sync_tokens_to_env(wb._access_token, wb._refresh_token, wb._did)
                                 print("[Webull Unofficial] ✅ Successfully auto-refreshed session token via refreshToken.")
                         except Exception as ref_err:
                             print(f"[Webull Unofficial] Auto-refresh via env refreshToken failed: {ref_err}")
@@ -239,24 +396,17 @@ def get_unofficial_client():
                 except Exception as e:
                     print(f"[Webull Unofficial] Environment token load failed: {e}")
 
-            # 2. Try to load cached token from local credentials file
-            if os.path.exists(credentials_file):
+            # 2. Try to load cached token from persistent credentials file
+            active_cred_file = credentials_file if os.path.exists(credentials_file) else fallback_cred_file
+            if os.path.exists(active_cred_file):
                 try:
-                    with open(credentials_file, "rb") as f:
+                    with open(active_cred_file, "rb") as f:
                         token_data = pickle.load(f)
 
                     wb._access_token = token_data.get("accessToken")
                     wb._refresh_token = token_data.get("refreshToken")
                     wb._token_expire = token_data.get("tokenExpireTime")
                     wb._uuid = token_data.get("uuid")
-
-                    did_bin_file = os.path.join(token_path, "did.bin")
-                    if os.path.exists(did_bin_file):
-                        try:
-                            with open(did_bin_file, "rb") as f:
-                                wb._did = pickle.load(f)
-                        except Exception:
-                            pass
 
                     if wb._access_token:
                         wb._account_id = token_data.get("account_id")
@@ -273,12 +423,13 @@ def get_unofficial_client():
                                     _unofficial_authenticated = True
                                     os.environ["WEBULL_ACCESS_TOKEN"] = wb._access_token
                                     os.environ["WEBULL_REFRESH_TOKEN"] = wb._refresh_token
-                                    print("[Webull Unofficial] ✅ Successfully auto-refreshed session token from webull_credentials.json.")
+                                    _sync_tokens_to_env(wb._access_token, wb._refresh_token, wb._did)
+                                    print("[Webull Unofficial] ✅ Successfully auto-refreshed session token from credentials file.")
                             except Exception as ref_err:
                                 print(f"[Webull Unofficial] Cached token refresh failed: {ref_err}")
 
                         if _unofficial_authenticated:
-                            print("[Webull Unofficial] Verified cached session from webull_credentials.json.")
+                            print("[Webull Unofficial] Verified cached session from credentials file.")
                             _unofficial_client = wb
                             _unofficial_initialized = True
                             return _unofficial_client
@@ -300,6 +451,7 @@ def get_unofficial_client():
                         _unofficial_client = wb
                         _unofficial_authenticated = True
                         _unofficial_initialized = True
+                        _sync_tokens_to_env(wb._access_token, wb._refresh_token, wb._did)
                         return _unofficial_client
                     else:
                         print(f"[Webull Unofficial] Login failed: {res}")
@@ -311,16 +463,6 @@ def get_unofficial_client():
             _unofficial_authenticated = False
             _unofficial_initialized = True
             print("[Webull Unofficial] Operating in 15-minute delayed guest mode (session token expired/unauthenticated).")
-
-            # Fire token expiration alert (throttled to once every 4 hours)
-            try:
-                from indicator_bot import notify_webull_token_expired
-                notify_webull_token_expired(
-                    context="Webull Client Init",
-                    detail="Session token expired/unauthenticated (running on 15m delayed data)"
-                )
-            except Exception:
-                pass
 
         except Exception as e:
             print(f"[Webull Unofficial] Initialization error: {e}")

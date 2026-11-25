@@ -34,41 +34,61 @@ def main():
         print("❌ Error: 'webull' package not found. Run: pip install webull")
         sys.exit(1)
 
-    wb = webull()
-    token_path = os.path.dirname(os.path.abspath(__file__))
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    conf_dir = os.path.join(app_dir, "conf")
+    os.makedirs(conf_dir, exist_ok=True)
+    token_path = conf_dir if os.path.isdir(conf_dir) else app_dir
     credentials_file = os.path.join(token_path, "webull_credentials.json")
+
+    # Load persistent DID first before instantiating webull so the device ID is stable
+    persistent_did = None
+    for p in (conf_dir, app_dir):
+        df_p = os.path.join(p, "did.bin")
+        if os.path.exists(df_p):
+            try:
+                import pickle
+                with open(df_p, "rb") as df:
+                    persistent_did = pickle.load(df)
+                    if persistent_did:
+                        break
+            except Exception:
+                pass
+    if not persistent_did and os.getenv("WEBULL_DID"):
+        persistent_did = os.getenv("WEBULL_DID").strip()
+
+    wb = webull()
+    if persistent_did:
+        wb._did = persistent_did
+        for p in (conf_dir, app_dir):
+            try:
+                import pickle
+                with open(os.path.join(p, "did.bin"), "wb") as df:
+                    pickle.dump(persistent_did, df)
+            except Exception:
+                pass
 
     # 1. First, check if existing token can simply be refreshed!
     token_loaded = False
-    if os.path.exists(credentials_file):
-        try:
-            import pickle
-            with open(credentials_file, "rb") as f:
-                token_data = pickle.load(f)
-            wb._access_token = token_data.get("accessToken")
-            wb._refresh_token = token_data.get("refreshToken")
-            wb._uuid = token_data.get("uuid")
-            token_loaded = True
-        except Exception:
-            pass
+    for p in (conf_dir, app_dir):
+        cf = os.path.join(p, "webull_credentials.json")
+        if os.path.exists(cf):
+            try:
+                import pickle
+                with open(cf, "rb") as f:
+                    token_data = pickle.load(f)
+                wb._access_token = token_data.get("accessToken")
+                wb._refresh_token = token_data.get("refreshToken")
+                wb._uuid = token_data.get("uuid")
+                token_loaded = True
+                break
+            except Exception:
+                pass
 
     if not wb._refresh_token and os.getenv("WEBULL_REFRESH_TOKEN"):
         wb._refresh_token = os.getenv("WEBULL_REFRESH_TOKEN").strip()
         wb._access_token = (os.getenv("WEBULL_ACCESS_TOKEN") or "").strip()
         wb._uuid = (os.getenv("WEBULL_UUID") or "").strip()
         token_loaded = bool(wb._refresh_token)
-
-    env_did = (os.getenv("WEBULL_DID") or "").strip()
-    did_bin = os.path.join(token_path, "did.bin")
-    if os.path.exists(did_bin):
-        try:
-            import pickle
-            with open(did_bin, "rb") as df:
-                wb._did = pickle.load(df)
-        except Exception:
-            pass
-    elif env_did:
-        wb._did = env_did
 
     if wb._refresh_token and wb._refresh_token != "dummy_refresh_token_bypassed":
         try:
@@ -78,6 +98,11 @@ def main():
                 print("✅ SUCCESS: Webull session successfully refreshed without re-entering password!")
                 print(f"   Account ID : {wb._account_id}")
                 print(f"   Saved to   : {credentials_file}\n")
+                if token_path != app_dir:
+                    try:
+                        wb._save_token(res, app_dir)
+                    except Exception:
+                        pass
                 _update_env_file("WEBULL_ACCESS_TOKEN", wb._access_token)
                 _update_env_file("WEBULL_REFRESH_TOKEN", wb._refresh_token)
                 if wb._did:
@@ -157,6 +182,11 @@ def main():
         _update_env_file("WEBULL_REFRESH_TOKEN", wb._refresh_token)
         if wb._did:
             _update_env_file("WEBULL_DID", str(wb._did))
+        if token_path != app_dir:
+            try:
+                wb._save_token(res, app_dir)
+            except Exception:
+                pass
 
         _send_success_notification()
     else:

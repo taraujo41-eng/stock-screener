@@ -1145,6 +1145,133 @@ def watchlist_import_webull():
         traceback.print_exc()
         return jsonify({"ok": False, "error": str(e)}), 500
 
+
+@app.route("/api/webull/status", methods=["GET"])
+def webull_status():
+    """Get status of Webull real-time market data and session token."""
+    try:
+        from data_fetcher import get_market_data_status, is_unofficial_authenticated, get_unofficial_client
+        status = get_market_data_status()
+        wb = get_unofficial_client()
+        token_expire = getattr(wb, "_token_expire", None) if wb else None
+        return jsonify({
+            "ok": True,
+            "status": status,
+            "token_expire": token_expire,
+            "authenticated": is_unofficial_authenticated()
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/webull/refresh", methods=["POST"])
+def webull_refresh():
+    """Trigger an immediate background refresh of the Webull session token."""
+    try:
+        from data_fetcher import refresh_webull_session_if_needed, get_market_data_status
+        success = refresh_webull_session_if_needed(force=True)
+        status = get_market_data_status()
+        return jsonify({
+            "ok": success,
+            "message": "Webull session refreshed successfully." if success else "Refresh token invalid or expired. Full login required.",
+            "status": status
+        }), (200 if success else 400)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.route("/api/webull/login", methods=["POST"])
+def webull_login_api():
+    """
+    Authenticate Webull account via API (email/phone + password + optional MFA).
+    Supports two-step login:
+      1) POST with email & password -> if MFA needed, requests SMS/email code and returns { "mfa_required": True }
+      2) POST with email, password & mfa_code -> verifies MFA, saves tokens to conf/, returns { "ok": True }
+    """
+    try:
+        data = request.get_json() or {}
+        username = (data.get("username") or data.get("email") or os.getenv("WEBULL_EMAIL") or "").strip()
+        password = (data.get("password") or os.getenv("WEBULL_PASSWORD") or "").strip()
+        mfa_code = (data.get("mfa_code") or data.get("code") or "").strip()
+
+        if not username or not password:
+            return jsonify({"ok": False, "error": "Username/email and password are required"}), 400
+
+        from webull import webull
+        from data_fetcher import get_webull_token_path, _sync_tokens_to_env
+        import pickle
+
+        token_path = get_webull_token_path()
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+
+        wb = webull()
+        persistent_did = None
+        for p in (token_path, base_dir):
+            f_did = os.path.join(p, "did.bin")
+            if os.path.exists(f_did):
+                try:
+                    with open(f_did, "rb") as df:
+                        persistent_did = pickle.load(df)
+                        if persistent_did:
+                            break
+                except Exception:
+                    pass
+        if not persistent_did and os.getenv("WEBULL_DID"):
+            persistent_did = os.getenv("WEBULL_DID").strip()
+        if persistent_did:
+            wb._did = persistent_did
+
+        # If MFA code provided, complete login with MFA
+        if mfa_code:
+            res = wb.login(username, password, mfa=mfa_code, save_token=True, token_path=token_path)
+        else:
+            res = wb.login(username, password, save_token=True, token_path=token_path)
+
+        if "accessToken" in res and wb.is_logged_in():
+            if token_path != base_dir:
+                try:
+                    wb._save_token(res, base_dir)
+                except Exception:
+                    pass
+                try:
+                    with open(os.path.join(base_dir, "did.bin"), "wb") as df:
+                        pickle.dump(wb._did, df)
+                except Exception:
+                    pass
+            _sync_tokens_to_env(wb._access_token, wb._refresh_token, wb._did)
+
+            try:
+                from indicator_bot import send_telegram_notification
+                send_telegram_notification(
+                    "✅ <b>WEBULL SESSION AUTHENTICATED</b>\n\n"
+                    "Fresh Webull session tokens have been verified via Web API.\n"
+                    "Real-time option quotes and your account subscription are now <b>ACTIVE</b>."
+                )
+            except Exception:
+                pass
+
+            return jsonify({
+                "ok": True,
+                "message": "Webull authenticated successfully",
+                "account_id": wb._account_id
+            })
+
+        if not mfa_code:
+            try:
+                wb.get_mfa(username)
+                return jsonify({
+                    "ok": False,
+                    "mfa_required": True,
+                    "message": "MFA code requested. Please submit your 6-digit verification code with the mfa_code parameter."
+                }), 200
+            except Exception as mfa_err:
+                return jsonify({"ok": False, "error": f"Login failed and could not request MFA: {mfa_err}"}), 400
+
+        return jsonify({"ok": False, "error": f"Login failed: {res}"}), 400
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 @app.route("/api/watchlist/screen-criteria", methods=["POST"])
 def watchlist_screen_criteria():
     """Re-screen universe against criteria (Base Equity, Options Health, ATR) and update watchlist."""

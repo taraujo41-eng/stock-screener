@@ -20,6 +20,7 @@ jobs:
           script: |
             echo "🚀 Deploying latest code to Oracle Cloud..."
             cd /home/ubuntu/stock-scanner
+            mkdir -p conf
             git pull origin main
             docker compose up -d --build
             echo "✅ Verifying running containers:"
@@ -29,6 +30,11 @@ jobs:
             echo ""
             echo "📈 Open Positions:"
             docker exec stock_scanner_web curl -s http://127.0.0.1:5000/api/paper/positions || true
+            echo ""
+            echo "🔐 Webull Session Status & Auto-Refresh:"
+            docker exec stock_scanner_web curl -s -X POST http://127.0.0.1:5000/api/webull/refresh || true
+            echo ""
+            docker exec stock_scanner_web curl -s http://127.0.0.1:5000/api/webull/status || true
             echo ""
             echo "📋 Latest Bot Logs:"
             sleep 5

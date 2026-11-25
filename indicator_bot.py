@@ -909,9 +909,11 @@ def bot_loop():
                 time.sleep(30)
                 continue
 
-            # Check Webull session token health and alert user if expired
+            # Check Webull session token health and auto-refresh proactively
             try:
-                from data_fetcher import get_market_data_status
+                from data_fetcher import refresh_webull_session_if_needed, get_market_data_status
+                # Proactively refresh token if expired or nearing expiration
+                refresh_webull_session_if_needed()
                 m_status = get_market_data_status()
                 if not m_status.get("realtime_options_ready"):
                     notify_webull_token_expired(
@@ -1108,7 +1110,8 @@ def start_bot_thread():
                 pt.start_monitor_thread()
                 logger.info("Paper trader initialized and position monitor started.")
                 try:
-                    from data_fetcher import test_connection
+                    from data_fetcher import refresh_webull_session_if_needed, test_connection
+                    refresh_webull_session_if_needed()
                     diag = test_connection("SPY")
                     if diag.get("realtime_options_ready"):
                         logger.info("✅ Real-time Webull options market data verified active on startup.")
