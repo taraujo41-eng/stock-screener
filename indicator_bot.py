@@ -129,37 +129,21 @@ def get_market_index_alignment(max_age_seconds=45):
         spy_above, spy_c, spy_vwap = _check_vwap(spy_df)
         qqq_above, qqq_c, qqq_vwap = _check_vwap(qqq_df)
 
-        # Macro Market Sentiment Check (SPY, QQQ, VIX regime)
+        # Nov 9-13 Winning Criteria: Broad market session VWAP alignment
+        long_ok = (spy_above is True) or (qqq_above is True)
+        short_ok = (spy_above is False) or (qqq_above is False)
+
         macro_sent = get_cached_market_sentiment()
         sent_label = macro_sent.get("sentiment", "Neutral")
         sent_score = macro_sent.get("score", 50)
 
-        # Combine Intraday Index VWAP + Macro Daily Sentiment:
-        # 1. If Macro Sentiment is Bearish (score < 40), BLOCK CALLS!
-        # 2. If Macro Sentiment is Bullish (score > 60), BLOCK PUTS!
-        # 3. For Neutral macro, require both SPY and QQQ to not contradict the trade.
-        if sent_score < 40 or sent_label == "Bearish":
-            long_ok = False
-            # Puts allowed if indexes are not rallying above VWAP
-            short_ok = (spy_above is not True) and (qqq_above is not True)
-        elif sent_score > 60 or sent_label == "Bullish":
-            # Calls allowed if indexes are not dumping below VWAP
-            long_ok = (spy_above is not False) and (qqq_above is not False)
-            short_ok = False
-        else:
-            # Neutral macro: require intraday alignment
-            long_ok = (spy_above is True) and (qqq_above is True)
-            short_ok = (spy_above is False) and (qqq_above is False)
-
-        summary_parts = [f"Macro: {sent_label} ({sent_score}/100)"]
+        summary_parts = []
         if spy_above is not None:
             summary_parts.append(f"SPY {'Above' if spy_above else 'Below'} VWAP (${spy_c:.2f}/${spy_vwap:.2f})")
         if qqq_above is not None:
             summary_parts.append(f"QQQ {'Above' if qqq_above else 'Below'} VWAP (${qqq_c:.2f}/${qqq_vwap:.2f})")
-        if not long_ok and short_ok:
-            summary_parts.append("[CALLS BLOCKED - BEARISH]")
-        elif long_ok and not short_ok:
-            summary_parts.append("[PUTS BLOCKED - BULLISH]")
+        if sent_label:
+            summary_parts.append(f"Macro: {sent_label} ({sent_score}/100)")
 
         _index_vwap_cache = {
             "spy_above_vwap": spy_above,
@@ -389,11 +373,11 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
     pml_str = f"${pm_low:.2f}" if pm_low else "N/A"
     zone_title = "5-MIN PREMARKET BREAKOUT (PMB)"
 
-    logger.info(f"🔔 {grade_str} {zone_title} SIGNAL on {ticker}: {action} | Setup: {reason} | Price=${last_price:.2f}, VWAP=${vwap_target:.2f}, 8EMA={f'${ema8:.2f}' if ema8 else 'N/A'} | Hard SL={sl_str} | TP1 (1R)={tp1_str} | TP2 (2R)={tp2_str}")
+    logger.info(f"🔔 {grade_str} {zone_title} SIGNAL on {ticker}: {action} | Setup: {reason} | Price=${last_price:.2f}, VWAP=${vwap_target:.2f}, 8EMA={f'${ema8:.2f}' if ema8 else 'N/A'} | Hard SL={sl_str} | 2R Target={tp1_str}")
     
     alert_method = os.getenv("ALERT_METHOD", "TELEGRAM").upper()
     
-    # 0. Find best option contract suggestion (PMB specs: 7-30 DTE, Delta 0.45-0.60, OI >= 500, Spread <= $0.30/2%)
+    # 0. Find best option contract suggestion (PMB specs: 0-30 DTE, Delta 0.45-0.60, OI >= 500, Spread <= $0.10/2%)
     opt_str = "None"
     opt_info = None
     try:
@@ -402,12 +386,12 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             ticker,
             signal_type,
             last_price,
-            min_dte=int(os.getenv("OPTIONS_MIN_DTE", "7")),
+            min_dte=int(os.getenv("OPTIONS_MIN_DTE", "0")),
             max_dte=int(os.getenv("OPTIONS_MAX_DTE", "30")),
             target_delta_min=0.45,
             target_delta_max=0.60,
             min_oi=500,
-            max_spread_dollars=float(os.getenv("OPTIONS_MAX_SPREAD_DOLLARS", "0.30")),
+            max_spread_dollars=float(os.getenv("OPTIONS_MAX_SPREAD_DOLLARS", "0.10")),
             max_spread_pct=2.0
         )
         if opt_info:
@@ -427,7 +411,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             f"Action: {action_label} ({signal_type.upper()})\n"
             f"Price: ${last_price:.2f} | PMH: {pmh_str} | PML: {pml_str}\n"
             f"VWAP: ${vwap_target:.2f} | 8 EMA: ${ema8:.2f}\n"
-            f"Hard SL: {sl_str} | TP1 (1R): {tp1_str} | TP2 (2R): {tp2_str}\n"
+            f"Hard SL: {sl_str} | 2R Target: {tp1_str}\n"
             f"Early Invalidation: {struct_invalidation}\n"
             f"Option: {opt_str}"
         )
@@ -451,8 +435,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
             f"<b>Intraday Anchors:</b> VWAP ${vwap_target:.2f} | 8 EMA ${ema8:.2f}\n"
             f"<b>Relative Volume (RVOL):</b> {rvol_formatted} (≥ 1.5x Volume SMA)\n"
             f"<b>Hard Emergency Stop:</b> {_esc(sl_str)}\n"
-            f"<b>Take Profit 1 (1.0R Scale):</b> {_esc(tp1_str)} (Scale Out 50%)\n"
-            f"<b>Take Profit 2 (2.0R Runner):</b> {_esc(tp2_str)} (Runner Target)\n"
+            f"<b>Profit Target (2R):</b> {_esc(tp1_str)} (2:1 Asymmetry)\n"
             f"<b>Early Invalidation:</b> 🏃 {_esc(struct_invalidation)}\n"
             f"<b>Market Filter:</b> {_esc(market_sentiment_summary or 'SPY/QQQ Confirmed 🎯')}\n"
             f"<b>Suggested Option:</b> {_esc(opt_str)}"
@@ -496,7 +479,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                     f"Price: ${result.get('entry_price', 0):.2f}\n"
                     f"Qty: {result.get('quantity', 1)} contract(s)\n"
                     f"Stock: ${last_price:.2f} | PMH: {pmh_str} | PML: {pml_str}\n"
-                    f"Hard SL: {sl_str} | TP1 (1R): {tp1_str} | TP2 (2R): {tp2_str}\n"
+                    f"Hard SL: {sl_str} | 2R Target: {tp1_str}\n"
                     f"Early Invalidation: {struct_invalidation}\n"
                     f"Data Feed: {feed_str}\n"
                     f"Mode: {mode_str}"
@@ -513,8 +496,7 @@ def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=Non
                         f"<b>Stock Price:</b> ${last_price:.2f} | <b>VWAP:</b> ${vwap_target:.2f} | <b>8 EMA:</b> ${ema8:.2f}\n"
                         f"<b>PMH:</b> {pmh_str} | <b>PML:</b> {pml_str}\n"
                         f"<b>Hard Emergency Stop:</b> {_esc(sl_str)}\n"
-                        f"<b>Take Profit 1 (1.0R Scale):</b> {_esc(tp1_str)} (Scale Out 50%)\n"
-                        f"<b>Take Profit 2 (2.0R Runner):</b> {_esc(tp2_str)} (Runner Target)\n"
+                        f"<b>Profit Target (2R):</b> {_esc(tp1_str)} (2:1 Asymmetry)\n"
                         f"<b>Early Invalidation:</b> 🏃 {_esc(struct_invalidation)}\n"
                         f"<b>Setup:</b> {_esc(reason or action)}\n"
                         f"<b>Data Feed:</b> {_esc(feed_str)}\n"
@@ -681,8 +663,8 @@ def evaluate_ticker_process(ticker, df):
             if (close_price - hard_stop_px) < min_risk_cushion:
                 hard_stop_px = close_price - min_risk_cushion
             r_risk = close_price - hard_stop_px
-            target_1_px = close_price + (1.0 * r_risk)   # 1.0R scale out (50%)
-            target_2r_px = close_price + (2.0 * r_risk)  # 2.0R runner
+            target_1_px = close_price + (2.0 * r_risk)   # 2.0R target
+            target_2r_px = close_price + (2.0 * r_risk)  # 2.0R target
 
         # Short Setup Evaluation (Monday Rules)
         elif (close_price < pm_low) and (rvol >= 1.5) and (close_price < current_vwap) and (close_price < current_ema8):
@@ -701,8 +683,8 @@ def evaluate_ticker_process(ticker, df):
             if (hard_stop_px - close_price) < min_risk_cushion:
                 hard_stop_px = close_price + min_risk_cushion
             r_risk = hard_stop_px - close_price
-            target_1_px = close_price - (1.0 * r_risk)   # 1.0R scale out (50%)
-            target_2r_px = close_price - (2.0 * r_risk)  # 2.0R runner
+            target_1_px = close_price - (2.0 * r_risk)   # 2.0R target
+            target_2r_px = close_price - (2.0 * r_risk)  # 2.0R target
 
         if not (is_long or is_short):
             return None
@@ -710,7 +692,7 @@ def evaluate_ticker_process(ticker, df):
         action = "BUY" if is_long else "SELL"
         signal_type = "bullish" if is_long else "bearish"
 
-        # 6. Derivative / Option Contract Lookup (PMB Specs: 7-30 DTE, Delta 0.45-0.60, OI >= 500, Spread <= $0.30/2%)
+        # 6. Derivative / Option Contract Lookup (PMB Specs: 0-30 DTE, Delta 0.45-0.60, OI >= 500, Spread <= $0.10/2%)
         best_opt = None
         try:
             from reversal_scanner import find_best_option
@@ -718,19 +700,19 @@ def evaluate_ticker_process(ticker, df):
                 ticker=ticker,
                 signal_type=signal_type,
                 last_price=close_price,
-                min_dte=int(os.getenv("OPTIONS_MIN_DTE", "7")),
+                min_dte=int(os.getenv("OPTIONS_MIN_DTE", "0")),
                 max_dte=int(os.getenv("OPTIONS_MAX_DTE", "30")),
                 target_delta_min=0.45,
                 target_delta_max=0.60,
                 min_oi=500,
-                max_spread_dollars=float(os.getenv("OPTIONS_MAX_SPREAD_DOLLARS", "0.30")),
+                max_spread_dollars=float(os.getenv("OPTIONS_MAX_SPREAD_DOLLARS", "0.10")),
                 max_spread_pct=2.0
             )
         except Exception as ex:
             logger.debug(f"Option search error for {ticker}: {ex}")
 
         if not best_opt:
-            logger.info(f"[{ticker}] ⚠️ {signal_type.upper()} PMB Breakout detected @ ${close_price:.2f}, but no liquid 7-30 DTE option contract found.")
+            logger.info(f"[{ticker}] ⚠️ {signal_type.upper()} PMB Breakout detected @ ${close_price:.2f}, but no liquid 0-30 DTE option contract found.")
             return None
 
         # 7. Rigorous A+ Scoring Formula
@@ -762,16 +744,16 @@ def evaluate_ticker_process(ticker, df):
         grade = "A+" if score >= 19 else "A"
 
         if is_long:
-            setup_reason = f"5m PMB Long | Closed Above PMH (${pm_high:.2f}) | RVOL {rvol:.1f}x | Above VWAP (${current_vwap:.2f}) + 8EMA (${current_ema8:.2f}) | TP1: ${target_1_px:.2f} | 2R Target: ${target_2r_px:.2f} 🚀"
+            setup_reason = f"5m PMB Long | Closed Above PMH (${pm_high:.2f}) | RVOL {rvol:.1f}x | Above VWAP (${current_vwap:.2f}) + 8EMA (${current_ema8:.2f}) | 2R Target: ${target_2r_px:.2f} 🚀"
             confluence_tag = f"PMH Breakout (${pm_high:.2f}) + RVOL {rvol:.1f}x"
         else:
-            setup_reason = f"5m PMB Short | Closed Below PML (${pm_low:.2f}) | RVOL {rvol:.1f}x | Below VWAP (${current_vwap:.2f}) + 8EMA (${current_ema8:.2f}) | TP1: ${target_1_px:.2f} | 2R Target: ${target_2r_px:.2f} 🩸"
+            setup_reason = f"5m PMB Short | Closed Below PML (${pm_low:.2f}) | RVOL {rvol:.1f}x | Below VWAP (${current_vwap:.2f}) + 8EMA (${current_ema8:.2f}) | 2R Target: ${target_2r_px:.2f} 🩸"
             confluence_tag = f"PML Breakdown (${pm_low:.2f}) + RVOL {rvol:.1f}x"
 
         logger.info(
             f"[{ticker}] 🎯 {grade} PMB {action} SIGNAL! Price: ${close_price:.2f} | "
             f"PMH: ${pm_high:.2f} | PML: ${pm_low:.2f} | VWAP: ${current_vwap:.2f} | 8EMA: ${current_ema8:.2f} | "
-            f"RVOL: {rvol:.1f}x | Hard SL: ${hard_stop_px:.2f} | TP1: ${target_1_px:.2f} | 2R Target: ${target_2r_px:.2f}"
+            f"RVOL: {rvol:.1f}x | Hard SL: ${hard_stop_px:.2f} | 2R Target: ${target_2r_px:.2f}"
         )
 
         return {

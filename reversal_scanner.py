@@ -1483,7 +1483,7 @@ def find_best_option(ticker, signal_type, last_price, min_dte=None, max_dte=None
     """
     try:
         if min_dte is None:
-            min_dte = int(os.getenv("OPTIONS_MIN_DTE", "7"))
+            min_dte = int(os.getenv("OPTIONS_MIN_DTE", "0"))
         if max_dte is None:
             max_dte = int(os.getenv("OPTIONS_MAX_DTE", "30"))
         if target_delta_min is None:
@@ -1493,7 +1493,7 @@ def find_best_option(ticker, signal_type, last_price, min_dte=None, max_dte=None
         if min_oi is None:
             min_oi = int(os.getenv("OPTIONS_MIN_OI", "500"))
         if max_spread_dollars is None:
-            max_spread_dollars = float(os.getenv("OPTIONS_MAX_SPREAD_DOLLARS", "0.30"))
+            max_spread_dollars = float(os.getenv("OPTIONS_MAX_SPREAD_DOLLARS", "0.10"))
         if max_spread_pct is None:
             max_spread_pct = float(os.getenv("OPTIONS_MAX_SPREAD_PCT", "2.0"))
 

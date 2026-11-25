@@ -13,6 +13,10 @@ services:
       - ALERT_METHOD=TELEGRAM
       - EARLIEST_TRADE_TIME_MINS=580
       - LATEST_TRADE_TIME_MINS=690
+      - OPTIONS_MIN_DTE=0
+      - OPTIONS_MAX_DTE=30
+      - OPTIONS_MAX_SPREAD_DOLLARS=0.10
+      - PAPER_CASH_SETTLEMENT_T1=false
     ports:
       - "127.0.0.1:5000:5000"
     volumes:
@@ -33,6 +37,10 @@ services:
       - ALLOW_DELAYED_OPTIONS_TRADING=true
       - TEST_TRADE_AUTO_CLOSE_SECS=60
       - ALERT_METHOD=TELEGRAM
+      - OPTIONS_MIN_DTE=0
+      - OPTIONS_MAX_DTE=30
+      - OPTIONS_MAX_SPREAD_DOLLARS=0.10
+      - PAPER_CASH_SETTLEMENT_T1=false
     volumes:
       - ./conf:/app/conf
       - scan_data:/app/scan_data
