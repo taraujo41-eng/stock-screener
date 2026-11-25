@@ -32,9 +32,9 @@ jobs:
             docker exec stock_scanner_web curl -s http://127.0.0.1:5000/api/paper/positions || true
             echo ""
             echo "🔐 Webull Session Status & Auto-Refresh:"
-            docker exec stock_scanner_web curl -s -X POST http://127.0.0.1:5000/api/webull/refresh || true
+            docker exec stock_scanner_web curl -s --max-time 10 -X POST http://127.0.0.1:5000/api/webull/refresh || true
             echo ""
-            docker exec stock_scanner_web curl -s http://127.0.0.1:5000/api/webull/status || true
+            docker exec stock_scanner_web curl -s --max-time 10 http://127.0.0.1:5000/api/webull/status || true
             echo ""
             echo "📋 Latest Bot Logs:"
             sleep 5

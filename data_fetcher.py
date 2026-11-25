@@ -156,7 +156,7 @@ def _extract_openapi_error(obj):
 
 # ── Webull Unofficial Client Loader (Option B — Legacy / Fallback) ────
 
-_unofficial_lock = threading.Lock()
+_unofficial_lock = threading.RLock()
 _unofficial_client = None
 _unofficial_initialized = False
 _unofficial_authenticated = False
@@ -234,12 +234,13 @@ def refresh_webull_session_if_needed(force=False):
     Returns True if session is authenticated/refreshed, False otherwise.
     """
     global _unofficial_client, _unofficial_authenticated, _unofficial_initialized
+    wb = _unofficial_client
+    if wb is None:
+        wb = get_unofficial_client()
+        if not wb:
+            return False
+
     with _unofficial_lock:
-        wb = _unofficial_client
-        if wb is None:
-            wb = get_unofficial_client()
-            if not wb:
-                return False
 
         # If already authenticated and not forcing, check if token is still valid
         if _unofficial_authenticated and not force:
