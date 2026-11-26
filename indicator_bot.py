@@ -319,41 +319,97 @@ def send_telegram_notification(message, max_retries=3):
 _last_token_alert_time = 0.0
 
 
-def notify_webull_token_expired(context="Bot Health Check", detail=None):
+def notify_webull_token_expired(context="Bot Health Check", detail=None, expiring_soon=False):
     """
-    Sends an urgent Telegram & SMS notification when Webull session token is expired.
-    Throttled to once every 4 hours to avoid repetitive spam while keeping user informed.
+    Sends a Telegram & SMS notification when Webull OpenAPI token (conf/token.txt)
+    is expired/invalid (throttled 4h) or expiring soon (throttled 24h).
     """
     global _last_token_alert_time
     now = time.time()
-    # Throttle to once every 4 hours (14,400 seconds)
-    if now - _last_token_alert_time < 14400:
+    throttle_secs = 86400 if expiring_soon else 14400
+    if now - _last_token_alert_time < throttle_secs:
         return False
     _last_token_alert_time = now
 
     detail_str = f" ({detail})" if detail else ""
-    msg = (
-        "🚨 <b>WEBULL SESSION TOKEN EXPIRED</b>\n\n"
-        f"<b>Trigger:</b> {context}{detail_str}\n"
-        "<b>Status:</b> Your Webull App session token has expired, and auto-refresh could not re-authenticate.\n\n"
-        "⚠️ <b>Risk:</b> The bot cannot access your active real-time quote subscription and is falling back to "
-        "<b>15-minute delayed guest quotes</b>, which can cause severe mispricing on options trade entries and exits!\n\n"
-        "🔧 <b>Action Required:</b>\n"
-        "Run <code>python3 login_webull.py</code> to log into Webull and restore 0-second real-time quotes immediately."
-    )
+    if expiring_soon:
+        msg = (
+            "⚠️ <b>WEBULL OPENAPI TOKEN EXPIRING SOON</b>\n\n"
+            f"<b>Trigger:</b> {context}{detail_str}\n"
+            "<b>Status:</b> Your Webull OpenAPI token in <code>conf/token.txt</code> will expire soon.\n\n"
+            "🔧 <b>Action Required:</b>\n"
+            "Run <code>python3 paper_trader.py --login</code> before expiration to keep your session active."
+        )
+        sms_text = f"⚠️ Webull OpenAPI token expiring soon{detail_str}. Run python3 paper_trader.py --login to renew."
+    else:
+        msg = (
+            "🚨 <b>WEBULL OPENAPI TOKEN EXPIRED</b>\n\n"
+            f"<b>Trigger:</b> {context}{detail_str}\n"
+            "<b>Status:</b> Your Webull OpenAPI token in <code>conf/token.txt</code> is expired or invalid.\n\n"
+            "🔧 <b>Action Required:</b>\n"
+            "Run <code>python3 paper_trader.py --login</code> to renew your OpenAPI token via 2FA."
+        )
+        sms_text = "🚨 ALERT: Webull OpenAPI token EXPIRED! Run python3 paper_trader.py --login to renew."
 
     try:
         send_telegram_notification(msg)
         alert_method = os.getenv("ALERT_METHOD", "TELEGRAM").upper()
         if alert_method in ("SMS", "BOTH"):
-            send_sms_notification(
-                "🚨 ALERT: Webull session token EXPIRED! Bot running on 15m delayed data. Run login_webull.py to restore real-time quotes."
-            )
-        logger.warning(f"[Webull Token Alert] Delivered token expiration alert to Telegram (context: {context}).")
+            send_sms_notification(sms_text)
+        logger.warning(f"[Webull Token Alert] Delivered token alert to Telegram (context: {context}, expiring_soon={expiring_soon}).")
         return True
     except Exception as e:
-        logger.error(f"[Webull Token Alert] Failed to send expiration alert: {e}")
+        logger.error(f"[Webull Token Alert] Failed to send token alert: {e}")
         return False
+
+
+def check_openapi_token_health(context="Token Health Check", warn_days=2):
+    """
+    Inspects conf/token.txt and only alerts Telegram if the OpenAPI token is
+    expired, invalid (status != NORMAL), or within `warn_days` of expiry.
+    """
+    token_file = os.path.join(os.path.dirname(__file__), "conf", "token.txt")
+    if not os.path.exists(token_file):
+        return (True, "simulation_no_token", None)
+
+    try:
+        with open(token_file, "r") as f:
+            lines = f.readlines()
+        if len(lines) < 3:
+            logger.warning(f"[Webull Token Check] Malformed conf/token.txt ({len(lines)} lines).")
+            notify_webull_token_expired(
+                context=context,
+                detail="conf/token.txt is malformed",
+                expiring_soon=False,
+            )
+            return (False, "expired", None)
+
+        expires_ms = int(lines[1].strip())
+        status = lines[2].strip()
+        remaining_days = (expires_ms - int(time.time() * 1000)) / (1000 * 86400)
+
+        if status != "NORMAL" or remaining_days <= 0:
+            logger.warning(f"[Webull Token Check] OpenAPI token invalid/expired (status={status}, remaining={remaining_days:.1f}d).")
+            notify_webull_token_expired(
+                context=context,
+                detail=f"OpenAPI token status={status}, remaining={remaining_days:.1f}d",
+                expiring_soon=False,
+            )
+            return (False, "expired", remaining_days)
+
+        if remaining_days <= warn_days:
+            logger.warning(f"[Webull Token Check] OpenAPI token expires in {remaining_days:.1f} days.")
+            notify_webull_token_expired(
+                context=context,
+                detail=f"OpenAPI token expires in {remaining_days:.1f} days",
+                expiring_soon=True,
+            )
+            return (True, "expiring_soon", remaining_days)
+
+        return (True, "ok", remaining_days)
+    except Exception as e:
+        logger.warning(f"[Webull Token Check] Error inspecting conf/token.txt: {e}")
+        return (False, "error", None)
 
 
 def trigger_alerts(ticker, action, signal_type, last_price, vwap_target, rsi=None, reason=None, score=None, grade=None, rvol=None, zone_summary=None, in_zone=False, sentiment_align=None, market_sentiment_summary=None, tech_trend=None, hod=None, lod=None, pm_high=None, pm_low=None, ema8=None, confluence=None, stop_loss=None, target_1=None, target_2=None):
@@ -909,17 +965,11 @@ def bot_loop():
                 time.sleep(30)
                 continue
 
-            # Check Webull session token health and auto-refresh proactively
+            # Proactively refresh Webull session if needed and alert only if OpenAPI conf/token.txt is expired or expiring soon
             try:
-                from data_fetcher import refresh_webull_session_if_needed, get_market_data_status
-                # Proactively refresh token if expired or nearing expiration
+                from data_fetcher import refresh_webull_session_if_needed
                 refresh_webull_session_if_needed()
-                m_status = get_market_data_status()
-                if not m_status.get("realtime_options_ready"):
-                    notify_webull_token_expired(
-                        context="Market Hours Scan Loop",
-                        detail=m_status.get("openapi_option_error") or "Session token expired (running on 15m delayed data)"
-                    )
+                check_openapi_token_health(context="Market Hours Scan Loop", warn_days=2)
             except Exception as tok_err:
                 logger.debug(f"Token health check error: {tok_err}")
 
@@ -1118,9 +1168,10 @@ def start_bot_thread():
                     else:
                         opt_err = diag.get("webull_openapi_options_error") or diag.get("webull_unofficial_options_mode")
                         logger.warning(f"⚠️ Real-time options data NOT active on startup ({opt_err}).")
-                        notify_webull_token_expired(context="Bot Startup Verification", detail=str(opt_err))
                 except Exception as diag_err:
                     logger.warning(f"Startup market-data check failed: {diag_err}")
+
+                check_openapi_token_health(context="Bot Startup Verification", warn_days=2)
 
                 # If requested, trigger a test trade on startup to verify execution and alert pipelines
                 if os.getenv("EXECUTE_TEST_TRADE_ON_START", "false").lower() in ("true", "1", "yes"):

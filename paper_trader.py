@@ -213,10 +213,19 @@ class PaperTrader:
 
                 now_ms = int(time.time() * 1000)
                 if status != "NORMAL" or now_ms >= expires_ms:
+                    err_reason = 'expired' if now_ms >= expires_ms else status
                     logger.error(
-                        f"[PaperTrader] Cached token is {'expired' if now_ms >= expires_ms else status}. "
+                        f"[PaperTrader] Cached token is {err_reason}. "
                         f"Run `python3 paper_trader.py --login` to re-authenticate."
                     )
+                    try:
+                        from indicator_bot import notify_webull_token_expired
+                        notify_webull_token_expired(
+                            context="PaperTrader Login",
+                            detail=f"Cached OpenAPI token is {err_reason}",
+                        )
+                    except Exception:
+                        pass
                     return False
 
                 remaining_days = (expires_ms - now_ms) / (1000 * 86400)
