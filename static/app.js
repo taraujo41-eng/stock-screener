@@ -36,8 +36,8 @@ function fmtEta(seconds) {
 function updateModeDesc() {
   const desc = document.getElementById("modeDesc");
   const subtitle = document.getElementById("headerSubtitle");
-  if (desc) desc.textContent = "📋 Watchlist: A+ Swing (Daily) • 🤖 Bot Tickers: PM Breakouts • 🎯 Intraday Retest: 5m VWAP / 8 EMA Above PMH & Below PML";
-  if (subtitle) subtitle.textContent = "A+ Swing Trade & Trend Scanner (Daily Chart • 30–60 DTE Options)";
+  if (desc) desc.textContent = "Watchlist: Daily A+ Swing • Bot: 5m PM Breakouts • Retest: 5m VWAP / 8 EMA";
+  if (subtitle) subtitle.textContent = "A+ Swing & 5m PMB Scanner";
 }
 
 function openCriteriaModal() {

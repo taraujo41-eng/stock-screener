@@ -5,30 +5,30 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
-  /* Color palette */
-  --bg-primary:    #0a0e17;
-  --bg-secondary:  #111827;
-  --bg-card:       #1a2235;
-  --bg-card-hover: #1f2a40;
-  --bg-glass:      rgba(26, 34, 53, 0.7);
+  /* Sleek Mobile Fintech — Obsidian Palette */
+  --bg-primary:    #07090d;
+  --bg-secondary:  #0e121a;
+  --bg-card:       #131822;
+  --bg-card-hover: #181f2c;
+  --bg-glass:      rgba(11, 14, 20, 0.88);
 
-  --text-primary:   #f1f5f9;
+  --text-primary:   #f8fafc;
   --text-secondary: #94a3b8;
   --text-muted:     #64748b;
 
-  --accent:        #6366f1;
-  --accent-glow:   rgba(99, 102, 241, 0.25);
-  --green:         #22c55e;
-  --green-bg:      rgba(34, 197, 94, 0.12);
-  --green-glow:    rgba(34, 197, 94, 0.3);
-  --red:           #ef4444;
-  --red-bg:        rgba(239, 68, 68, 0.12);
-  --red-glow:      rgba(239, 68, 68, 0.3);
+  --accent:        #3b82f6;
+  --accent-glow:   rgba(59, 130, 246, 0.22);
+  --green:         #00d26a;
+  --green-bg:      rgba(0, 210, 106, 0.12);
+  --green-glow:    rgba(0, 210, 106, 0.25);
+  --red:           #ff4d5a;
+  --red-bg:        rgba(255, 77, 90, 0.12);
+  --red-glow:      rgba(255, 77, 90, 0.25);
   --amber:         #f59e0b;
   --amber-bg:      rgba(245, 158, 11, 0.12);
 
-  --border:        rgba(148, 163, 184, 0.08);
-  --border-accent: rgba(99, 102, 241, 0.3);
+  --border:        rgba(255, 255, 255, 0.07);
+  --border-accent: rgba(59, 130, 246, 0.35);
 
   --radius-sm: 8px;
   --radius-md: 12px;
@@ -3927,6 +3927,466 @@ body {
   opacity: 0.6;
   cursor: not-allowed;
   transform: none;
+}
+
+/* ============================================================
+   Mobile Fintech Theme v7.0 Override Layer
+   ============================================================ */
+
+.bg-grid {
+  display: none;
+}
+
+.bg-glow {
+  opacity: 0.16;
+  top: -260px;
+}
+
+.app {
+  max-width: 520px;
+  padding: 0 14px calc(104px + env(safe-area-inset-bottom));
+}
+
+@media (min-width: 900px) {
+  .app {
+    max-width: 960px;
+  }
+}
+
+/* ── Compact Horizontal Fintech Top Bar ── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: calc(14px + env(safe-area-inset-top)) 0 12px;
+  text-align: left;
+}
+
+.header__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.22), rgba(0, 210, 106, 0.14));
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  color: #60a5fa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.header__titles {
+  min-width: 0;
+}
+
+.header__title {
+  font-size: 1.08rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  background: none;
+  -webkit-background-clip: initial;
+  -webkit-text-fill-color: initial;
+  color: var(--text-primary);
+  line-height: 1.15;
+}
+
+.header__subtitle {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.header-actions .edit-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 9px;
+  border-radius: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.header-actions .edit-link:hover,
+.header-actions .edit-link:active {
+  color: var(--text-primary);
+  background: var(--bg-card-hover);
+  border-color: rgba(59, 130, 246, 0.35);
+}
+
+.header-actions .edit-link--top50 {
+  color: #60a5fa;
+}
+
+@media (max-width: 390px) {
+  .header-actions .edit-link span {
+    display: none;
+  }
+  .header-actions .edit-link {
+    padding: 7px 8px;
+  }
+}
+
+.mode-info {
+  margin-bottom: 10px;
+}
+
+.mode-desc {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  text-align: left;
+  margin-bottom: 0;
+}
+
+/* ── Fixed iOS-Style Bottom Navigation Bar ── */
+.main-tabs {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 900;
+  margin: 0;
+  border-radius: 0;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(9, 12, 18, 0.90);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  padding: 6px 8px calc(8px + env(safe-area-inset-bottom));
+  display: block;
+}
+
+.main-tabs__inner {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.main-tab {
+  position: relative;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 4px 5px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #7b8798;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: 10px;
+}
+
+.main-tab:hover {
+  background: rgba(255, 255, 255, 0.03) !important;
+  color: #cbd5e1;
+}
+
+.main-tab--active {
+  color: #f8fafc !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.main-tab--active::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 24px;
+  height: 2.5px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.main-tab--active svg {
+  color: var(--accent);
+  filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.45));
+}
+
+.main-tab .tab-badge {
+  position: absolute;
+  top: 2px;
+  right: calc(50% - 22px);
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  font-size: 0.64rem;
+  font-weight: 700;
+  background: var(--green);
+  color: #04130a;
+  border-radius: 999px;
+}
+
+.main-tab--active .tab-badge {
+  background: var(--green);
+  color: #04130a;
+}
+
+/* ── Market Pulse Card (Always 3 Columns on Phone) ── */
+.market-sentiment-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  margin-bottom: 10px;
+  box-shadow: none;
+}
+
+.sentiment-icon {
+  display: inline-flex;
+  align-items: center;
+  color: #60a5fa;
+}
+
+.sentiment-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: var(--text-secondary);
+}
+
+.sentiment-indices-grid {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  margin-bottom: 8px;
+}
+
+.sentiment-index-item {
+  background: #0a0d14;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+  padding: 8px 9px;
+  gap: 3px;
+}
+
+.sentiment-index-symbol {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+}
+
+.sentiment-index-price {
+  font-size: 0.96rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.sentiment-index-change {
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.sentiment-index-regime,
+.sentiment-index-risk {
+  font-size: 0.62rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Fintech 2-Column Scan Grid ── */
+.ext-hours-wrap {
+  margin-bottom: 10px;
+}
+
+.scan-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  gap: 8px !important;
+  margin: 4px 0 16px;
+}
+
+.scan-grid .scan-btn {
+  padding: 13px 10px !important;
+  font-size: 0.82rem !important;
+  font-weight: 700;
+  border-radius: 12px;
+  gap: 7px;
+  background: var(--bg-card) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text-primary) !important;
+  box-shadow: none !important;
+  min-height: 46px;
+}
+
+.scan-grid .scan-btn::before {
+  display: none;
+}
+
+.scan-grid #scanBtn {
+  background: linear-gradient(135deg, #2563eb, #3b82f6) !important;
+  border-color: rgba(96, 165, 250, 0.45) !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.25) !important;
+}
+
+.scan-grid #scanTop50Btn svg { color: #38bdf8; }
+.scan-grid #scanRsiDivBtn svg { color: #a78bfa; }
+.scan-grid #scanUnusualOptsBtn svg { color: #f59e0b; }
+.scan-grid #scanIntradayRetestBtn {
+  grid-column: 1 / -1;
+}
+.scan-grid #scanIntradayRetestBtn svg { color: var(--green); }
+
+.scan-btn--loading svg {
+  display: none;
+}
+
+/* ── Horizontal Swipeable Filter Pills on Mobile ── */
+.filters {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  gap: 6px;
+  padding-bottom: 4px;
+  margin-bottom: 10px;
+}
+
+.filters::-webkit-scrollbar {
+  display: none;
+}
+
+.filter-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+  border-radius: 999px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  font-size: 0.74rem;
+}
+
+.filter-btn--active {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: #ffffff !important;
+}
+
+/* ── Tabular Numbers & Crisp Obsidian Surfaces ── */
+.stat__value,
+.paper-kpi__val,
+.movers-kpi__val,
+.card__price,
+.mover-price {
+  font-variant-numeric: tabular-nums;
+}
+
+.paper-kpi__val {
+  font-size: 1.28rem;
+}
+
+.paper-summary-icon,
+.movers-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(59, 130, 246, 0.12);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.paper-criteria-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.paper-rule-chip {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: #0a0d14;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.card,
+.paper-summary-card,
+.movers-header-card,
+.movers-col,
+.mover-card {
+  background: var(--bg-card);
+  border-color: var(--border);
+}
+
+.empty-state__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  margin: 0 auto 10px;
+  border-radius: 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+/* ── Native iOS Bottom-Sheet Modals on Phone ── */
+@media (max-width: 560px) {
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .modal {
+    width: 100%;
+    max-width: 100%;
+    border-radius: 22px 22px 0 0;
+    max-height: 88dvh;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+    border-bottom: none;
+  }
+
+  .modal--chart {
+    height: 86dvh;
+    max-height: 92dvh;
+  }
 }
 
 
